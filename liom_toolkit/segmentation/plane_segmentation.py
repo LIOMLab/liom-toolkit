@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.ndimage import median_filter, binary_fill_holes
-from skimage import restoration
+from skimage import restoration, img_as_ubyte
 from skimage.filters import frangi, thresholding
 from skimage.io import imread, imsave
 from skimage.measure import regionprops, label
@@ -32,7 +32,7 @@ def frangi_filter(img, sigma_range, black_ridges):
     :param black_ridges: Whether to detect black ridges
     :return: The filtered image
     """
-    return frangi(img, sigmas=[x for x in range(sigma_range)], black_ridges=black_ridges)
+    return frangi(img, sigmas=[x for x in range(*sigma_range)], black_ridges=black_ridges)
 
 
 def li_threshold_image(img):
@@ -117,7 +117,6 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
     :param background_filter_size: The size of the background filter
     :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
     :param frangi_black_ridges: Whether to detect black ridges
-    :return: The segmented images, both the binary vessel mask and the result of the Frangi filter
     """
     pbar = tqdm(images)
     for image in pbar:
@@ -143,6 +142,5 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Saving images")
         # Save image
-        imsave(base_directory + image + '_vessel_mask.tif', vessel_mask)
-        imsave(base_directory + image + '_frangi.tif', frangi)
-        return vessel_mask, frangi
+        imsave(base_directory + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask))
+        imsave(base_directory + image + '_frangi.tif', frangi, check_contrast=False)
