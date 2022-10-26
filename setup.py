@@ -16,5 +16,5 @@ setuptools.setup(
     license='GPLv3+',
     license_files=['LICENSE'],
     python_requires='>=3.10',
-    install_requires=['antspyx', 'torch']
+    install_requires=['antspyx', 'torch', 'tqdm', 'scikit-image']
 )
