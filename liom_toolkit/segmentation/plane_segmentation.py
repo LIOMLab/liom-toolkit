@@ -1,16 +1,11 @@
-import os
-
 import numpy as np
-
 from scipy.ndimage import median_filter, binary_fill_holes
-from skimage.morphology import disk, binary_erosion
-from skimage.filters import frangi, thresholding
 from skimage import restoration
-from skimage.measure import regionprops, label
+from skimage.filters import frangi, thresholding
 from skimage.io import imread, imsave
+from skimage.measure import regionprops, label
+from skimage.morphology import disk, binary_erosion
 from tqdm import tqdm
-
-home_directory = os.path.expanduser('~')
 
 
 def subtract_background(img, radius=70):
