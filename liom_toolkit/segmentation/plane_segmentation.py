@@ -28,7 +28,7 @@ def frangi_filter(img, sigma_range, black_ridges):
     """
     Apply the Frangi filter to an image
     :param img: The image to apply the filter to
-    :param sigma_range: The range of sigmas to use
+    :param sigma_range: The range of sigmas to use (start, stop, step)
     :param black_ridges: Whether to detect black ridges
     :return: The filtered image
     """
@@ -49,7 +49,7 @@ def create_vessel_mask(img, background_filter_size=70, frangi_sigma_range=(2, 16
     Create a vessel mask from an image
     :param img: The image to create the mask from
     :param background_filter_size: The size of the background filter
-    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter
+    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
     :param frangi_black_ridges: Whether to detect black ridges
     :return: The vessel mask
     """
@@ -115,7 +115,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
     :param images: The filenames of the images to segment
     :param erode_mask_size: The size of the disk to use for erosion
     :param background_filter_size: The size of the background filter
-    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter
+    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
     :param frangi_black_ridges: Whether to detect black ridges
     :return: The segmented images, both the binary vessel mask and the result of the Frangi filter
     """
