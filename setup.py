@@ -1,16 +1,14 @@
 from setuptools import setup
-from setuptools import find_packages
 
 with open("README.md", "r") as fh:
     description = fh.read()
 
 setup(
     name="liom-toolkit",
-    version="0.1.6",
+    version="0.1.7",
     author="Laboratoire d’Imagerie Optique et Moléculaire",
     author_email="frederic.lesage@polymtl.ca",
-    packages=find_packages('liom_toolkit'),
-    package_dir={'': 'liom_toolkit'},
+    packages=["liom_toolkit"],
     description="Package to support the research of LIOM.",
     long_description=description,
     long_description_content_type="text/markdown",
