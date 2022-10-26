@@ -1,1 +1,1 @@
-from .plane_segmentation import segment_2d_images
+from .plane_segmentation import *
