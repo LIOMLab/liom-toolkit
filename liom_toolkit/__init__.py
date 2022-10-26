@@ -1,2 +1,2 @@
-from .registration import *
-from .segmentation import *
+from . import registration
+from . import segmentation
