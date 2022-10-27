@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.ndimage import median_filter, binary_fill_holes
-from skimage import restoration, img_as_ubyte
+from skimage import restoration, img_as_ubyte, filters
 from skimage.filters import frangi, thresholding
 from skimage.io import imread, imsave
 from skimage.measure import regionprops, label
@@ -44,19 +44,13 @@ def li_threshold_image(img):
     return img > thresholding.threshold_li(img, initial_guess=np.quantile(img, 0.95))
 
 
-def create_vessel_mask(img, background_filter_size=70, frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False):
+def sauvola_threshold_image(img):
     """
-    Create a vessel mask from an image
-    :param img: The image to create the mask from
-    :param background_filter_size: The size of the background filter
-    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
-    :param frangi_black_ridges: Whether to detect black ridges
-    :return: The vessel mask
+    Apply the Sauvola thresholding algorithm to an image
+    :param img: The image to apply the thresholding to
+    :return: The thresholded image
     """
-    bg_less = subtract_background(img, background_filter_size)
-    frangi_image = frangi_filter(bg_less, frangi_sigma_range, frangi_black_ridges)
-    thresholded_image = li_threshold_image(frangi_image)
-    return thresholded_image, frangi_image
+    return img > filters.threshold_sauvola(img)
 
 
 def estimate_tissue_mask(img):
@@ -108,7 +102,7 @@ def erode_mask(mask, disk_size=30):
 
 
 def segment_2d_images(base_directory, images, erode_mask_size=30, background_filter_size=70,
-                      frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False):
+                      frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False, local_threshold=False):
     """
     Segment 2D images
     :param base_directory: The base directory to save the results to and load the images from
@@ -117,7 +111,11 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
     :param background_filter_size: The size of the background filter
     :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
     :param frangi_black_ridges: Whether to detect black ridges
+    :param local_threshold: Wheter to apply local or global thresholding
+    :return Lists of segmented images, both the Frangi filter and the thersholded vessel mask
     """
+    vessel_masks = []
+    frangi_images = []
     pbar = tqdm(images)
     for image in pbar:
         # Read image
@@ -131,10 +129,20 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
         # Erode outer edge
         erode = erode_mask(mask, disk_size=erode_mask_size)
 
-        pbar.set_description("Creating vessel mask")
-        # Create Vessel mask
-        vessel_mask_raw, frangi = create_vessel_mask(img, background_filter_size, frangi_sigma_range,
-                                                     frangi_black_ridges)
+        pbar.set_description("Removing background")
+        # Remove background from image
+        bg_less = subtract_background(img, background_filter_size)
+
+        pbar.set_description("Applying Frangi filter")
+        # Apply Frangi filter
+        frangi = frangi_filter(bg_less, frangi_sigma_range, frangi_black_ridges)
+
+        pbar.set_description("Applying threshold")
+        # Apply threshold
+        if local_threshold:
+            vessel_mask_raw = sauvola_threshold_image(frangi)
+        else:
+            vessel_mask_raw = li_threshold_image(frangi)
 
         pbar.set_description("Apply erosion to mask")
         # Apply erosion
@@ -144,3 +152,6 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
         # Save image
         imsave(base_directory + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask))
         imsave(base_directory + image + '_frangi.tif', frangi, check_contrast=False)
+        vessel_masks.append(vessel_mask)
+        frangi_images.append(frangi)
+    return vessel_masks, frangi_images
