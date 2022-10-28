@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from scipy.ndimage import median_filter, binary_fill_holes
 from skimage import restoration, img_as_ubyte, filters
@@ -104,7 +105,8 @@ def erode_mask(mask, disk_size=30):
 def segment_2d_images(base_directory, images, erode_mask_size=30, background_filter_size=70,
                       frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False, local_threshold=False):
     """
-    Segment 2D images
+    Segment 2D images. Finished files are not returned due to memory concerns.
+
     :param base_directory: The base directory to save the results to and load the images from
     :param images: The filenames of the images to segment
     :param erode_mask_size: The size of the disk to use for erosion
@@ -112,14 +114,13 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
     :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
     :param frangi_black_ridges: Whether to detect black ridges
     :param local_threshold: Wheter to apply local or global thresholding
-    :return Lists of segmented images, both the Frangi filter and the thersholded vessel mask
     """
-    vessel_masks = []
-    frangi_images = []
+    if not os.path.exists(base_directory + "output/"):
+        os.mkdir(base_directory + "output/")
     pbar = tqdm(images)
     for image in pbar:
         # Read image
-        img = imread(base_directory + images[0], as_gray=True)
+        img = imread(base_directory + image, as_gray=True)
 
         pbar.set_description("Creating mask")
         # Create full mask
@@ -150,8 +151,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Saving images")
         # Save image
-        imsave(base_directory + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask))
-        imsave(base_directory + image + '_frangi.tif', frangi, check_contrast=False)
-        vessel_masks.append(vessel_mask)
-        frangi_images.append(frangi)
-    return vessel_masks, frangi_images
+        imsave(base_directory + "output/" + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask))
+        imsave(base_directory + "output/" + image + '_frangi.tif', frangi, check_contrast=False)
+        # Clean memory
+        del img, mask, erode, bg_less, frangi, vessel_mask_raw, vessel_mask
