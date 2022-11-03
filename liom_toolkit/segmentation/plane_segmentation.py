@@ -159,6 +159,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Saving images")
         # Save image
+        imsave(base_directory + "output/" + image + '_mask.tif', img_as_ubyte(mask), check_contrast=False)
         imsave(base_directory + "output/" + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask), check_contrast=False)
         imsave(base_directory + "output/" + image + '_frangi.tif', frangi, check_contrast=False)
         # Clean memory
