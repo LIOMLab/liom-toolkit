@@ -133,7 +133,9 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Eroding mask")
         # Erode outer edge
-        erode = erode_mask(mask, disk_size=erode_mask_size)
+        mask_filled = binary_fill_holes(mask)
+        erode = erode_mask(mask_filled, disk_size=erode_mask_size)
+        mask = erode * mask
 
         pbar.set_description("Removing background")
         # Remove background from image
@@ -152,7 +154,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Apply erosion to mask")
         # Apply erosion
-        vessel_mask = vessel_mask_raw * erode
+        vessel_mask = vessel_mask_raw * mask
 
         pbar.set_description("Saving images")
         # Save image
