@@ -73,9 +73,6 @@ def estimate_tissue_mask(img):
     # Filter out noisy segmentation
     mask = median_filter(mask, 5)
 
-    # Fill holes
-    mask = binary_fill_holes(mask)
-
     # Filter out small structures
     img_labels = label(mask)
     props = regionprops(img_labels)
