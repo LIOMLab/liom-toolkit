@@ -103,10 +103,11 @@ def erode_mask(mask, disk_size=30):
 
 def segment_2d_images(base_directory, images, erode_mask_size=30, background_filter_size=70,
                       frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False, local_threshold=False,
-                      local_threshold_size=15):
+                      local_threshold_size=15, erosion=True):
     """
     Segment 2D images. Finished files are not returned due to memory concerns.
 
+    :param erosion: Enable or disable erosion of the mask
     :param base_directory: The base directory to save the results to and load the images from
     :param images: The filenames of the images to segment
     :param erode_mask_size: The size of the disk to use for erosion
@@ -133,9 +134,10 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Eroding mask")
         # Erode outer edge
-        mask_filled = binary_fill_holes(mask)
-        erode = erode_mask(mask_filled, disk_size=erode_mask_size)
-        mask = erode * mask
+        if erosion is True:
+            mask_filled = binary_fill_holes(mask)
+            erode = erode_mask(mask_filled, disk_size=erode_mask_size)
+            mask = erode * mask
 
         pbar.set_description("Removing background")
         # Remove background from image
