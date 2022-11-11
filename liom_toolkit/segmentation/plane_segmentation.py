@@ -138,6 +138,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
             mask_filled = binary_fill_holes(mask)
             erode = erode_mask(mask_filled, disk_size=erode_mask_size)
             mask = erode * mask
+            del erode
 
         pbar.set_description("Removing background")
         # Remove background from image
@@ -164,4 +165,4 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
         imsave(base_directory + "output/" + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask), check_contrast=False)
         imsave(base_directory + "output/" + image + '_frangi.tif', frangi, check_contrast=False)
         # Clean memory
-        del img, mask, erode, bg_less, frangi, vessel_mask_raw, vessel_mask
+        del img, mask, bg_less, frangi, vessel_mask_raw, vessel_mask
