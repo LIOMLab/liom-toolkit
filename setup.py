@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="liom-toolkit",
-    version="0.1.14",
+    version="0.1.15",
     author="Laboratoire d’Imagerie Optique et Moléculaire",
     author_email="frederic.lesage@polymtl.ca",
     packages=find_packages(),
@@ -16,5 +16,5 @@ setup(
     license='GPLv3+',
     license_files=['LICENSE'],
     python_requires='>=3.10',
-    install_requires=['antspyx', 'torch', 'tqdm', 'scikit-image']
+    install_requires=['antspyx', 'torch', 'tqdm', 'scikit-image', 'ome-zarr', 'nibabel', 'zarr', 'h5py', 'pynrrd']
 )
