@@ -1,7 +1,7 @@
 # Liom Toolkit
 
-This package supports the reserach being done by the [Liom Lab](https://liom.ca) at the Polytechnique Montréal. It hosts
-a collection of scripts used to process and analyze data collected by the lab.
+This package supports the research being done by the [Laboratoire d’Imagerie Optique et Moléculaire](https://liom.ca) at
+Polytechnique Montréal. It hosts a collection of scripts used to process and analyze data collected by the lab.
 
 ## Installation
 
