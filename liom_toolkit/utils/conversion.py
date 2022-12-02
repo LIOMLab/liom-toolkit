@@ -9,6 +9,7 @@ import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
 
+base_key = "reconstructed_frame"
 
 def get_first_key(file):
     """
@@ -36,7 +37,8 @@ def load_hdf5(hdf5_file, map_file="temp.dat"):
         key = get_first_key(file)
         frame = file[key][:]
         data = np.memmap(map_file, dtype=np.uint16, mode='w+', shape=(n_frames, frame.shape[0], frame.shape[1]))
-        for i, key in enumerate(tqdm.tqdm(keys, desc="Converting HDF5 to zarr file")):
+        for i, _ in enumerate(tqdm.tqdm(keys, desc="Converting HDF5 to zarr file")):
+            key = base_key + "{:03d}".format(i+1)
             frame = file[key][:]
             data[i, :, :] = frame
     return data
