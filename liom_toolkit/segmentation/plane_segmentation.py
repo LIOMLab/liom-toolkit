@@ -130,7 +130,7 @@ def segment_2d_images(base_directory, images, erode_mask_size=30, background_fil
 
         pbar.set_description("Creating mask")
         # Create full mask
-        mask = estimate_tissue_mask(img_enhanced)
+        mask = estimate_tissue_mask(img)
 
         pbar.set_description("Eroding mask")
         # Erode outer edge
