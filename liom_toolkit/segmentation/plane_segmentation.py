@@ -1,13 +1,12 @@
 import os
 
 import numpy as np
-from scipy.ndimage import median_filter, binary_fill_holes
-from skimage import restoration, img_as_ubyte, filters, exposure
+from scipy.ndimage import median_filter
+from skimage import restoration, img_as_ubyte, filters, morphology
 from skimage.filters import frangi, thresholding
-from skimage.io import imread, imsave
+from skimage.io import imsave
 from skimage.measure import regionprops, label
 from skimage.morphology import disk, binary_erosion
-from tqdm import tqdm
 
 
 def subtract_background(img, radius=70):
@@ -101,68 +100,44 @@ def erode_mask(mask, disk_size=30):
     return binary_erosion(mask, disk(disk_size))
 
 
-def segment_2d_images(base_directory, images, erode_mask_size=30, background_filter_size=70,
-                      frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False, local_threshold=False,
-                      local_threshold_size=15, erosion=True):
+def segment_2d_image(output_dir, image, name, frangi_sigma_range=(2, 16, 2), frangi_black_ridges=False,
+                     local_threshold=False, local_threshold_size=15):
     """
     Segment 2D images. Finished files are not returned due to memory concerns.
 
-    :param erosion: Enable or disable erosion of the mask
-    :param base_directory: The base directory to save the results to and load the images from
-    :param images: The filenames of the images to segment
-    :param erode_mask_size: The size of the disk to use for erosion
-    :param background_filter_size: The size of the background filter
-    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter (start, stop, step)
+    :param output_dir: The directory to save the results to
+    :param image: The image to segment
+    :param name: The name of the image
+    :param frangi_sigma_range: The range of sigmas to use for the Frangi filter
     :param frangi_black_ridges: Whether to detect black ridges
-    :param local_threshold: Wheter to apply local or global thresholding
-    :param local_threshold_size: The size of the window to use for local thresholding
+    :param local_threshold: Whether to use local thresholding
+    :param local_threshold_size: The size of the local thresholding window, must be odd
     """
-    if not os.path.exists(base_directory + "output/"):
-        os.mkdir(base_directory + "output/")
-    pbar = tqdm(images)
-    for image in pbar:
-        # Read image
-        img = imread(base_directory + image, as_gray=True)
+    assert local_threshold_size % 2 == 1, 'Local thresholding window size must be odd'
 
-        pbar.set_description("Enhancing Contrast")
-        # Enhance contrast
-        img_enhanced = exposure.equalize_adapthist(img)
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 
-        pbar.set_description("Creating mask")
-        # Create full mask
-        mask = estimate_tissue_mask(img)
+    # Create full mask
+    mask = estimate_tissue_mask(image)
 
-        pbar.set_description("Eroding mask")
-        # Erode outer edge
-        if erosion is True:
-            mask_filled = binary_fill_holes(mask)
-            erode = erode_mask(mask_filled, disk_size=erode_mask_size)
-            mask = erode * mask
-            del erode
+    # Apply Frangi filter
+    frangi = frangi_filter(image, frangi_sigma_range, frangi_black_ridges)
 
-        pbar.set_description("Removing background")
-        # Remove background from image
-        bg_less = subtract_background(img_enhanced, background_filter_size)
+    # Apply threshold
+    if local_threshold:
+        vessel_mask_raw = sauvola_threshold_image(frangi, local_threshold_size)
+    else:
+        vessel_mask_raw = li_threshold_image(frangi)
 
-        pbar.set_description("Applying Frangi filter")
-        # Apply Frangi filter
-        frangi = frangi_filter(bg_less, frangi_sigma_range, frangi_black_ridges)
+    # Cleanup small structures
+    cleaned = morphology.remove_small_objects(vessel_mask_raw, min_size=200)
 
-        pbar.set_description("Applying threshold")
-        # Apply threshold
-        if local_threshold:
-            vessel_mask_raw = sauvola_threshold_image(frangi, local_threshold_size)
-        else:
-            vessel_mask_raw = li_threshold_image(frangi)
+    # Apply mask
+    vessel_mask = cleaned * mask
 
-        pbar.set_description("Apply erosion to mask")
-        # Apply erosion
-        vessel_mask = vessel_mask_raw * mask
-
-        pbar.set_description("Saving images")
-        # Save image
-        imsave(base_directory + "output/" + image + '_mask.tif', img_as_ubyte(mask), check_contrast=False)
-        imsave(base_directory + "output/" + image + '_vessel_mask.tif', img_as_ubyte(vessel_mask), check_contrast=False)
-        imsave(base_directory + "output/" + image + '_frangi.tif', frangi, check_contrast=False)
-        # Clean memory
-        del img, mask, bg_less, frangi, vessel_mask_raw, vessel_mask
+    # Save image
+    imsave(output_dir + name + '_mask.tif', img_as_ubyte(mask), check_contrast=False)
+    imsave(output_dir + name + '_vessel_mask.tif', img_as_ubyte(vessel_mask), check_contrast=False)
+    # Clean memory
+    del image, mask, frangi, vessel_mask_raw, vessel_mask, cleaned
