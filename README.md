@@ -16,7 +16,6 @@ pip install liom-toolkit
 The package requires the following packages to be installed and will attempt to install them using installation:
 
 - antspyx
-- torch
 - scikit-image
 - ome-zarr
 - nibabel
