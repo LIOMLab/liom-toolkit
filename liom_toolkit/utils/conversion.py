@@ -187,19 +187,6 @@ def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
     return image[:nrow, :ncol]
 
 
-def get_first_key(file):
-    """
-    Get the first key in a HDF5 file.
-    :param file: The HDF5 file.
-    :return: The first key. Useful for getting the shape of the data.
-    """
-    keys = file.keys()
-    for first_key in keys:
-        first_key = first_key
-        break
-    return first_key
-
-
 def load_hdf5(hdf5_file, map_file="temp.dat"):
     """
     Load a HDF5 into a numpy memmap.
@@ -282,30 +269,29 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, remove_stripes=False, scales=(6.5
     os.remove(map_file)
 
 
-def convert_nifti_to_zarr(nifti_file, zarr_file, shape=None):
+def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(512, 512, 512)):
     """
     Convert a NIFTI file to a zarr file.
     :param nifti_file: The NIFTI file to convert.
     :param zarr_file: The zarr file to save to.
-    :param shape: The shape of the data. If None, the shape will be inferred from the NIFTI file.
+    :param scales: The resolution of the image, in z x y order.
+    :param chucks: The chunk size to use in the zarr file.
+
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
     data = ni_img.get_fdata()
-    if shape is None:
-        shape = data.shape
-    save_zarr(data, zarr_file, axes="xyz", chunks=shape)
+    save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
-def convert_nrrd_to_zarr(nrrd_file, zarr_file, shape=None):
+def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(512, 512, 512)):
     """
     Convert a NRRD file to a zarr file.
     :param nrrd_file: The NRRD file to convert.
     :param zarr_file: The zarr file to save.
-    :param shape: The shape of the data to save. If None, the shape of the data will be used.
+    :param scales: The resolution of the image, in z x y order.
+    :param chucks: The chunk size to use in the zarr file.
     """
     print("Loading...")
     data, header = nrrd.read(nrrd_file)
-    if shape is None:
-        shape = data.shape
-    save_zarr(data, zarr_file, axes="xyz", chunks=shape)
+    save_zarr(data, zarr_file, scales=scales, chunks=chucks)
