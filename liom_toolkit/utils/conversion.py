@@ -98,7 +98,7 @@ def create_transformation_dict(scales, levels):
     """
     Create a dictionary with the transformation information for 3D images.
 
-    :param scales: The scale of the image, in x y z order.
+    :param scales: The scale of the image, in z y x order.
     :param levels: The number of levels in the pyramid.
     :return:
     """
@@ -119,9 +119,9 @@ def generate_axes_dict():
     :return: The axes dictionary
     """
     axes = [
-        {"name": "x", "type": "space", "unit": "micrometer"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
         {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "z", "type": "space", "unit": "micrometer"}
+        {"name": "x", "type": "space", "unit": "micrometer"}
     ]
     return axes
 
@@ -210,7 +210,6 @@ def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
             frame = file[key][:]
             data[i, :, :] = frame
 
-    data = np.transpose(data, (1, 2, 0))
     return data
 
 
@@ -238,7 +237,7 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
     :param data: The data to save.
     :param zarr_file: The zarr file to save to.
     :param remove_stripes: Whether to remove stripes from the data.
-    :param scales: The resolution of the image, in x y z order.
+    :param scales: The resolution of the image, in z y x order.
     :param chunks: The chunk size to use.
     :return:
     """
@@ -265,7 +264,7 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
     :param zarr_file: Path to the zarr file.
     :param use_mem_map: Whether to use a memmap or not.
     :param remove_stripes: Whether to remove stripes from the data.
-    :param scales: The resolution of the image, in x y z order.
+    :param scales: The resolution of the image, in z y x order.
     :param chunks: The chunk size to use.
     :return:
     """
