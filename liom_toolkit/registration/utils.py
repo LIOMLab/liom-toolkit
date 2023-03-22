@@ -33,7 +33,7 @@ def load_zarr_image_from_node(node: Node, scale: (list or tuple), resolution_lev
     volume = np.transpose(volume, (1, 2, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
-    volume.set_direction([[1, 0, 0], [0, 0, 1], [0, 1, 0]])
+    volume.set_direction([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
     return volume
 
 
@@ -49,7 +49,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
     return transform
 
 
-def load_ants_image_from_zarr(node: Node, resolution_level: int = 1) -> (ants.ANTsImage, dict):
+def load_ants_image_from_zarr(node: Node, resolution_level: int = 1) -> ants.ANTsImage:
     """
     Load a zarr file to an ANTs image.
 
@@ -59,4 +59,4 @@ def load_ants_image_from_zarr(node: Node, resolution_level: int = 1) -> (ants.AN
     """
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
     volume = load_zarr_image_from_node(node, scale=transform, resolution_level=resolution_level)
-    return volume, transform
+    return volume
