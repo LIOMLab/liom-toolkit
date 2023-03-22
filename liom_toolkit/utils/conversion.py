@@ -98,7 +98,7 @@ def create_transformation_dict(scales, levels):
     """
     Create a dictionary with the transformation information for 3D images.
 
-    :param scales: The scale of the image, in y x z order.
+    :param scales: The scale of the image, in x y z order.
     :param levels: The number of levels in the pyramid.
     :return:
     """
@@ -119,7 +119,7 @@ def generate_axes_dict():
     :return: The axes dictionary
     """
     axes = [
-         {"name": "x", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
         {"name": "y", "type": "space", "unit": "micrometer"},
         {"name": "z", "type": "space", "unit": "micrometer"}
     ]
@@ -218,8 +218,6 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file):
     map_file = "temp.dat"
     data = load_hdf5(hdf5_file, map_file)
 
-    print("Transposing...")
-    data = np.transpose(data, (1, 2, 0))
     print("Saving...")
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
     nib.save(ni_img, nifti_file)
@@ -257,7 +255,7 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, remove_stripes=False, scales=(6.5
     :param hdf5_file: Path to the HDF5 file.
     :param zarr_file: Path to the zarr file.
     :param remove_stripes: Whether to remove stripes from the data.
-    :param scales: The resolution of the image, in y x z order.
+    :param scales: The resolution of the image, in x y z order.
     :param chunks: The chunk size to use.
     :return:
     """
