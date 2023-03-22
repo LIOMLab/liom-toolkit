@@ -241,14 +241,15 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
         for i in tqdm.tqdm(range(data.shape[0]), desc="Removing stripes", leave=False, unit="frames",
                            total=data.shape[0], position=1):
             data[i, :, :] = remove_stripe_based_wavelet_fft(data[i, :, :])
-        print("Saving...")
-        os.mkdir(zarr_file)
-        store = parse_url(zarr_file, mode="w").store
-        root = zarr.group(store=store)
-        write_image(image=data, group=root, axes=generate_axes_dict(),
-                    coordinate_transformations=create_transformation_dict(scales, 5),
-                    storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest"))
-        print("Done!")
+
+    print("Saving...")
+    os.mkdir(zarr_file)
+    store = parse_url(zarr_file, mode="w").store
+    root = zarr.group(store=store)
+    write_image(image=data, group=root, axes=generate_axes_dict(),
+                coordinate_transformations=create_transformation_dict(scales, 5),
+                storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest"))
+    print("Done!")
 
 
 def convert_hdf5_to_zarr(hdf5_file, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(512, 512, 512)):
