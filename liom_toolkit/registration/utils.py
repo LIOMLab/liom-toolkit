@@ -30,7 +30,7 @@ def load_zarr_image_from_node(node: Node, scale: (list or tuple), resolution_lev
     :return: The ANTs image.
     """
     volume = np.array(node.data[resolution_level])
-    volume = np.transpose(volume, (1, 2, 0)).astype("uint32")
+    volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
     volume.set_direction([[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]])
