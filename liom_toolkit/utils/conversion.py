@@ -119,9 +119,9 @@ def generate_axes_dict():
     :return: The axes dictionary
     """
     axes = [
-        {"name": "z", "type": "space", "unit": "micrometer"},
+         {"name": "x", "type": "space", "unit": "micrometer"},
         {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"}
+        {"name": "z", "type": "space", "unit": "micrometer"}
     ]
     return axes
 
@@ -199,12 +199,12 @@ def load_hdf5(hdf5_file, map_file="temp.dat"):
         n_frames = len(keys)
         key_list = [base_key + "{:03d}".format(i + 1) for i in range(len(keys))]
         frame = file[key_list[0]][:]
-        data = np.memmap(map_file, dtype=np.uint16, mode='w+', shape=(n_frames, frame.shape[0], frame.shape[1]))
+        data = np.memmap(map_file, dtype=np.uint16, mode='w+', shape=(frame.shape[0], frame.shape[1], n_frames))
         for i, key in enumerate(
                 tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit="frames", total=len(key_list),
                           leave=False, position=1)):
             frame = file[key][:]
-            data[i, :, :] = frame
+            data[:, :, i] = frame
     return data
 
 
@@ -233,7 +233,7 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
     :param data: The data to save.
     :param zarr_file: The zarr file to save to.
     :param remove_stripes: Whether to remove stripes from the data.
-    :param scales: The resolution of the image, in y x z order.
+    :param scales: The resolution of the image, in x y z order.
     :param chunks: The chunk size to use.
     :return:
     """
