@@ -199,7 +199,7 @@ def load_hdf5(hdf5_file, map_file="temp.dat"):
         n_frames = len(keys)
         key_list = [base_key + "{:03d}".format(i + 1) for i in range(len(keys))]
         frame = file[key_list[0]][:]
-        data = np.memmap(map_file, dtype=np.uint16, mode='w+', shape=(frame.shape[0], frame.shape[1], n_frames))
+        data = np.memmap(map_file, dtype=np.uint16, mode='w+', shape=(n_frames, frame.shape[0], frame.shape[1]))
         for i, key in enumerate(
                 tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit="frames", total=len(key_list),
                           leave=False, position=1)):
