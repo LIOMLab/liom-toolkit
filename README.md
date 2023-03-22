@@ -22,7 +22,7 @@ The package requires the following packages to be installed and will attempt to 
 - zarr
 - h5py
 - pynrrd
-- imagecodecs
+- SimpleITK
 
 ## Package Structure
 
