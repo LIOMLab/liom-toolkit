@@ -281,7 +281,7 @@ def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=
     Convert a NIFTI file to a zarr file.
     :param nifti_file: The NIFTI file to convert.
     :param zarr_file: The zarr file to save to.
-    :param scales: The resolution of the image, in z x y order.
+    :param scales: The resolution of the image, in z y x order.
     :param chucks: The chunk size to use in the zarr file.
 
     """
@@ -296,7 +296,7 @@ def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(5
     Convert a NRRD file to a zarr file.
     :param nrrd_file: The NRRD file to convert.
     :param zarr_file: The zarr file to save.
-    :param scales: The resolution of the image, in z x y order.
+    :param scales: The resolution of the image, in z y x order.
     :param chucks: The chunk size to use in the zarr file.
     """
     print("Loading...")
