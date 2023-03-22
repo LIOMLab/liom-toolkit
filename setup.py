@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="liom-toolkit",
-    version="0.2.3",
+    version="0.2.4",
     author="Laboratoire d’Imagerie Optique et Moléculaire",
     author_email="frederic.lesage@polymtl.ca",
     packages=find_packages(),
