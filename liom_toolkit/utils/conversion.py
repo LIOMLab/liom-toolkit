@@ -204,7 +204,9 @@ def load_hdf5(hdf5_file, map_file="temp.dat"):
                 tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit="frames", total=len(key_list),
                           leave=False, position=1)):
             frame = file[key][:]
-            data[:, :, i] = frame
+            data[i, :, :] = frame
+
+    data = np.transpose(data, (1, 2, 0))
     return data
 
 
