@@ -1,60 +1,54 @@
-import os
 from tempfile import mktemp
+from typing import List
 
 import ants
 import ants.utils as utils
 import numpy as np
 from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
+from tqdm import tqdm
 
 
-def create_template(folder: str, template: ants.ANTsImage):
+def create_template(images: List, masks: List, base_template: ants.ANTsImage, template_resolution: int = 10,
+                    iterations: int = 3) -> ants.ANTsImage:
     """
     Create a template from a folder of images.
-    :param folder: Folder containing the files to be used for templating.
-    :param template: Default template to initialize the templating (usually the allen atlas).
+    :param images: List of images to use to create the template.
+    :param masks: List of masks to use to create the template.
+    :param base_template: Default template to initialize the templating (usually the allen atlas).
+    :param template_resolution: The resolution of the template.
+    :param iterations: The number of iterations to use to create the template.
     :return: The newly created template.
     """
-    base = template
-
-    files = os.listdir(folder)
-    files.sort()
-
     template_images = []
-    masks = []
-    for file in files:
-        image = ants.image_read(folder + file)
-        image.set_direction(([1., 0., 0.], [0., 0., 1.], [0., 1., 0.]))
-        image.set_spacing((50.0, 50.0, 50.0))
-        image_reg, mask_reg = register_and_get_mask(image, base)
+    template_masks = []
+    for i, image in tqdm(enumerate(images), desc="Pre-registering images", leave=False, total=len(images), unit="image",
+                         position=1):
+        image_resampled = ants.resample_image(image, (template_resolution, template_resolution, template_resolution),
+                                              use_voxels=False, interp_type=1)
+        mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
+                                             use_voxels=False, interp_type=1)
+        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, base_template)
         template_images.append(image_reg)
-        masks.append(mask_reg)
-        del image
-        image = ants.image_read(folder + file)
-        image.set_direction(([-1., 0., 0.], [0., 0., 1.], [0., 1., 0.]))
-        image.set_spacing((50.0, 50.0, 50.0))
-        image = ants.reorient_image2(image, 'RIA')
-        image_reg, mask_reg = register_and_get_mask(image, base)
-        template_images.append(image_reg)
-        masks.append(mask_reg)
-        del image
+        template_masks.append(mask_reg)
 
-    template = build_template(base, template_images, masks=masks)
+    print("Creating template...")
+    template = build_template(base_template, template_images, masks=template_masks, iterations=iterations)
     return template
 
 
-def register_and_get_mask(image: ants.ANTsImage, template: ants.ANTsImage):
+def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage):
     """
-    Pre-registers the image to be used in templating using rigid registration and acquires the mask after
-    this registration.
-    :param image: Image to be registered.
-    :param template: Template to be registered to.
-    :return: Image transformed using rigid registration and the mask of the image.
+    Register an image to a template and return the registered image and mask.
+
+    :param volume: The volume to register
+    :param mask: The mask to use in registration
+    :param template: The template to register to
+    :return: The registered image and registered mask
     """
-    mask = ants.get_mask(image)
-    image_reg_transform = ants.registration(fixed=template, moving=image, mask=mask, type_of_transform='Rigid')
-    image_reg = ants.apply_transforms(fixed=template, moving=image, transformlist=image_reg_transform['fwdtransforms'])
-    mask_reg = ants.get_mask(image_reg)
+    image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask, type_of_transform='Rigid')
+    image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
+    mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
     return image_reg, mask_reg
 
 

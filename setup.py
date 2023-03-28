@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="liom-toolkit",
-    version="0.2.10",
+    version="0.3.0",
     author="Laboratoire d’Imagerie Optique et Moléculaire",
     author_email="frederic.lesage@polymtl.ca",
     packages=find_packages(),
@@ -16,5 +16,6 @@ setup(
     license='GPLv3+',
     license_files=['LICENSE'],
     python_requires='>=3.10',
-    install_requires=['antspyx', 'tqdm', 'scikit-image', 'ome-zarr', 'nibabel', 'zarr', 'h5py', 'pynrrd', 'PyWavelets']
+    install_requires=['antspyx', 'tqdm', 'scikit-image', 'ome-zarr', 'nibabel', 'zarr', 'h5py', 'pynrrd', 'PyWavelets',
+                      'SimpleITK']
 )
