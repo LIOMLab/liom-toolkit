@@ -1,4 +1,5 @@
 from tempfile import mktemp
+from typing import List
 
 import ants
 import ants.utils as utils
@@ -7,43 +8,47 @@ from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
 from tqdm import tqdm
 
-from liom_toolkit.registration.utils import segment_3d_brain
 
-
-def create_template(images: list, template: ants.ANTsImage):
+def create_template(images: List, masks: List, base_template: ants.ANTsImage, template_resolution: int = 10,
+                    iterations: int = 3) -> ants.ANTsImage:
     """
     Create a template from a folder of images.
     :param images: List of images to use to create the template.
-    :param template: Default template to initialize the templating (usually the allen atlas).
+    :param masks: List of masks to use to create the template.
+    :param base_template: Default template to initialize the templating (usually the allen atlas).
+    :param template_resolution: The resolution of the template.
+    :param iterations: The number of iterations to use to create the template.
     :return: The newly created template.
     """
-    base = template
-
     template_images = []
-    masks = []
-    for image in tqdm(images, desc="Pre-registering images", leave=False, total=len(images), unit="image", position=1):
-        image_resampled = ants.resample_image_to_target(image, base, interpolation_type=1)
-        image_reg, mask_reg = register_and_get_mask(image_resampled, base)
+    template_masks = []
+    for i, image in tqdm(enumerate(images), desc="Pre-registering images", leave=False, total=len(images), unit="image",
+                         position=1):
+        image_resampled = ants.resample_image(image, (template_resolution, template_resolution, template_resolution),
+                                              use_voxels=False, interp_type=1)
+        mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
+                                             use_voxels=False, interp_type=1)
+        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, base_template)
         template_images.append(image_reg)
-        masks.append(mask_reg)
-        del image
+        template_masks.append(mask_reg)
 
-    template = build_template(base, template_images, masks=masks)
+    print("Creating template...")
+    template = build_template(base_template, template_images, masks=template_masks, iterations=iterations)
     return template
 
 
-def register_and_get_mask(volume, template):
+def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage):
     """
     Register an image to a template and return the registered image and mask.
 
     :param volume: The volume to register
+    :param mask: The mask to use in registration
     :param template: The template to register to
-    :return: The registered image and estimated mask
+    :return: The registered image and registered mask
     """
-    mask = segment_3d_brain(volume)
     image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask, type_of_transform='Rigid')
     image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
-    mask_reg = segment_3d_brain(image_reg)
+    mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
     return image_reg, mask_reg
 
 
