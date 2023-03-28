@@ -1,16 +1,22 @@
+from typing import List, Tuple
+
 import SimpleITK as sitk
 import ants
 import numpy as np
+import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader, Node
+from ome_zarr.writer import write_image
 from scipy.ndimage import binary_fill_holes
+
+from liom_toolkit.utils import generate_axes_dict, create_transformation_dict, CustomScaler
 
 """
     Utility functions aiding in the registration process.
 """
 
 
-def load_zarr(zarr_file: str) -> Node:
+def load_zarr(zarr_file: str) -> List[Node]:
     """
     Load a zarr file to an ANTs image.
 
@@ -18,11 +24,11 @@ def load_zarr(zarr_file: str) -> Node:
     :return: The ANTs image.
     """
     reader = Reader(parse_url(zarr_file))
-    image_node = list(reader())[0]
+    image_node = list(reader())
     return image_node
 
 
-def load_zarr_image_from_node(node: Node, scale: (list or tuple), resolution_level: int = 1) -> ants.ANTsImage:
+def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_level: int = 1) -> ants.ANTsImage:
     """
     Load a zarr file to an ANTs image.
 
@@ -64,7 +70,7 @@ def load_ants_image_from_zarr(node: Node, resolution_level: int = 1) -> ants.ANT
     return volume
 
 
-def fill_holes_2d_3d(mask):
+def fill_holes_2d_3d(mask: np.ndarray) -> np.ndarray:
     """
     Fill holes in a 2D and 3D mask.
 
@@ -90,7 +96,7 @@ def fill_holes_2d_3d(mask):
     return mask
 
 
-def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="otsu") -> ants.ANTsImage:
+def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="otsu") -> np.ndarray:
     """
     Segment a 3D brain volume using a watershed algorithm.
 
@@ -127,11 +133,7 @@ def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="
 
     # Filling holes and returning the mask
     mask = fill_holes_2d_3d(sitk.GetArrayFromImage(seg))
-
-    ants_mask = ants.from_numpy(mask.astype(np.uint8))
-    ants_mask.set_spacing(volume.spacing)
-    ants_mask.set_direction(volume.direction)
-    return ants_mask
+    return mask
 
 
 def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
@@ -147,3 +149,43 @@ def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
     atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., 1., 0.]])
     atlas_volume = ants.reorient_image2(atlas_volume, "RIA")
     return atlas_volume
+
+
+def create_and_write_mask(zarr_file: str):
+    """
+    Create a mask for a zarr file and write it to disk.
+
+    :param zarr_file: The zarr file to create a mask for
+    """
+    node = load_zarr(zarr_file)[0]
+    image = load_ants_image_from_zarr(node, resolution_level=0)
+    mask = segment_3d_brain(image)
+
+    file = parse_url(zarr_file, mode="w").store
+    root = zarr.group(store=file)
+    labels_grp = root.create_group("labels")
+    label_name = "mask"
+    labels_grp.attrs["labels"] = [label_name]
+    label_grp = labels_grp.create_group(label_name)
+
+    write_image(image=mask, group=label_grp, axes=generate_axes_dict(),
+                coordinate_transformations=create_transformation_dict((6.5, 6.5, 6.5), 5),
+                storage_options=dict(chunks=(512, 512, 512)), scaler=CustomScaler(downscale=2, method="nearest"))
+
+
+def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
+    """
+    Load a mask from a zarr file.
+
+    :param node: The zarr node to load the mask from
+    :param resolution_level: The resolution level to load the mask from
+    :return: The loaded mask
+    """
+    volume = np.array(node.data[resolution_level])
+    volume = volume.astype("uint32")
+    mask = ants.from_numpy(volume)
+
+    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
+    mask.set_spacing(transform)
+    mask.set_direction([[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]])
+    return mask
