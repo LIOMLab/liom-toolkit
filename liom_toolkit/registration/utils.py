@@ -41,7 +41,7 @@ def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_lev
     volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
-    volume.set_direction([[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]])
+    volume.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
     return volume
 
 
@@ -146,7 +146,7 @@ def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
     """
     atlas_volume = ants.image_read(atlas_file)
     atlas_volume.set_spacing([resolution, resolution, resolution])
-    atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., 1., 0.]])
+    atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
     atlas_volume = ants.reorient_image2(atlas_volume, "RIA")
     return atlas_volume
 
