@@ -182,10 +182,11 @@ def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
     :return: The loaded mask
     """
     volume = np.array(node.data[resolution_level])
-    volume = volume.astype("uint32")
+    volume = np.transpose(volume, (2, 1, 0))
+    volume = volume.astype("ubyte")
     mask = ants.from_numpy(volume)
 
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
     mask.set_spacing(transform)
-    mask.set_direction([[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]])
+    mask.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
     return mask
