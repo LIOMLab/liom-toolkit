@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 import SimpleITK as sitk
 import ants
+import nrrd
 import numpy as np
 import zarr
 from ome_zarr.io import parse_url
@@ -42,6 +43,7 @@ def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_lev
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
     volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
+    volume = ants.reorient_image2(volume, "RAS")
     return volume
 
 
@@ -60,21 +62,30 @@ def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
     mask.set_spacing(transform)
     mask.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
+    mask = ants.reorient_image2(mask, "RAS")
     return mask
 
 
-def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
+def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants.ANTsImage:
     """
     Load the allen template and set the resolution and direction (PIR).
 
     :param atlas_file: The file to load
     :param resolution: The resolution to set
+    :param padding: Whether to pad the atlas or not
     :return: The loaded template
     """
-    atlas_volume = ants.image_read(atlas_file)
+    atlas_data, atlas_header = nrrd.read(atlas_file)
+    atlas_data = atlas_data.astype("uint32")
+    if padding:
+        # Pad the atlas to avoid edge effects, the padding is 15% of the atlas size
+        pad_size = int(atlas_data.shape[0] * 0.15)
+        npad = ((pad_size, pad_size), (0, 0), (0, 0))
+        atlas_data = np.pad(atlas_data, pad_width=npad, mode="constant", constant_values=0)
+    atlas_volume = ants.from_numpy(atlas_data)
     atlas_volume.set_spacing([resolution, resolution, resolution])
     atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
-    atlas_volume = ants.reorient_image2(atlas_volume, "RIA")
+    atlas_volume = ants.reorient_image2(atlas_volume, "RAS")
     return atlas_volume
 
 
