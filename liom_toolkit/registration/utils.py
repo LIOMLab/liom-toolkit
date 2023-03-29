@@ -41,8 +41,41 @@ def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_lev
     volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
-    volume.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
+    volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
     return volume
+
+
+def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
+    """
+    Load a mask from a zarr file.
+
+    :param node: The zarr node to load the mask from
+    :param resolution_level: The resolution level to load the mask from
+    :return: The loaded mask
+    """
+    volume = np.array(node.data[resolution_level])
+    volume = volume.astype("ubyte")
+    mask = ants.from_numpy(volume)
+
+    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
+    mask.set_spacing(transform)
+    mask.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
+    return mask
+
+
+def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
+    """
+    Load the allen template and set the resolution and direction (PIR).
+
+    :param atlas_file: The file to load
+    :param resolution: The resolution to set
+    :return: The loaded template
+    """
+    atlas_volume = ants.image_read(atlas_file)
+    atlas_volume.set_spacing([resolution, resolution, resolution])
+    atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
+    atlas_volume = ants.reorient_image2(atlas_volume, "RIA")
+    return atlas_volume
 
 
 def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict:
@@ -136,21 +169,6 @@ def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="
     return mask
 
 
-def load_allen_template(atlas_file: str, resolution) -> ants.ANTsImage:
-    """
-    Load the allen template and set the resolution and direction (PIR).
-
-    :param atlas_file: The file to load
-    :param resolution: The resolution to set
-    :return: The loaded template
-    """
-    atlas_volume = ants.image_read(atlas_file)
-    atlas_volume.set_spacing([resolution, resolution, resolution])
-    atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
-    atlas_volume = ants.reorient_image2(atlas_volume, "RIA")
-    return atlas_volume
-
-
 def create_and_write_mask(zarr_file: str):
     """
     Create a mask for a zarr file and write it to disk.
@@ -171,21 +189,3 @@ def create_and_write_mask(zarr_file: str):
     write_image(image=mask, group=label_grp, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict((6.5, 6.5, 6.5), 5),
                 storage_options=dict(chunks=(512, 512, 512)), scaler=CustomScaler(downscale=2, method="nearest"))
-
-
-def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
-    """
-    Load a mask from a zarr file.
-
-    :param node: The zarr node to load the mask from
-    :param resolution_level: The resolution level to load the mask from
-    :return: The loaded mask
-    """
-    volume = np.array(node.data[resolution_level])
-    volume = volume.astype("ubyte")
-    mask = ants.from_numpy(volume)
-
-    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
-    mask.set_spacing(transform)
-    mask.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
-    return mask
