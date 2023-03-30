@@ -42,7 +42,7 @@ def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_lev
     volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
-    volume.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
+    volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
     volume = ants.reorient_image2(volume, "RAS")
     return volume
 
@@ -61,7 +61,7 @@ def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
 
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
     mask.set_spacing(transform)
-    mask.set_direction([[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]])
+    mask.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
     mask = ants.reorient_image2(mask, "RAS")
     return mask
 
@@ -84,7 +84,7 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants
         atlas_data = np.pad(atlas_data, pad_width=npad, mode="constant", constant_values=0)
     atlas_volume = ants.from_numpy(atlas_data)
     atlas_volume.set_spacing([resolution, resolution, resolution])
-    atlas_volume.set_direction([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
+    atlas_volume.set_direction([[0., 0., 1.], [1., 0., 0.], [0., -1., 0.]])
     atlas_volume = ants.reorient_image2(atlas_volume, "RAS")
     return atlas_volume
 
