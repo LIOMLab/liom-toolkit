@@ -72,6 +72,19 @@ def estimate_tissue_mask(img):
     # Filter out noisy segmentation
     mask = median_filter(mask, 5)
 
+    mask = remove_small_structures(img, mask)
+
+    return mask
+
+
+def remove_small_structures(img, mask):
+    """
+    Remove small structures from a mask
+
+    :param img: The image with which the mask was generated
+    :param mask: The mask to remove small structures from
+    :return: The mask with small structures removed
+    """
     # Filter out small structures
     img_labels = label(mask)
     props = regionprops(img_labels)
@@ -82,11 +95,9 @@ def estimate_tissue_mask(img):
     for this_region in props:
         if this_region.area / img_size >= 0.05:
             tissue_labels.append(this_region.label)
-
     mask = np.zeros_like(mask)
     for this_label in tissue_labels:
         mask[img_labels == this_label] = 1
-
     return mask
 
 
