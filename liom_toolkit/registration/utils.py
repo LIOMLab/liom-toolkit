@@ -182,7 +182,7 @@ def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="
     return mask
 
 
-def create_and_write_mask(zarr_file: str):
+def create_and_write_mask(zarr_file: str, overwrite: bool = False):
     """
     Create a mask for a zarr file and write it to disk.
 
@@ -194,10 +194,10 @@ def create_and_write_mask(zarr_file: str):
 
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
-    labels_grp = root.create_group("labels")
+    labels_grp = root.create_group("labels", overwrite=overwrite)
     label_name = "mask"
     labels_grp.attrs["labels"] = [label_name]
-    label_grp = labels_grp.create_group(label_name)
+    label_grp = labels_grp.create_group(label_name, overwrite=overwrite)
 
     write_image(image=mask, group=label_grp, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict((6.5, 6.5, 6.5), 5),
