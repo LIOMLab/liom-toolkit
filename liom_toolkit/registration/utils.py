@@ -10,6 +10,7 @@ from ome_zarr.reader import Reader, Node
 from ome_zarr.writer import write_image
 from scipy.ndimage import binary_fill_holes
 
+from liom_toolkit.segmentation import remove_small_structures
 from liom_toolkit.utils import generate_axes_dict, create_transformation_dict, CustomScaler
 
 """
@@ -43,7 +44,6 @@ def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_lev
     volume = ants.from_numpy(volume)
     volume.set_spacing(scale)
     volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
-    volume = ants.reorient_image2(volume, "RAS")
     return volume
 
 
@@ -62,7 +62,6 @@ def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
     mask.set_spacing(transform)
     mask.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
-    mask = ants.reorient_image2(mask, "RAS")
     return mask
 
 
@@ -85,7 +84,6 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants
     atlas_volume = ants.from_numpy(atlas_data)
     atlas_volume.set_spacing([resolution, resolution, resolution])
     atlas_volume.set_direction([[0., 0., 1.], [1., 0., 0.], [0., -1., 0.]])
-    atlas_volume = ants.reorient_image2(atlas_volume, "RAS")
     return atlas_volume
 
 
@@ -177,6 +175,10 @@ def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="
 
     # Filling holes and returning the mask
     mask = fill_holes_2d_3d(sitk.GetArrayFromImage(seg))
+
+    # Remove small objects
+    mask = remove_small_structures(vol_p, mask)
+
     return mask
 
 
