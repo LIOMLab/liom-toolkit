@@ -56,7 +56,7 @@ def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
     :return: The loaded mask
     """
     volume = np.array(node.data[resolution_level])
-    volume = volume.astype("ubyte")
+    volume = np.transpose(volume, (2, 1, 0)).astype("ubyte")
     mask = ants.from_numpy(volume)
 
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
@@ -187,10 +187,12 @@ def create_and_write_mask(zarr_file: str, overwrite: bool = False):
     Create a mask for a zarr file and write it to disk.
 
     :param zarr_file: The zarr file to create a mask for
+    :param overwrite: Whether to overwrite the mask if it already exists
     """
     node = load_zarr(zarr_file)[0]
     image = load_ants_image_from_zarr(node, resolution_level=0)
     mask = segment_3d_brain(image)
+    mask_transposed = np.transpose(mask, (2, 1, 0))
 
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
@@ -199,6 +201,6 @@ def create_and_write_mask(zarr_file: str, overwrite: bool = False):
     labels_grp.attrs["labels"] = [label_name]
     label_grp = labels_grp.create_group(label_name, overwrite=overwrite)
 
-    write_image(image=mask, group=label_grp, axes=generate_axes_dict(),
+    write_image(image=mask_transposed, group=label_grp, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict((6.5, 6.5, 6.5), 5),
                 storage_options=dict(chunks=(512, 512, 512)), scaler=CustomScaler(downscale=2, method="nearest"))
