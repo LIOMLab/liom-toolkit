@@ -9,15 +9,16 @@ from ants.core import ants_image_io as iio
 from tqdm import tqdm
 
 
-def create_template(images: List, masks: List, base_template: ants.ANTsImage, template_resolution: int = 10,
-                    iterations: int = 3) -> ants.ANTsImage:
+def create_template(images: List, masks: List, atlas_volume: ants.ANTsImage, template_resolution: int = 10,
+                    iterations: int = 3, initial_brain: ants.ANTsImage = None) -> ants.ANTsImage:
     """
     Create a template from a folder of images.
     :param images: List of images to use to create the template.
     :param masks: List of masks to use to create the template.
-    :param base_template: Default template to initialize the templating (usually the allen atlas).
+    :param atlas_volume: Default template to pre-register the brains to and possible the initial volume for registration.
     :param template_resolution: The resolution of the template.
     :param iterations: The number of iterations to use to create the template.
+    :param initial_brain: The initial brain to use to create the template.
     :return: The newly created template.
     """
     template_images = []
@@ -28,12 +29,15 @@ def create_template(images: List, masks: List, base_template: ants.ANTsImage, te
                                               use_voxels=False, interp_type=1)
         mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
                                              use_voxels=False, interp_type=1)
-        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, base_template)
+        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, atlas_volume)
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
     print("Creating template...")
-    template = build_template(base_template, template_images, masks=template_masks, iterations=iterations)
+    if initial_brain is None:
+        template = build_template(atlas_volume, template_images, masks=template_masks, iterations=iterations)
+    else:
+        template = build_template(initial_brain, template_images, masks=template_masks, iterations=iterations)
     return template
 
 
