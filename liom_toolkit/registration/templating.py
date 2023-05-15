@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 
 def create_template(images: List, masks: List, atlas_volume: ants.ANTsImage, template_resolution: int = 10,
-                    iterations: int = 3, initial_brain: ants.ANTsImage = None) -> ants.ANTsImage:
+                    iterations: int = 3, init_with_template=True) -> ants.ANTsImage:
     """
     Create a template from a folder of images.
     :param images: List of images to use to create the template.
@@ -29,15 +29,16 @@ def create_template(images: List, masks: List, atlas_volume: ants.ANTsImage, tem
                                               use_voxels=False, interp_type=1)
         mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
                                              use_voxels=False, interp_type=1)
+
         image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, atlas_volume)
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
     print("Creating template...")
-    if initial_brain is None:
+    if init_with_template:
         template = build_template(atlas_volume, template_images, masks=template_masks, iterations=iterations)
     else:
-        template = build_template(initial_brain, template_images, masks=template_masks, iterations=iterations)
+        template = build_template(template_images[0], template_images, masks=template_masks, iterations=iterations)
     return template
 
 

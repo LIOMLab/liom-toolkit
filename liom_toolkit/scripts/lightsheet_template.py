@@ -9,7 +9,7 @@ brains = [
 ]
 
 
-def build_template_for_resolution(resolution_level=3, atlas_resolution=50, iterations=15):
+def build_template_for_resolution(resolution_level=3, atlas_resolution=50, iterations=15, init_with_template=True):
     atlas_file = f"<<PATH TO ALLEN TEMPLATE>>"
     resolution_mm = atlas_resolution / 1000
     atlas_volume = load_allen_template(atlas_file, atlas_resolution, padding=False)
@@ -32,7 +32,7 @@ def build_template_for_resolution(resolution_level=3, atlas_resolution=50, itera
         masks.append(mask)
 
     template = create_template(brain_volumes, masks, atlas_volume, template_resolution=resolution_mm,
-                               iterations=iterations)
+                               iterations=iterations, init_with_template=init_with_template)
     template_transform = ants.registration(fixed=atlas_volume, moving=template, type_of_transform="SyN")
     template = ants.apply_transforms(fixed=atlas_volume, moving=template,
                                      transformlist=template_transform["fwdtransforms"])
@@ -63,4 +63,5 @@ for (resolution_level, atlas_resolution) in (
         pbar := tqdm(zip(resolution_levels, atlas_resolutions), desc="Building templates", leave=True,
                      total=len(resolution_levels), unit="template", position=0)):
     pbar.set_description(f"Building template at {atlas_resolution} microns")
-    build_template_for_resolution(resolution_level=resolution_level, atlas_resolution=atlas_resolution, iterations=15)
+    build_template_for_resolution(resolution_level=resolution_level, atlas_resolution=atlas_resolution, iterations=15,
+                                  init_with_template=False)
