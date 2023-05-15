@@ -124,7 +124,8 @@ def build_template(
             initial_template = initial_template + temp
 
     xavg = initial_template.clone()
-    for i in range(iterations):
+    for i in tqdm(range(iterations), desc="Running template iterations", leave=False, total=iterations,
+                  unit="iteration", position=1):
         for k in range(len(image_list)):
             if masks is None:
                 w1 = registration(

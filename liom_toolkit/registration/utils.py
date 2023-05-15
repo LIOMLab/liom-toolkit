@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List
 
 import SimpleITK as sitk
 import ants
@@ -30,39 +30,24 @@ def load_zarr(zarr_file: str) -> List[Node]:
     return image_node
 
 
-def load_zarr_image_from_node(node: Node, scale: (List or Tuple), resolution_level: int = 1) -> ants.ANTsImage:
+def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> ants.ANTsImage:
     """
     Load a zarr file to an ANTs image.
 
     :param node: The zarr node to load.
-    :param scale: The scale of the image.
     :param resolution_level: The resolution level to load.
     :return: The ANTs image.
     """
     volume = np.array(node.data[resolution_level])
     volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
-    volume.set_spacing(scale)
+    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
+
+    # Convert to mm
+    transform = [element / 1000 for element in transform]
+    volume.set_spacing(transform)
     volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
     return volume
-
-
-def load_mask(node: Node, resolution_level: int = 0) -> ants.ANTsImage:
-    """
-    Load a mask from a zarr file.
-
-    :param node: The zarr node to load the mask from
-    :param resolution_level: The resolution level to load the mask from
-    :return: The loaded mask
-    """
-    volume = np.array(node.data[resolution_level])
-    volume = np.transpose(volume, (2, 1, 0)).astype("ubyte")
-    mask = ants.from_numpy(volume)
-
-    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
-    mask.set_spacing(transform)
-    mask.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
-    return mask
 
 
 def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants.ANTsImage:
@@ -74,6 +59,7 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants
     :param padding: Whether to pad the atlas or not
     :return: The loaded template
     """
+    resolution = resolution / 1000
     atlas_data, atlas_header = nrrd.read(atlas_file)
     atlas_data = atlas_data.astype("uint32")
     if padding:
@@ -97,19 +83,6 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
     """
     transform = node.metadata["coordinateTransformations"][resolution_level][0]['scale']
     return transform
-
-
-def load_ants_image_from_zarr(node: Node, resolution_level: int = 1) -> ants.ANTsImage:
-    """
-    Load a zarr file to an ANTs image.
-
-    :param node: The zarr node to load.
-    :param resolution_level: The resolution level to load.
-    :return: The ANTs image.
-    """
-    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
-    volume = load_zarr_image_from_node(node, scale=transform, resolution_level=resolution_level)
-    return volume
 
 
 def fill_holes_2d_3d(mask: np.ndarray) -> np.ndarray:
@@ -190,7 +163,7 @@ def create_and_write_mask(zarr_file: str, overwrite: bool = False):
     :param overwrite: Whether to overwrite the mask if it already exists
     """
     node = load_zarr(zarr_file)[0]
-    image = load_ants_image_from_zarr(node, resolution_level=0)
+    image = load_zarr_image_from_node(node, resolution_level=0)
     mask = segment_3d_brain(image)
     mask_transposed = np.transpose(mask, (2, 1, 0))
 
