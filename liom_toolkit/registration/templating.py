@@ -1,3 +1,4 @@
+import os
 from tempfile import mktemp
 from typing import List
 
@@ -9,16 +10,22 @@ from ants.core import ants_image_io as iio
 from tqdm import tqdm
 
 
-def create_template(images: List, masks: List, atlas_volume: ants.ANTsImage, template_resolution: int = 10,
-                    iterations: int = 3, init_with_template=True) -> ants.ANTsImage:
+def create_template(images: List, masks: List, brain_names: List, atlas_volume: ants.ANTsImage,
+                    template_resolution: int = 10, iterations: int = 3, init_with_template=True,
+                    save_pre_reg: bool = False, remove_temp_output: bool = False,
+                    save_templating_progress: bool = False) -> ants.ANTsImage:
     """
     Create a template from a folder of images.
     :param images: List of images to use to create the template.
     :param masks: List of masks to use to create the template.
+    :param brain_names: List of brain names to use for saving the pre-registered images.
     :param atlas_volume: Default template to pre-register the brains to and possible the initial volume for registration.
     :param template_resolution: The resolution of the template.
     :param iterations: The number of iterations to use to create the template.
-    :param initial_brain: The initial brain to use to create the template.
+    :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
+    :param save_pre_reg: Whether to save the pre-registered images.
+    :param remove_temp_output: Whether to remove the temporary output.
+    :param save_templating_progress: Whether to save the template at each iteration.
     :return: The newly created template.
     """
     template_images = []
@@ -30,30 +37,41 @@ def create_template(images: List, masks: List, atlas_volume: ants.ANTsImage, tem
         mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
                                              use_voxels=False, interp_type=1)
 
-        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, atlas_volume)
+        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, atlas_volume, brain_names[i],
+                                                 save_pre_reg=save_pre_reg)
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
     print("Creating template...")
     if init_with_template:
-        template = build_template(atlas_volume, template_images, masks=template_masks, iterations=iterations)
+        template = build_template(atlas_volume, template_images, masks=template_masks, iterations=iterations,
+                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output)
     else:
-        template = build_template(template_images[0], template_images, masks=template_masks, iterations=iterations)
+        template = build_template(template_images[0], template_images, masks=template_masks, iterations=iterations,
+                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output)
     return template
 
 
-def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage):
+def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage, brain: str,
+                       save_pre_reg: bool = False):
     """
     Register an image to a template and return the registered image and mask.
 
     :param volume: The volume to register
     :param mask: The mask to use in registration
     :param template: The template to register to
+    :param brain: The name of the brain
+    :param save_pre_reg: Whether to save the pre-registered image and mask
     :return: The registered image and registered mask
     """
     image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask, type_of_transform='Rigid')
     image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
     mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
+    if save_pre_reg:
+        if not os.path.exists("pre_registered"):
+            os.makedirs("pre_registered")
+        ants.image_write(image_reg, f"pre_registered/{brain}_pre_reg.nii.gz")
+        ants.image_write(mask_reg, f"pre_registered/{brain}_pre_reg_mask.nii.gz")
     return image_reg, mask_reg
 
 
@@ -65,6 +83,8 @@ def build_template(
         blending_weight=0.75,
         weights=None,
         masks=None,
+        remove_temp_output=False,
+        save_progress=False,
         **kwargs
 ):
     """
@@ -97,6 +117,12 @@ def build_template(
     masks : ANTsImages
         list of mask corresponding to the images in image_list
 
+    remove_temp_output : bool
+        whether to remove the temporary output files
+
+    save_progress : bool
+        whether to save the progress of the template building
+
     kwargs : keyword args
         extra arguments passed to ants registration
 
@@ -128,6 +154,9 @@ def build_template(
             temp = resample_image_to_target(temp, initial_template)
             initial_template = initial_template + temp
 
+    if not os.path.exists("template_progress") and save_progress:
+        os.makedirs("template_progress")
+
     xavg = initial_template.clone()
     for i in tqdm(range(iterations), desc="Running template iterations", leave=False, total=iterations,
                   unit="iteration", position=1):
@@ -144,17 +173,25 @@ def build_template(
                 wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
                 xavgNew = w1["warpedmovout"] * weights[k]
             else:
+                # Remove the transform and warping when not needed, when not last i
                 wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
                 xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
+                if i < iterations - 1 and remove_temp_output:
+                    for fwd_transform in w1["fwdtransforms"]:
+                        os.remove(fwd_transform)
+                    for inv_transform in w1["invtransforms"]:
+                        os.remove(inv_transform)
         print(wavg.abs().mean())
         wscl = (-1.0) * gradient_step
         wavg = wavg * wscl
         wavgfn = mktemp(suffix=".nii.gz")
         iio.image_write(wavg, wavgfn)
+        # Keep for debugging/visualization
         xavg = apply_transforms(xavgNew, xavgNew, wavgfn)
         if blending_weight is not None:
             xavg = xavg * blending_weight + utils.iMath(xavg, "Sharpen") * (
                     1.0 - blending_weight
             )
-
+        if save_progress:
+            ants.image_write(xavg, f"template_progress/template_{i}.nii.gz")
     return xavg
