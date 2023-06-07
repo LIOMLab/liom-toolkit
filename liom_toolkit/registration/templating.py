@@ -13,7 +13,8 @@ from tqdm import tqdm
 def create_template(images: List, masks: List, brain_names: List, atlas_volume: ants.ANTsImage,
                     template_resolution: int = 10, iterations: int = 3, init_with_template=True,
                     save_pre_reg: bool = False, remove_temp_output: bool = False,
-                    save_templating_progress: bool = False) -> ants.ANTsImage:
+                    save_templating_progress: bool = False, pre_registration_type: str = "Rigid",
+                    templating_registration_type: str = "SyN") -> ants.ANTsImage:
     """
     Create a template from a folder of images.
     :param images: List of images to use to create the template.
@@ -26,6 +27,8 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
     :param save_pre_reg: Whether to save the pre-registered images.
     :param remove_temp_output: Whether to remove the temporary output.
     :param save_templating_progress: Whether to save the template at each iteration.
+    :param pre_registration_type: The type of pre-registration to use.
+    :param templating_registration_type: The type of registration to use to create the template.
     :return: The newly created template.
     """
     template_images = []
@@ -38,22 +41,24 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
                                              use_voxels=False, interp_type=1)
 
         image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, atlas_volume, brain_names[i],
-                                                 save_pre_reg=save_pre_reg)
+                                                 save_pre_reg=save_pre_reg, registration_type=pre_registration_type)
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
     print("Creating template...")
     if init_with_template:
         template = build_template(atlas_volume, template_images, masks=template_masks, iterations=iterations,
-                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output)
+                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output,
+                                  type_of_transform=templating_registration_type)
     else:
         template = build_template(template_images[0], template_images, masks=template_masks, iterations=iterations,
-                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output)
+                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output,
+                                  type_of_transform=templating_registration_type)
     return template
 
 
 def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage, brain: str,
-                       save_pre_reg: bool = False):
+                       save_pre_reg: bool = False, registration_type: str = "Rigid"):
     """
     Register an image to a template and return the registered image and mask.
 
@@ -62,9 +67,11 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: a
     :param template: The template to register to
     :param brain: The name of the brain
     :param save_pre_reg: Whether to save the pre-registered image and mask
+    :param registration_type: The type of registration to use
     :return: The registered image and registered mask
     """
-    image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask, type_of_transform='Rigid')
+    image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask,
+                                            type_of_transform=registration_type)
     image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
     mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
     if save_pre_reg:
@@ -85,6 +92,7 @@ def build_template(
         masks=None,
         remove_temp_output=False,
         save_progress=False,
+        type_of_transform="SyN",
         **kwargs
 ):
     """
@@ -123,6 +131,9 @@ def build_template(
     save_progress : bool
         whether to save the progress of the template building
 
+    type_of_transform : string
+        type of transform to use for registration
+
     kwargs : keyword args
         extra arguments passed to ants registration
 
@@ -139,10 +150,6 @@ def build_template(
     >>> timage = ants.build_template( image_list = ( image, image2, image3 ) ).resample_image( (45,45))
     >>> timagew = ants.build_template( image_list = ( image, image2, image3 ), weights = (5,1,1) )
     """
-    if "type_of_transform" not in kwargs:
-        type_of_transform = "SyN"
-    else:
-        type_of_transform = kwargs.pop("type_of_transform")
 
     if weights is None:
         weights = np.repeat(1.0 / len(image_list), len(image_list))
