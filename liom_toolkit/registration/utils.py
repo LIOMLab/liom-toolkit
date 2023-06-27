@@ -47,6 +47,7 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> ants.ANT
     transform = [element / 1000 for element in transform]
     volume.set_spacing(transform)
     volume.set_direction([[1., 0., 0.], [0., 0., -1.], [0., -1., 0.]])
+    volume.physical_shape = tuple(np.array(volume.shape) * np.array(volume.spacing))
     return volume
 
 
