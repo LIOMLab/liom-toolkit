@@ -70,7 +70,7 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: a
     :param registration_type: The type of registration to use
     :return: The registered image and registered mask
     """
-    image_reg_transform = ants.registration(fixed=template, moving=volume, mask=mask,
+    image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
                                             type_of_transform=registration_type)
     image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
     mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
@@ -174,7 +174,7 @@ def build_template(
                 )
             else:
                 w1 = registration(
-                    xavg, image_list[k], type_of_transform=type_of_transform, mask=masks[k], **kwargs
+                    xavg, image_list[k], type_of_transform=type_of_transform, moving_mask=masks[k], **kwargs
                 )
             if k == 0:
                 wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
