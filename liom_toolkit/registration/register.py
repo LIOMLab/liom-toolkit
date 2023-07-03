@@ -10,7 +10,7 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, temp
     syn_transform = ants.registration(fixed=template, moving=rigid, mask=mask_rigid, type_of_transform=deformable_type)
     syn = ants.apply_transforms(fixed=template, moving=rigid,
                                 transformlist=syn_transform['fwdtransforms'])
-    return syn, syn_transform
+    return syn, syn_transform, rigid_transform
 
 
 def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage, rigid_type='Rigid'):
