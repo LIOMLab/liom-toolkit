@@ -274,7 +274,8 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
     data = load_hdf5(hdf5_file, use_mem_map, map_file)
 
     save_zarr(data, zarr_file, remove_stripes, scales=scales, chunks=chunks)
-    os.remove(map_file)
+    if use_mem_map:
+        os.remove(map_file)
 
 
 def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
