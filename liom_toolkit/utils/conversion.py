@@ -205,7 +205,7 @@ def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
         else:
             data = np.zeros((n_frames, frame.shape[0], frame.shape[1]), dtype=np.uint32)
         for i, key in enumerate(
-                tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit="frames", total=len(key_list),
+                tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit=" frames", total=len(key_list),
                           leave=False, position=1)):
             frame = file[key][:]
             data[i, :, :] = frame
