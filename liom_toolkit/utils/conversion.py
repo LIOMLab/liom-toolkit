@@ -228,7 +228,8 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
     nib.save(ni_img, nifti_file)
     print("Done!")
-    os.remove(map_file)
+    if use_mem_map:
+        os.remove(map_file)
 
 
 def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32)):
