@@ -205,7 +205,7 @@ def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
         else:
             data = np.zeros((n_frames, frame.shape[0], frame.shape[1]), dtype=np.uint32)
         for i, key in enumerate(
-                tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit="frames", total=len(key_list),
+                tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit=" frames", total=len(key_list),
                           leave=False, position=1)):
             frame = file[key][:]
             data[i, :, :] = frame
@@ -228,10 +228,11 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
     nib.save(ni_img, nifti_file)
     print("Done!")
-    os.remove(map_file)
+    if use_mem_map:
+        os.remove(map_file)
 
 
-def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(512, 512, 512)):
+def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32)):
     """
     Save a numpy array to a zarr file.
     :param data: The data to save.
@@ -257,7 +258,7 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
 
 
 def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=False, scales=(6.5, 6.5, 6.5),
-                         chunks=(512, 512, 512)):
+                         chunks=(32, 32, 32)):
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
     :param hdf5_file: Path to the HDF5 file.
@@ -276,7 +277,7 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
     os.remove(map_file)
 
 
-def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(512, 512, 512)):
+def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
     """
     Convert a NIFTI file to a zarr file.
     :param nifti_file: The NIFTI file to convert.
@@ -291,7 +292,7 @@ def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
-def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(512, 512, 512)):
+def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
     """
     Convert a NRRD file to a zarr file.
     :param nrrd_file: The NRRD file to convert.
