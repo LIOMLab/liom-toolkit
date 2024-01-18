@@ -53,9 +53,9 @@ class CustomScaler(Scaler):
             plane,
             output_shape=(
                 plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[2] // self.downscale),
-            order=0,
+            order=1,
             preserve_range=True,
-            anti_aliasing=False,
+            anti_aliasing=True,
         ).astype(plane.dtype)
 
     def _by_plane(
