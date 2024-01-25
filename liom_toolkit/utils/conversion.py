@@ -28,8 +28,10 @@ class CustomScaler(Scaler):
     A custom scaler that can downsample 3D images for OME-Zarr Conversion
     """
 
-    def __init__(self, downscale=2, method="nearest"):
+    def __init__(self, order=1, anti_aliasing=True, downscale=2, method="nearest"):
         super().__init__(downscale=downscale, method=method)
+        self.order = order
+        self.anti_aliasing = anti_aliasing
 
     def nearest(self, base: np.ndarray) -> List[np.ndarray]:
         """
@@ -53,9 +55,9 @@ class CustomScaler(Scaler):
             plane,
             output_shape=(
                 plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[2] // self.downscale),
-            order=1,
+            order=self.order,
             preserve_range=True,
-            anti_aliasing=True,
+            anti_aliasing=self.anti_aliasing,
         ).astype(plane.dtype)
 
     def _by_plane(
@@ -253,7 +255,8 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
     root = zarr.group(store=store)
     write_image(image=data, group=root, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict(scales, 5),
-                storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest"))
+                storage_options=dict(chunks=chunks),
+                scaler=CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest"))
     print("Done!")
 
 

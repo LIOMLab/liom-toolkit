@@ -177,7 +177,8 @@ def create_and_write_mask(zarr_file: str, overwrite: bool = False):
 
     write_image(image=mask_transposed, group=label_grp, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict((6.5, 6.5, 6.5), 5),
-                storage_options=dict(chunks=(512, 512, 512)), scaler=CustomScaler(downscale=2, method="nearest"))
+                storage_options=dict(chunks=(512, 512, 512)),
+                scaler=CustomScaler(order=0, anti_aliasing=False, downscale=2, method="nearest"))
 
 
 def set_physical_shape(image: ants.ANTsImage):
