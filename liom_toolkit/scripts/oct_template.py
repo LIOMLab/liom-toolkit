@@ -1,7 +1,8 @@
 import ants
 from tqdm import tqdm
 
-from liom_toolkit.registration import segment_3d_brain, create_template
+from liom_toolkit.registration import create_template
+from liom_toolkit.segmentation.volume_segmentation import segment_3d_brain
 
 
 def load_allen_template(resolution, resolution_mm):
