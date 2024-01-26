@@ -234,7 +234,7 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
         os.remove(map_file)
 
 
-def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32)):
+def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(128, 128, 128)):
     """
     Save a numpy array to a zarr file.
     :param data: The data to save.
@@ -242,7 +242,6 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
     :param remove_stripes: Whether to remove stripes from the data.
     :param scales: The resolution of the image, in z y x order.
     :param chunks: The chunk size to use.
-    :return:
     """
     if remove_stripes:
         for i in tqdm.tqdm(range(data.shape[0]), desc="Removing stripes", leave=False, unit="frames",
@@ -270,7 +269,6 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
     :param remove_stripes: Whether to remove stripes from the data.
     :param scales: The resolution of the image, in z y x order.
     :param chunks: The chunk size to use.
-    :return:
     """
 
     map_file = "temp.dat"
@@ -281,18 +279,21 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
         os.remove(map_file)
 
 
-def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
+def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32), transpose=False):
     """
     Convert a NIFTI file to a zarr file.
     :param nifti_file: The NIFTI file to convert.
     :param zarr_file: The zarr file to save to.
     :param scales: The resolution of the image, in z y x order.
     :param chucks: The chunk size to use in the zarr file.
+    :param transpose: Whether to transpose the data or not.
 
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
     data = ni_img.get_fdata()
+    if transpose:
+        data = np.transpose(data, (2, 1, 0))
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
