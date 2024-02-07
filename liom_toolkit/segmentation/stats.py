@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
 from scipy.ndimage import distance_transform_edt
-from skimage import img_as_ubyte, img_as_uint
+from skimage.util import img_as_ubyte, img_as_uint
 from skimage import measure
 from skimage.color import gray2rgb
 from skimage.draw import circle_perimeter

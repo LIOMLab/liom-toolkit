@@ -2,11 +2,12 @@ import os
 
 import numpy as np
 from scipy.ndimage import median_filter
-from skimage import restoration, img_as_ubyte, filters, morphology
+from skimage import restoration, filters, morphology
 from skimage.filters import frangi, thresholding
 from skimage.io import imsave
 from skimage.measure import regionprops, label
 from skimage.morphology import disk, binary_erosion
+from skimage.util import img_as_ubyte
 
 
 def subtract_background(img, radius=70):
