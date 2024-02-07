@@ -94,7 +94,7 @@ def get_vessel_region(regions, region_index, vessel_mask):
     :param regions: The regions of the tissue mask
     :param region_index: The index of the region
     :param vessel_mask: The mask of the vessels
-    :return:
+    :return: The vessel within the masked region
     """
     region = regions == region_index + 1
     region = region * vessel_mask
@@ -110,7 +110,7 @@ def calculate_regional_density(region, region_index, props_list, output_dir, vox
     :param props_list: The list of properties of the regions
     :param output_dir: The directory to save the region mask to
     :param voxel_size: The size of the voxels in the image
-    :return:
+    :return: The area of the vessels, the area of the region, and the density of the vessels in a specific region
     """
     vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
@@ -122,6 +122,7 @@ def calculate_regional_density(region, region_index, props_list, output_dir, vox
 def calculate_density(vessel_mask, mask, voxel_size=0.65):
     """
     Calculates the areas of the tissue and vessel to compute the density of vessels in a mask
+
     :param vessel_mask: The mask of the vessels
     :param mask: The mask of the tissue
     :param voxel_size: The size of the voxels in the image
@@ -152,7 +153,7 @@ def get_branching_point_count(vessel_mask, output_dir, filename='skeleton.tif'):
 
 def get_branching_points(skeleton):
     """
-    Get the branching points in a skeleton
+    Get the branching points in a skeleton using predefined structural elements
     Source: https://stackoverflow.com/questions/43037692/how-to-find-branch-point-from-binary-skeletonize-image
 
     :param skeleton: The skeleton of the vessels
@@ -212,12 +213,11 @@ def compute_average_diameter(mask, skeleton, voxel_size=0.65):
 
 def create_heatmap(image, output_dir, square_size=150):
     """
-    Create a heatmap of the vessel density in a brain slice
+    Create and save a heatmap of the vessel density in a brain slice
 
     :param image: The image of the brain slice
     :param output_dir: The directory to save the heatmap to
     :param square_size: The size of the squares in the heatmap
-    :return: The heatmap
     """
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)

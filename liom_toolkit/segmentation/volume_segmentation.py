@@ -9,7 +9,6 @@ from liom_toolkit.segmentation import remove_small_structures
 def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="otsu") -> np.ndarray:
     """
     Segment a 3D brain volume using a watershed algorithm.
-
     Source: https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
 
     :param volume: The volume to segment
@@ -53,7 +52,6 @@ def segment_3d_brain(volume: ants.ANTsImage, k=5, useLog=True, thresholdMethod="
 def fill_holes_2d_3d(mask: np.ndarray) -> np.ndarray:
     """
     Fill holes in a 2D and 3D mask.
-
     Source: https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
 
     :param mask: The mask to fill holes in
