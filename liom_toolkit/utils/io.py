@@ -32,7 +32,6 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1,
     :param node: The zarr node to load.
     :param resolution_level: The resolution level to load.
     :param volume_direction: The direction of the volume.
-
     :return: The ANTs image.
     """
     volume = np.array(node.data[resolution_level])
@@ -102,7 +101,7 @@ def create_mask_from_zarr(zarr_file: str) -> np.ndarray:
     Create a brain mask from a zarr file.
 
     :param zarr_file: The zarr file to create a mask for
-    :return:
+    :return: The mask
     """
     node = load_zarr(zarr_file)[0]
     image = load_zarr_image_from_node(node, resolution_level=0)
@@ -119,7 +118,6 @@ def save_mask_to_zarr(mask: np.ndarray, zarr_file: str, scales=(6.5, 6.5, 6.5),
     :param zarr_file: The zarr file to save the mask to
     :param scales: The scales to use for the mask
     :param chunks: The chunks to use for the mask
-    :return:
     """
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
@@ -141,7 +139,6 @@ def set_physical_shape(image: ants.ANTsImage):
     Set the physical shape of an ANTs image by multiplying the shape with the spacing.
 
     :param image: The image to set the physical shape for
-    :return:
     """
     dims = np.array(image.shape)
     spacing = np.array(image.spacing)

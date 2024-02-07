@@ -2,16 +2,18 @@ import os
 
 import numpy as np
 from scipy.ndimage import median_filter
-from skimage import restoration, img_as_ubyte, filters, morphology
+from skimage import restoration, filters, morphology
 from skimage.filters import frangi, thresholding
 from skimage.io import imsave
 from skimage.measure import regionprops, label
 from skimage.morphology import disk, binary_erosion
+from skimage.util import img_as_ubyte
 
 
 def subtract_background(img, radius=70):
     """
     Subtract background from image using rolling ball algorithm
+
     :param img: The image to subtract the background from
     :param radius: The radius of the rolling ball
     :return: The background subtracted image
@@ -28,6 +30,7 @@ def subtract_background(img, radius=70):
 def frangi_filter(img, sigma_range, black_ridges):
     """
     Apply the Frangi filter to an image
+
     :param img: The image to apply the filter to
     :param sigma_range: The range of sigmas to use (start, stop, step)
     :param black_ridges: Whether to detect black ridges
@@ -39,6 +42,7 @@ def frangi_filter(img, sigma_range, black_ridges):
 def li_threshold_image(img):
     """
     Apply the Li thresholding algorithm to an image
+
     :param img: The image to apply the thresholding to
     :return: The thresholded image
     """
@@ -48,6 +52,7 @@ def li_threshold_image(img):
 def sauvola_threshold_image(img, window_size=15):
     """
     Apply the Sauvola thresholding algorithm to an image
+
     :param img: The image to apply the thresholding to
     :param window_size: The size of the window to use for thresholding
     :return: The thresholded image
@@ -58,6 +63,7 @@ def sauvola_threshold_image(img, window_size=15):
 def estimate_tissue_mask(img):
     """
     Estimate the tissue mask from an image
+
     :param img: The image to estimate the mask from
     :return: The tissue mask
     Based on function found here: https://github.com/joe-from-mtl/sbhassisant-2d-3d-registration
@@ -104,6 +110,7 @@ def remove_small_structures(img, mask):
 def erode_mask(mask, disk_size=30):
     """
     Erode the outer edge of a mask
+
     :param mask: The mask to erode
     :param disk_size: The size of the disk to use for erosion
     :return: The eroded mask

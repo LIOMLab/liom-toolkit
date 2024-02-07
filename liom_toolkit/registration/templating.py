@@ -17,6 +17,7 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
                     templating_registration_type: str = "SyN") -> ants.ANTsImage:
     """
     Create a template from a folder of images.
+
     :param images: List of images to use to create the template.
     :param masks: List of masks to use to create the template.
     :param brain_names: List of brain names to use for saving the pre-registered images.
@@ -100,49 +101,21 @@ def build_template(
     A modification of the ANTsPy function build_template to use masks.
     Source here: https://antspyx.readthedocs.io/en/latest/_modules/ants/registration/build_template.html#build_template
 
-    ANTsR function: N/A
-
-    Arguments
-    ---------
-    initial_template : ANTsImage
-        initialization for the template building
-
-    image_list : ANTsImages
-        images from which to estimate template
-
-    iterations : integer
-        number of template building iterations
-
-    gradient_step : scalar
-        for shape update gradient
-
-    blending_weight : scalar
-        weight for image blending
-
-    weights : vector
-        weight for each input image
-
-    masks : ANTsImages
-        list of mask corresponding to the images in image_list
-
-    remove_temp_output : bool
-        whether to remove the temporary output files
-
-    save_progress : bool
-        whether to save the progress of the template building
-
-    type_of_transform : string
-        type of transform to use for registration
-
-    kwargs : keyword args
-        extra arguments passed to ants registration
-
-    Returns
-    -------
-    ANTsImage
+    :param initial_template: The initial template to use
+    :param image_list: The list of images to use to create the template
+    :param iterations: The number of iterations to use to create the template
+    :param gradient_step: For shape update gradient
+    :param blending_weight: Weight for image blending
+    :param weights: Weight for each input image
+    :param masks: List of masks corresponding to the images in image_list
+    :param remove_temp_output: Whether to remove the temporary output files
+    :param save_progress: Whether to save the progress of the template building
+    :param type_of_transform: The type of transform to use for registration
+    :param kwargs: Extra arguments passed to ants registration
+    :return: The newly created template
 
     Example
-    -------
+    ^^^^^^^
     >>> import ants
     >>> image = ants.image_read( ants.get_ants_data('r16') )
     >>> image2 = ants.image_read( ants.get_ants_data('r27') )

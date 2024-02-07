@@ -26,6 +26,11 @@ base_key = "reconstructed_frame"
 class CustomScaler(Scaler):
     """
     A custom scaler that can downsample 3D images for OME-Zarr Conversion
+
+    :param order: The order of the transformation
+    :param anti_aliasing: Whether to use anti-aliasing
+    :param downscale: The amount to downscale by
+    :param method: The method to use for downscaling. **Disclaimer:** Only "nearest" is supported.
     """
 
     def __init__(self, order=1, anti_aliasing=True, downscale=2, method="nearest"):
@@ -102,7 +107,7 @@ def create_transformation_dict(scales, levels):
 
     :param scales: The scale of the image, in z y x order.
     :param levels: The number of levels in the pyramid.
-    :return:
+    :return: The transformation dictionary
     """
     coord_transforms = []
     for i in range(levels):
@@ -131,25 +136,20 @@ def generate_axes_dict():
 def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
     """
     Function gracefully taken from https://github.com/nghia-vo/sarepy/blob/master/sarepy/prep/stripe_removal_former.py
-
     Remove stripes using the method in Ref. [1].
     Angular direction is along the axis 0.
-    Parameters
-    ----------
+
     :param image: 2D array
     :param level: Wavelet decomposition level.
     :param sigma: Damping parameter. Larger is stronger.
     :param order: Order of the the Daubechies wavelets.
     :param pad: Padding for FFT
     :return: 2D array. Stripe-removed sinogram.
-    ----
-    Notes
-    -----
+
     Code adapted from tomopy source code https://github.com/tomopy/tomopy
     with a small improvement of using different ways of padding to
     reduce the side effect of the Fourier transform.
-    References
-    ----------
+
     .. [1] https://doi.org/10.1364/OE.17.008567
     """
     (nrow, ncol) = image.shape
@@ -184,11 +184,12 @@ def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
 
 def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
     """
-    Load a HDF5 into a numpy memmap.
+    Load the data from a HDF5 file. If use_mem_map is True, the data will be saved to a memmap file to save memory.
+
     :param hdf5_file: The HDF5 file to load.
     :param use_mem_map: Whether to use a memmap or not.
     :param map_file: The memmap file to save to.
-    :return: The memmap.
+    :return: The data from the HDF5 file.
     """
     with h5.File(hdf5_file) as file:
         keys = file.keys()
@@ -211,6 +212,7 @@ def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
 def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
     """
     Convert a HDF5 file from the lightsheet microscope to a NIFTI file.
+
     :param hdf5_file: Path to the HDF5 file.
     :param nifti_file: Path to the NIFTI file.
     :param use_mem_map: Whether to use a memmap or not.
@@ -230,6 +232,7 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
 def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(128, 128, 128)):
     """
     Save a numpy array to a zarr file.
+
     :param data: The data to save.
     :param zarr_file: The zarr file to save to.
     :param remove_stripes: Whether to remove stripes from the data.
@@ -256,6 +259,7 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
                          chunks=(32, 32, 32)):
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
+
     :param hdf5_file: Path to the HDF5 file.
     :param zarr_file: Path to the zarr file.
     :param use_mem_map: Whether to use a memmap or not.
@@ -275,12 +279,12 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
 def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32), transpose=False):
     """
     Convert a NIFTI file to a zarr file.
+
     :param nifti_file: The NIFTI file to convert.
     :param zarr_file: The zarr file to save to.
     :param scales: The resolution of the image, in z y x order.
     :param chucks: The chunk size to use in the zarr file.
     :param transpose: Whether to transpose the data or not.
-
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
@@ -293,6 +297,7 @@ def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=
 def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
     """
     Convert a NRRD file to a zarr file.
+
     :param nrrd_file: The NRRD file to convert.
     :param zarr_file: The zarr file to save.
     :param scales: The resolution of the image, in z y x order.
