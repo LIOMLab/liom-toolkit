@@ -141,7 +141,7 @@ def get_branching_point_count(vessel_mask, output_dir, filename='skeleton.tif'):
     :param output_dir: The directory to save the skeleton to
     :param filename: The filename to save the skeleton to
     :return: The number of branching points in the vessel mask, the skeleton of the vessel mask,
-    and the location of the branching points
+            and the location of the branching points
     """
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
