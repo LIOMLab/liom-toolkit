@@ -130,26 +130,19 @@ def generate_axes_dict():
 
 def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
     """
-    Function gracefully yoinked from https://github.com/nghia-vo/sarepy/blob/master/sarepy/prep/stripe_removal_former.py
+    Function gracefully taken from https://github.com/nghia-vo/sarepy/blob/master/sarepy/prep/stripe_removal_former.py
 
     Remove stripes using the method in Ref. [1].
     Angular direction is along the axis 0.
     Parameters
     ----------
-    image : array_like
-        2D array.
-    level : int
-        Wavelet decomposition level.
-    sigma : int
-        Damping parameter. Larger is stronger.
-    order : int
-        Order of the the Daubechies wavelets.
-    pad : int
-        Padding for FFT
-    Returns
-    -------
-    ndarray
-        2D array. Stripe-removed sinogram.
+    :param image: 2D array
+    :param level: Wavelet decomposition level.
+    :param sigma: Damping parameter. Larger is stronger.
+    :param order: Order of the the Daubechies wavelets.
+    :param pad: Padding for FFT
+    :return: 2D array. Stripe-removed sinogram.
+    ----
     Notes
     -----
     Code adapted from tomopy source code https://github.com/tomopy/tomopy

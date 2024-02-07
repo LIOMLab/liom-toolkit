@@ -5,6 +5,18 @@ Liom Toolkit
 This is the documentation of the LIOM Toolkit. The package supports the research being done by the `Laboratoire d’Imagerie Optique et Moléculaire <https://liom.ca/>`_ at
 Polytechnique Montréal. It hosts a collection of scripts used to process and analyze data collected by the lab.
 
+.. image:: https://readthedocs.org/projects/liom-toolkit/badge/?version=latest
+    :target: https://liom-toolkit.readthedocs.io/en/latest/?badge=latest
+    :alt: Documentation Status
+
+Here is an overview of the available documentation:
+
+.. toctree::
+  :maxdepth: 4
+  :caption: Contents:
+
+  reference/modules
+
 Installation
 ============
 
