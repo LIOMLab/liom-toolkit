@@ -38,6 +38,7 @@ Requirements
 The package requires the following packages to be installed and will attempt to install them using installation:
 
 - antspyx
+- allensdk
 - scikit-image
 - ome-zarr
 - nibabel
@@ -45,6 +46,22 @@ The package requires the following packages to be installed and will attempt to 
 - h5py
 - pynrrd
 - SimpleITK
+
+To create an anaconda environment with all the required packages, run the following commands:
+
+.. code-block:: rst
+
+    conda create -n <name>
+    conda activate <name>
+    conda install python=3.10
+
+    # The line below is for Apple Silicon specifically.
+    # Hdf5 needs to be installed using homebrew.
+    HDF5_DIR=/opt/homebrew/Cellar/hdf5/1.14.3 pip install tables
+    pip install allensdk
+    pip install antspyx
+    pip install liom-toolkit
+
 
 Package Structure
 =================
