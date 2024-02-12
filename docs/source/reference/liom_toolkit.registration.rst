@@ -9,6 +9,7 @@ Submodules
 
    liom_toolkit.registration.register
    liom_toolkit.registration.templating
+   liom_toolkit.registration.utils
 
 Module contents
 ---------------
