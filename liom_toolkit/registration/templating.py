@@ -19,18 +19,43 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
     Create a template from a folder of images.
 
     :param images: List of images to use to create the template.
+    :type images: List
+
     :param masks: List of masks to use to create the template.
+    :type masks: List
+
     :param brain_names: List of brain names to use for saving the pre-registered images.
+    :type brain_names: List
+
     :param atlas_volume: Default template to pre-register the brains to and possible the initial volume for registration.
+    :type atlas_volume: ants.ANTsImage
+
     :param template_resolution: The resolution of the template.
+    :type template_resolution: int
+
     :param iterations: The number of iterations to use to create the template.
+    :type iterations: int
+
     :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
+    :type init_with_template: bool
+
     :param save_pre_reg: Whether to save the pre-registered images.
+    :type save_pre_reg: bool
+
     :param remove_temp_output: Whether to remove the temporary output.
+    :type remove_temp_output: bool
+
     :param save_templating_progress: Whether to save the template at each iteration.
+    :type save_templating_progress: bool
+
     :param pre_registration_type: The type of pre-registration to use.
+    :type pre_registration_type: str
+
     :param templating_registration_type: The type of registration to use to create the template.
+    :type templating_registration_type: str
+
     :return: The newly created template.
+    :rtype: ants.ANTsImage
     """
     template_images = []
     template_masks = []
