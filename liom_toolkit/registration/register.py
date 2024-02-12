@@ -3,7 +3,7 @@ import os
 import ants
 from tqdm import tqdm
 
-from liom_toolkit.registration import construct_reference_space_cache, download_allen_template, \
+from .utils import construct_reference_space_cache, download_allen_template, \
     convert_allen_nrrd_to_ants, download_allen_atlas
 
 
