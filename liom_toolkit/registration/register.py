@@ -1,4 +1,10 @@
+import os
+
 import ants
+from tqdm import tqdm
+
+from liom_toolkit.registration import construct_reference_space_cache, download_allen_template, \
+    convert_allen_nrrd_to_ants, download_allen_atlas
 
 
 def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
@@ -37,3 +43,173 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     rigid = ants.apply_transforms(fixed=template, moving=image,
                                   transformlist=rigid_transform['fwdtransforms'])
     return rigid, rigid_transform
+
+
+def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+                                 region: str, data_dir: str, resolution: int = 25,
+                                 registration_volume: ants.ANTsImage = None, rigid_type: str = 'Similarity',
+                                 deformable_type: str = "SyN", keep_intermediary: bool = False) -> ants.ANTsImage:
+    """
+    Mask an image with a brain region. Assumes all images are in RAS+ orientation.
+
+    :param target_volume: ants.ANTsImage The image to mask.
+    :param mask: ants.ANTsImage The mask to use.
+    :param template: ants.ANTsImage The template to use for registration.
+    :param region: int The brain region to use. Will do a lookup in the Allen ontology.
+    :param data_dir: str The directory to use for saving temporary files.
+    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :param registration_volume: ants.ANTsImage The volume to use for registration. If None, the target_volume will be used.
+    :param rigid_type: str The type of rigid registration to use.
+    :param deformable_type: str The type of deformable registration to use.
+    :param keep_intermediary: bool Whether to write intermediary files or not. Will also save the final masked image.
+    :return: ants.ANTsImage The masked image.
+    """
+    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+
+    pbar = tqdm(total=5, desc="Masking image", leave=True, unit="step", position=0)
+
+    # Create the data directory if it does not exist
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    # Check if registration volume is None and set it to the target volume if so
+    if registration_volume is None:
+        registration_volume = target_volume
+
+    # Construct the reference space cache
+    rsc = construct_reference_space_cache(resolution=resolution)
+
+    # Get the allen template
+    pbar.set_description("Downloading Allen template")
+    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False, rsc=rsc)
+
+    # Get the id of the region
+    structure_tree = rsc.get_structure_tree(f"{data_dir}/structure_tree_safe_2017.csv")
+    region_id = structure_tree.get_structures_by_name([region])[0]['id']
+
+    if keep_intermediary:
+        ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
+    pbar.update(1)
+
+    # Start registration process
+    pbar.set_description("Starting registration process")
+    # Register the Allen template to own template
+    syn_allen, syn_transform_allen, rigid_transform_allen = deformably_register_volume(template_allen, None,
+                                                                                       template,
+                                                                                       rigid_type=rigid_type,
+                                                                                       deformable_type=deformable_type)
+    if keep_intermediary:
+        ants.image_write(syn_allen, f"{data_dir}/syn_allen.nii")
+    pbar.update(1)
+
+    # Register image to template
+    pbar.set_description("Registering image to template")
+    syn_image, syn_transform_image, rigid_transform_image = deformably_register_volume(registration_volume, mask,
+                                                                                       template,
+                                                                                       rigid_type=rigid_type,
+                                                                                       deformable_type=deformable_type)
+    if keep_intermediary:
+        ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
+    pbar.update(1)
+
+    # Get the structure mask from the Allen atlas
+    pbar.set_description("Getting structure mask")
+    region_mask, structure_mask_metadata = rsc.get_structure_mask(region_id,
+                                                                  file_name=f"{data_dir}/region_{str(region_id)}.nrrd",
+                                                                  annotation_file_name=f"{data_dir}/annotations.nrrd")
+    region_mask = convert_allen_nrrd_to_ants(region_mask, resolution / 1000)
+    if keep_intermediary:
+        ants.image_write(region_mask, f"{data_dir}/region_{str(region_id)}_mask.nii")
+
+    # Apply transforms from structure mask to final image
+    region_mask_transformed = ants.apply_transforms(fixed=template, moving=region_mask,
+                                                    transformlist=syn_transform_allen['fwdtransforms'])
+    region_mask_transformed = ants.apply_transforms(fixed=registration_volume, moving=region_mask_transformed,
+                                                    transformlist=syn_transform_image['invtransforms'])
+    if keep_intermediary:
+        ants.image_write(region_mask_transformed, f"{data_dir}/region_{str(region_id)}_mask_transformed.nii")
+    pbar.update(1)
+
+    # Mask the image
+    pbar.set_description("Masking image")
+    masked_image = target_volume * region_mask_transformed
+    if keep_intermediary:
+        ants.image_write(masked_image, f"{data_dir}/masked_image.nii")
+    pbar.update(1)
+
+    pbar.set_description("Done")
+    pbar.close()
+    return masked_image
+
+
+def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+                                resolution: int = 25, data_dir: str = "registration_test",
+                                rigid_type: str = 'Similarity', deformable_type: str = "SyN",
+                                keep_intermediary: bool = False) -> ants.ANTsImage:
+    """
+    Align an annotation to a target image.
+
+    :param target_volume: ants.ANTsImage The target image to align to.
+    :param mask: ants.ANTsImage The mask to use in registration.
+    :param template: ants.ANTsImage The template to use for registration.
+    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :param data_dir: str The directory to use for saving temporary files.
+    :param rigid_type: str The type of rigid registration to use.
+    :param deformable_type: str The type of deformable registration to use.
+    :param keep_intermediary: bool Whether to keep intermediary files or not.
+    :return: ants.ANTsImage The aligned annotation.
+    """
+    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+
+    pbar = tqdm(total=4, desc="Aligning annotation", leave=True, unit="step", position=0)
+
+    # Create the data directory if it does not exist
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    # Construct the reference space cache
+    rsc = construct_reference_space_cache(resolution=resolution)
+
+    # Get the allen template
+    pbar.set_description("Downloading Allen template and annotations")
+    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False, rsc=rsc)
+    if keep_intermediary:
+        ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
+
+    # Get the annotations
+    atlas = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=False, rsc=rsc)
+    if keep_intermediary:
+        ants.image_write(atlas, f"{data_dir}/atlas.nii")
+    pbar.update(1)
+
+    # Start registration process
+    pbar.set_description("Starting registration process")
+    # Register the Allen template to own template
+    syn_allen, syn_transform_allen, rigid_transform_allen = deformably_register_volume(template_allen, None,
+                                                                                       template,
+                                                                                       rigid_type=rigid_type,
+                                                                                       deformable_type=deformable_type)
+    if keep_intermediary:
+        ants.image_write(syn_allen, f"{data_dir}/syn_allen.nii")
+    pbar.update(1)
+
+    pbar.set_description("Registering image to template")
+    syn_image, syn_transform_image, rigid_transform_image = deformably_register_volume(target_volume, mask,
+                                                                                       template,
+                                                                                       rigid_type=rigid_type,
+                                                                                       deformable_type=deformable_type)
+    if keep_intermediary:
+        ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
+    pbar.update(1)
+
+    atlas_transformed = ants.apply_transforms(fixed=template, moving=atlas,
+                                              transformlist=syn_transform_allen['fwdtransforms'])
+    atlas_transformed = ants.apply_transforms(fixed=target_volume, moving=atlas_transformed,
+                                              transformlist=syn_transform_image['invtransforms'])
+    if keep_intermediary:
+        ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
+    pbar.update(1)
+
+    pbar.set_description("Done")
+    pbar.close()
+    return atlas_transformed
