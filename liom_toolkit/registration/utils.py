@@ -11,7 +11,7 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ants.AN
 
     :param volume: np.ndarray The already loaded nrrd file.
     :param resolution: float The resolution of the nrrd file in millimeters.
-    :return ants.ANTsImage The converted image.
+    :return: ants.ANTsImage The converted image.
     """
     # Set axis to RAS
     volume = np.moveaxis(volume, [0, 1, 2], [1, 2, 0])
