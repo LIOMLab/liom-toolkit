@@ -16,12 +16,6 @@ from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_image
 from skimage.transform import resize
 
-base_key = "reconstructed_frame"
-
-""" 
-    This file contains functions for converting between different file formats.
-"""
-
 
 class CustomScaler(Scaler):
     """
@@ -219,7 +213,8 @@ def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: in
     return image[:nrow, :ncol]
 
 
-def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.dat") -> np.ndarray:
+def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.dat",
+              base_key: str = "reconstructed_frame") -> np.ndarray:
     """
     Load the data from a HDF5 file. If use_mem_map is True, the data will be saved to a memmap file to save memory.
 
@@ -229,6 +224,8 @@ def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.da
     :type use_mem_map: bool
     :param map_file: The memmap file to save to.
     :type map_file: str
+    :param base_key: The base key of the HDF5 key list.
+    :type base_key: str
     :return: The data from the HDF5 file.
     :rtype: np.ndarray
     """
@@ -250,7 +247,8 @@ def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.da
     return data
 
 
-def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str, use_mem_map: bool = True) -> None:
+def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str, use_mem_map: bool = True,
+                          base_key: str = "reconstructed_frame") -> None:
     """
     Convert a HDF5 file to a NIFTI file.
 
@@ -260,9 +258,11 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str, use_mem_map: bool = T
     :type nifti_file: str
     :param use_mem_map: Whether to use a memmap or not.
     :type use_mem_map: bool
+    :param base_key: The base key of the HDF5 key list.
+    :type base_key: str
     """
     map_file = "temp.dat"
-    data = load_hdf5(hdf5_file, use_mem_map, map_file)
+    data = load_hdf5(hdf5_file, use_mem_map, map_file, base_key=base_key)
 
     print("Saving...")
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
@@ -305,7 +305,8 @@ def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, sc
 
 
 def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = True, remove_stripes: bool = False,
-                         scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)) -> None:
+                         scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
+                         base_key: str = "reconstructed_frame") -> None:
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
 
@@ -321,10 +322,12 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = Tru
     :type scales: tuple
     :param chunks: The chunk size to use.
     :type chunks: tuple
+    :param base_key: The base key of the HDF5 key list.
+    :type base_key: str
     """
 
     map_file = "temp.dat"
-    data = load_hdf5(hdf5_file, use_mem_map, map_file)
+    data = load_hdf5(hdf5_file, use_mem_map, map_file, base_key=base_key)
 
     save_zarr(data, zarr_file, remove_stripes, scales=scales, chunks=chunks)
     if use_mem_map:
