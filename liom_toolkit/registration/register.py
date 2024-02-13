@@ -8,17 +8,23 @@ from .utils import construct_reference_space_cache, download_allen_template, \
 
 
 def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                               rigid_type='Rigid', deformable_type='SyN'):
+                               rigid_type='Rigid', deformable_type='SyN') -> (ants.ANTsImage, dict, dict):
     """
     Register an image to a template using a rigid registration followed by a deformable registration.
 
     :param image: The image to register
+    :type image: ants.ANTsImage
     :param mask: The mask to use in registration
+    :type mask: ants.ANTsImage
     :param template: The template to register to
+    :type template: ants.ANTsImage
     :param rigid_type: The type of rigid registration to use
+    :type rigid_type: str
     :param deformable_type: The type of deformable registration to use
+    :type deformable_type: str
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
+    :rtype: tuple[ants.ANTsImage, dict, dict]
     """
     rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type)
 
@@ -29,15 +35,21 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, temp
     return syn, syn_transform, rigid_transform
 
 
-def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage, rigid_type='Rigid'):
+def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+                            rigid_type='Rigid') -> (ants.ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
 
     :param image: The image to register
+    :type image: ants.ANTsImage
     :param mask: The mask to use in registration
+    :type mask: ants.ANTsImage
     :param template: The template to register to
+    :type template: ants.ANTsImage
     :param rigid_type: The type of rigid registration to use
+    :type rigid_type: str
     :return: The registered image and the transform from the rigid registration
+    :rtype: tuple[ants.ANTsImage, dict]
     """
     rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type)
     rigid = ants.apply_transforms(fixed=template, moving=image,
@@ -52,17 +64,28 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     """
     Mask an image with a brain region. Assumes all images are in RAS+ orientation.
 
-    :param target_volume: ants.ANTsImage The image to mask.
-    :param mask: ants.ANTsImage The mask to use.
-    :param template: ants.ANTsImage The template to use for registration.
-    :param region: int The brain region to use. Will do a lookup in the Allen ontology.
-    :param data_dir: str The directory to use for saving temporary files.
-    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :param registration_volume: ants.ANTsImage The volume to use for registration. If None, the target_volume will be used.
-    :param rigid_type: str The type of rigid registration to use.
-    :param deformable_type: str The type of deformable registration to use.
-    :param keep_intermediary: bool Whether to write intermediary files or not. Will also save the final masked image.
-    :return: ants.ANTsImage The masked image.
+    :param target_volume: The image to mask.
+    :type target_volume: ants.ANTsImage
+    :param mask: The mask to use.
+    :type mask: ants.ANTsImage
+    :param template: The template to use for registration.
+    :type template: ants.ANTsImage
+    :param region: The brain region to use. Will do a lookup in the Allen ontology.
+    :type region: str
+    :param data_dir: The directory to use for saving temporary files.
+    :type data_dir: str
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :param registration_volume: The volume to use for registration. If None, the target_volume will be used.
+    :type registration_volume: ants.ANTsImage
+    :param rigid_type: The type of rigid registration to use.
+    :type rigid_type: str
+    :param deformable_type: The type of deformable registration to use.
+    :type deformable_type: str
+    :param keep_intermediary: Whether to write intermediary files or not. Will also save the final masked image.
+    :type keep_intermediary: bool
+    :return: The masked image.
+    :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
@@ -149,15 +172,24 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     """
     Align an annotation to a target image.
 
-    :param target_volume: ants.ANTsImage The target image to align to.
-    :param mask: ants.ANTsImage The mask to use in registration.
-    :param template: ants.ANTsImage The template to use for registration.
-    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :param data_dir: str The directory to use for saving temporary files.
-    :param rigid_type: str The type of rigid registration to use.
-    :param deformable_type: str The type of deformable registration to use.
-    :param keep_intermediary: bool Whether to keep intermediary files or not.
-    :return: ants.ANTsImage The aligned annotation.
+    :param target_volume: The target image to align to.
+    :type target_volume: ants.ANTsImage
+    :param mask: The mask to use in registration.
+    :type mask: ants.ANTsImage
+    :param template: The template to use for registration.
+    :type template: ants.ANTsImage
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :param data_dir: The directory to use for saving temporary files.
+    :type data_dir: str
+    :param rigid_type: The type of rigid registration to use.
+    :type rigid_type: str
+    :param deformable_type: The type of deformable registration to use.
+    :type deformable_type: str
+    :param keep_intermediary: Whether to keep intermediary files or not.
+    :type keep_intermediary: bool
+    :return: The aligned annotation.
+    :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 

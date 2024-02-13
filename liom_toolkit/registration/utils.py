@@ -9,9 +9,12 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ants.AN
     """
     Convert a nrrd file form the Allen reference spaces to an ants image. The returned image will be in RAS+ orientation.
 
-    :param volume: np.ndarray The already loaded nrrd file.
-    :param resolution: float The resolution of the nrrd file in millimeters.
-    :return: ants.ANTsImage The converted image.
+    :param volume: The already loaded nrrd file.
+    :type volume: np.ndarray
+    :param resolution: The resolution of the nrrd file in millimeters.
+    :type resolution: float
+    :return: The converted image.
+    :rtype: ants.ANTsImage
     """
     # Set axis to RAS
     volume = np.moveaxis(volume, [0, 1, 2], [1, 2, 0])
@@ -28,8 +31,10 @@ def construct_reference_space_cache(resolution: int = 25) -> ReferenceSpaceCache
     """
     Construct a reference space cache for the Allen brain atlas. Will use the 2017 adult version of the atlas.
 
-    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :return: ReferenceSpaceCache The reference space cache.
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :return: The reference space cache.
+    :rtype: ReferenceSpaceCache
     """
     # Check the resolution
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
@@ -45,11 +50,16 @@ def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool
     """
     Download the allen mouse brain template in RAS+ orientation.
 
-    :param data_dir: str The directory to save the template to.
-    :param resolution: int The template resolution in micron. Must be 10, 25, 50 or 100 microns
-    :param keep_nrrd: bool Whether to keep the nrrd file or not.
-    :param rsc: ReferenceSpaceCache The reference space cache to use. If None, a new one will be constructed.
-    :return: ants.ANTsImage The template as an ants image.
+    :param data_dir: The directory to save the template to.
+    :type data_dir: str
+    :param resolution: The template resolution in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :param keep_nrrd: Whether to keep the nrrd file or not.
+    :type keep_nrrd: bool
+    :param rsc: The reference space cache to use. If None, a new one will be constructed.
+    :type rsc: ReferenceSpaceCache
+    :return: The template as an ants image.
+    :rtype: ants.ANTsImage
     """
     # Check the resolution
     assert int(resolution) in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
@@ -76,11 +86,16 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     """
     Download the allen mouse brain atlas and reorient it to RAS+.
 
-    :param data_dir: str The directory to save the atlas to.
-    :param resolution: int The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :param keep_nrrd: bool Whether to keep the nrrd file or not.
-    :param rsc: ReferenceSpaceCache The reference space cache to use. If None, a new one will be constructed.
-    :return: ants.ANTsImage The atlas as an ants image.
+    :param data_dir: The directory to save the atlas to.
+    :type data_dir: str
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :param resolution: int
+    :param keep_nrrd: Whether to keep the nrrd file or not.
+    :param keep_nrrd: bool
+    :param rsc: The reference space cache to use. If None, a new one will be constructed.
+    :param rsc: ReferenceSpaceCache
+    :return: The atlas as an ants image.
+    :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
