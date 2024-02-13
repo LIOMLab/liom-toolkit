@@ -1,7 +1,7 @@
 import os
 
 
-def fix_even(number):
+def fix_even(number: int) -> int:
     """
     Fix even numbers by adding 1
 
@@ -13,11 +13,12 @@ def fix_even(number):
     return number
 
 
-def clean_dir(directory):
+def clean_dir(directory: str) -> None:
     """
-    Remove default files in a directory
+    Remove default files in a directory.
 
-    :param directory: The directory to clean
+    :param directory: The directory to clean.
+    :type directory: str
     """
     if os.path.exists(directory + '.DS_Store'):
         os.remove(directory + '.DS_Store')

@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple, Any, Callable, Union
+from typing import Callable, Union
 
 import dask.array as da
 import h5py as h5
@@ -25,31 +25,50 @@ base_key = "reconstructed_frame"
 
 class CustomScaler(Scaler):
     """
-    A custom scaler that can downsample 3D images for OME-Zarr Conversion
+    A custom scaler that can down-sample 3D images for OME-Zarr Conversion.
 
-    :param order: The order of the transformation
+    :param order: The order of the transformation.
+    :type order: int
     :param anti_aliasing: Whether to use anti-aliasing
+    :type anti_aliasing: bool
     :param downscale: The amount to downscale by
+    :type downscale: int
     :param method: The method to use for downscaling. **Disclaimer:** Only "nearest" is supported.
+    :type method: str
     """
 
-    def __init__(self, order=1, anti_aliasing=True, downscale=2, method="nearest"):
+    def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest"):
         super().__init__(downscale=downscale, method=method)
         self.order = order
         self.anti_aliasing = anti_aliasing
 
-    def nearest(self, base: np.ndarray) -> List[np.ndarray]:
+    def nearest(self, base: np.ndarray) -> list[np.ndarray]:
         """
-        Downsample using :func:`skimage.transform.resize`.
+        Down-sample using :func:`skimage.transform.resize`.
+
+        :param base: The base image to down-sample.
+        :type base: np.ndarray
+        :return: The down-sampled image.
+        :rtype: list[np.ndarray]
         """
         return self._by_plane(base, self.__nearest)
 
-    def __nearest(self, plane: ArrayLike, sizeY: int, sizeX: int) -> np.ndarray:
-        """Apply the 2-dimensional transformation."""
+    def __nearest(self, plane: ArrayLike, size_y: int, size_x: int) -> np.ndarray:
+        """Apply the 2-dimensional transformation.
+
+        :param plane: The plane to transform.
+        :type plane: ArrayLike
+        :param size_y: The size of the y dimension.
+        :type size_y: int
+        :param size_x: The size of the x dimension.
+        :type size_x: int
+        :return: The transformed plane.
+        :rtype: np.ndarray
+        """
         if isinstance(plane, da.Array):
 
             def _resize(
-                    image: ArrayLike, output_shape: Tuple, **kwargs: Any
+                    image: ArrayLike, output_shape: tuple, **kwargs
             ) -> ArrayLike:
                 return dask_resize(image, output_shape, **kwargs)
 
@@ -70,7 +89,15 @@ class CustomScaler(Scaler):
             base: np.ndarray,
             func: Callable[[np.ndarray, int, int], np.ndarray],
     ) -> list[Union[ndarray, ndarray, None]]:
-        """Loop over 3 of the 5 dimensions and apply the func transform."""
+        """Loop over 3 of the 5 dimensions and apply the func transform.
+
+        :param base: The base image to transform.
+        :type base: np.ndarray
+        :param func: The function to apply to the image.
+        :type func: Callable[[np.ndarray, int, int], np.ndarray]
+        :return: The transformed image.
+        :rtype: list[Union[ndarray, ndarray, None]]
+        """
 
         rv = [base]
         for i in range(self.max_layer):
@@ -101,13 +128,16 @@ class CustomScaler(Scaler):
         return rv
 
 
-def create_transformation_dict(scales, levels):
+def create_transformation_dict(scales: tuple, levels: int) -> list:
     """
     Create a dictionary with the transformation information for 3D images.
 
     :param scales: The scale of the image, in z y x order.
+    :type scales: tuple
     :param levels: The number of levels in the pyramid.
-    :return: The transformation dictionary
+    :type levels: int
+    :return: The transformation dictionary.
+    :rtype: list
     """
     coord_transforms = []
     for i in range(levels):
@@ -119,11 +149,12 @@ def create_transformation_dict(scales, levels):
     return coord_transforms
 
 
-def generate_axes_dict():
+def generate_axes_dict() -> list:
     """
     Generate the axes dictionary for the zarr file.
 
-    :return: The axes dictionary
+    :return: The axes dictionary.
+    :rtype: list
     """
     axes = [
         {"name": "z", "type": "space", "unit": "micrometer"},
@@ -133,24 +164,30 @@ def generate_axes_dict():
     return axes
 
 
-def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
+def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: int = 1, order: int = 8,
+                                    pad: int = 150) -> np.ndarray:
     """
     Function gracefully taken from https://github.com/nghia-vo/sarepy/blob/master/sarepy/prep/stripe_removal_former.py
-    Remove stripes using the method in Ref. [1].
+    Remove stripes using the method in https://doi.org/10.1364/OE.17.008567
     Angular direction is along the axis 0.
-
-    :param image: 2D array
-    :param level: Wavelet decomposition level.
-    :param sigma: Damping parameter. Larger is stronger.
-    :param order: Order of the the Daubechies wavelets.
-    :param pad: Padding for FFT
-    :return: 2D array. Stripe-removed sinogram.
 
     Code adapted from tomopy source code https://github.com/tomopy/tomopy
     with a small improvement of using different ways of padding to
     reduce the side effect of the Fourier transform.
 
-    .. [1] https://doi.org/10.1364/OE.17.008567
+
+    :param image: The image to remove stripes from.
+    :type image: np.ndarray
+    :param level: Wavelet decomposition level.
+    :type level: int
+    :param sigma: Damping parameter. Larger is stronger.
+    :type sigma: int
+    :param order: Order of the the Daubechies wavelets.
+    :type order: int
+    :param pad: Padding for FFT
+    :type pad: int
+    :return: 2D array. Stripe-removed sinogram.
+    :rtype: np.ndarray
     """
     (nrow, ncol) = image.shape
     if pad > 0:
@@ -182,14 +219,18 @@ def remove_stripe_based_wavelet_fft(image, level=5, sigma=1, order=8, pad=150):
     return image[:nrow, :ncol]
 
 
-def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
+def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.dat") -> np.ndarray:
     """
     Load the data from a HDF5 file. If use_mem_map is True, the data will be saved to a memmap file to save memory.
 
     :param hdf5_file: The HDF5 file to load.
+    :type hdf5_file: str
     :param use_mem_map: Whether to use a memmap or not.
+    :type use_mem_map: bool
     :param map_file: The memmap file to save to.
+    :type map_file: str
     :return: The data from the HDF5 file.
+    :rtype: np.ndarray
     """
     with h5.File(hdf5_file) as file:
         keys = file.keys()
@@ -209,14 +250,16 @@ def load_hdf5(hdf5_file, use_mem_map=True, map_file="temp.dat"):
     return data
 
 
-def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
+def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str, use_mem_map: bool = True) -> None:
     """
-    Convert a HDF5 file from the lightsheet microscope to a NIFTI file.
+    Convert a HDF5 file to a NIFTI file.
 
     :param hdf5_file: Path to the HDF5 file.
+    :type hdf5_file: str
     :param nifti_file: Path to the NIFTI file.
+    :type nifti_file: str
     :param use_mem_map: Whether to use a memmap or not.
-    :return:
+    :type use_mem_map: bool
     """
     map_file = "temp.dat"
     data = load_hdf5(hdf5_file, use_mem_map, map_file)
@@ -229,15 +272,21 @@ def convert_hdf5_to_nifti(hdf5_file, nifti_file, use_mem_map=True):
         os.remove(map_file)
 
 
-def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chunks=(128, 128, 128)):
+def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, scales: tuple = (6.5, 6.5, 6.5),
+              chunks: tuple = (128, 128, 128)) -> None:
     """
     Save a numpy array to a zarr file.
 
     :param data: The data to save.
+    :type data: np.ndarray
     :param zarr_file: The zarr file to save to.
+    :type zarr_file: str
     :param remove_stripes: Whether to remove stripes from the data.
+    :type remove_stripes: bool
     :param scales: The resolution of the image, in z y x order.
+    :type scales: tuple
     :param chunks: The chunk size to use.
+    :type chunks: tuple
     """
     if remove_stripes:
         for i in tqdm.tqdm(range(data.shape[0]), desc="Removing stripes", leave=False, unit="frames",
@@ -255,17 +304,23 @@ def save_zarr(data, zarr_file, remove_stripes=False, scales=(6.5, 6.5, 6.5), chu
     print("Done!")
 
 
-def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=False, scales=(6.5, 6.5, 6.5),
-                         chunks=(32, 32, 32)):
+def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = True, remove_stripes: bool = False,
+                         scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)) -> None:
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
 
     :param hdf5_file: Path to the HDF5 file.
+    :type hdf5_file: str
     :param zarr_file: Path to the zarr file.
+    :type zarr_file: str
     :param use_mem_map: Whether to use a memmap or not.
+    :type use_mem_map: bool
     :param remove_stripes: Whether to remove stripes from the data.
+    :type remove_stripes: bool
     :param scales: The resolution of the image, in z y x order.
+    :type scales: tuple
     :param chunks: The chunk size to use.
+    :type chunks: tuple
     """
 
     map_file = "temp.dat"
@@ -276,15 +331,21 @@ def convert_hdf5_to_zarr(hdf5_file, zarr_file, use_mem_map=True, remove_stripes=
         os.remove(map_file)
 
 
-def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32), transpose=False):
+def convert_nifti_to_zarr(nifti_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
+                          chucks: tuple = (128, 128, 128), transpose: bool = False) -> None:
     """
     Convert a NIFTI file to a zarr file.
 
     :param nifti_file: The NIFTI file to convert.
+    :type nifti_file: str
     :param zarr_file: The zarr file to save to.
+    :type zarr_file: str
     :param scales: The resolution of the image, in z y x order.
+    :type scales: tuple
     :param chucks: The chunk size to use in the zarr file.
+    :type chucks: tuple
     :param transpose: Whether to transpose the data or not.
+    :type transpose: bool
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
@@ -294,14 +355,19 @@ def convert_nifti_to_zarr(nifti_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
-def convert_nrrd_to_zarr(nrrd_file, zarr_file, scales=(6.5, 6.5, 6.5), chucks=(32, 32, 32)):
+def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
+                         chucks: tuple = (128, 128, 128)) -> None:
     """
     Convert a NRRD file to a zarr file.
 
     :param nrrd_file: The NRRD file to convert.
+    :type nrrd_file: str
     :param zarr_file: The zarr file to save.
+    :type zarr_file: str
     :param scales: The resolution of the image, in z y x order.
+    :type scales: tuple
     :param chucks: The chunk size to use in the zarr file.
+    :type chucks: tuple
     """
     print("Loading...")
     data, header = nrrd.read(nrrd_file)

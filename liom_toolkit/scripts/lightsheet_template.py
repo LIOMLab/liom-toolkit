@@ -1,7 +1,8 @@
 import ants
+from tqdm import tqdm
+
 from liom_toolkit.registration import create_template
 from liom_toolkit.utils import load_zarr, load_allen_template, load_zarr_image_from_node, segment_3d_brain
-from tqdm import tqdm
 
 # Brains to use in registration
 brains = [

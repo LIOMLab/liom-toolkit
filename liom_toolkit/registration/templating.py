@@ -1,6 +1,5 @@
 import os
 from tempfile import mktemp
-from typing import List
 
 import ants
 import ants.utils as utils
@@ -10,7 +9,7 @@ from ants.core import ants_image_io as iio
 from tqdm import tqdm
 
 
-def create_template(images: List, masks: List, brain_names: List, atlas_volume: ants.ANTsImage,
+def create_template(images: list, masks: list, brain_names: list, atlas_volume: ants.ANTsImage,
                     template_resolution: int = 10, iterations: int = 3, init_with_template=True,
                     save_pre_reg: bool = False, remove_temp_output: bool = False,
                     save_templating_progress: bool = False, pre_registration_type: str = "Rigid",
@@ -19,41 +18,29 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
     Create a template from a folder of images.
 
     :param images: List of images to use to create the template.
-    :type images: List
-
+    :type images: list
     :param masks: List of masks to use to create the template.
-    :type masks: List
-
+    :type masks: list
     :param brain_names: List of brain names to use for saving the pre-registered images.
-    :type brain_names: List
-
+    :type brain_names: list
     :param atlas_volume: Default template to pre-register the brains to and possible the initial volume for registration.
     :type atlas_volume: ants.ANTsImage
-
     :param template_resolution: The resolution of the template.
     :type template_resolution: int
-
     :param iterations: The number of iterations to use to create the template.
     :type iterations: int
-
     :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
     :type init_with_template: bool
-
     :param save_pre_reg: Whether to save the pre-registered images.
     :type save_pre_reg: bool
-
     :param remove_temp_output: Whether to remove the temporary output.
     :type remove_temp_output: bool
-
     :param save_templating_progress: Whether to save the template at each iteration.
     :type save_templating_progress: bool
-
     :param pre_registration_type: The type of pre-registration to use.
     :type pre_registration_type: str
-
     :param templating_registration_type: The type of registration to use to create the template.
     :type templating_registration_type: str
-
     :return: The newly created template.
     :rtype: ants.ANTsImage
     """
@@ -84,17 +71,25 @@ def create_template(images: List, masks: List, brain_names: List, atlas_volume: 
 
 
 def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage, brain: str,
-                       save_pre_reg: bool = False, registration_type: str = "Rigid"):
+                       save_pre_reg: bool = False, registration_type: str = "Rigid") -> (
+        ants.ANTsImage, ants.ANTsImage):
     """
     Register an image to a template and return the registered image and mask.
 
     :param volume: The volume to register
+    :type volume: ants.ANTsImage
     :param mask: The mask to use in registration
+    :type mask: ants.ANTsImage
     :param template: The template to register to
+    :type template: ants.ANTsImage
     :param brain: The name of the brain
+    :type brain: str
     :param save_pre_reg: Whether to save the pre-registered image and mask
+    :type save_pre_reg: bool
     :param registration_type: The type of registration to use
+    :type registration_type: str
     :return: The registered image and registered mask
+    :rtype: Tuple[ants.ANTsImage, ants.ANTsImage]
     """
     image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
                                             type_of_transform=registration_type)
@@ -109,35 +104,46 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: a
 
 
 def build_template(
-        initial_template=None,
-        image_list=None,
-        iterations=3,
-        gradient_step=0.2,
-        blending_weight=0.75,
-        weights=None,
-        masks=None,
-        remove_temp_output=False,
-        save_progress=False,
-        type_of_transform="SyN",
+        initial_template: ants.ANTsImage = None,
+        image_list: list[ants.ANTsImage] = None,
+        iterations: int = 3,
+        gradient_step: float = 0.2,
+        blending_weight: float = 0.75,
+        weights: bool = None,
+        masks: bool = None,
+        remove_temp_output: bool = False,
+        save_progress: bool = False,
+        type_of_transform: str = "SyN",
         **kwargs
-):
+) -> ants.ANTsImage:
     """
     Estimate an optimal template from an input image_list
     A modification of the ANTsPy function build_template to use masks.
     Source here: https://antspyx.readthedocs.io/en/latest/_modules/ants/registration/build_template.html#build_template
 
     :param initial_template: The initial template to use
+    :type initial_template: ants.ANTsImage
     :param image_list: The list of images to use to create the template
+    :type image_list: list[ants.ANTsImage]
     :param iterations: The number of iterations to use to create the template
+    :type iterations: int
     :param gradient_step: For shape update gradient
+    :type gradient_step: float
     :param blending_weight: Weight for image blending
+    :type blending_weight: float
     :param weights: Weight for each input image
+    :type weights: List[float]
     :param masks: List of masks corresponding to the images in image_list
+    :type masks: List[ants.ANTsImage]
     :param remove_temp_output: Whether to remove the temporary output files
+    :type remove_temp_output: bool
     :param save_progress: Whether to save the progress of the template building
+    :type save_progress: bool
     :param type_of_transform: The type of transform to use for registration
+    :type type_of_transform: str
     :param kwargs: Extra arguments passed to ants registration
     :return: The newly created template
+    :rtype: ants.ANTsImage
 
     Example
     ^^^^^^^
