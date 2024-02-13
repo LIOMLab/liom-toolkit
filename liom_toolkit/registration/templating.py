@@ -89,7 +89,7 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage, template: a
     :param registration_type: The type of registration to use
     :type registration_type: str
     :return: The registered image and registered mask
-    :rtype: Tuple[ants.ANTsImage, ants.ANTsImage]
+    :rtype: tuple[ants.ANTsImage, ants.ANTsImage]
     """
     image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
                                             type_of_transform=registration_type)

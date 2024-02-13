@@ -24,7 +24,7 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, temp
     :type deformable_type: str
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
-    :rtype: Tuple[ants.ANTsImage, dict, dict]
+    :rtype: tuple[ants.ANTsImage, dict, dict]
     """
     rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type)
 
@@ -49,7 +49,7 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     :param rigid_type: The type of rigid registration to use
     :type rigid_type: str
     :return: The registered image and the transform from the rigid registration
-    :rtype: Tuple[ants.ANTsImage, dict]
+    :rtype: tuple[ants.ANTsImage, dict]
     """
     rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type)
     rigid = ants.apply_transforms(fixed=template, moving=image,
@@ -84,7 +84,7 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     :type deformable_type: str
     :param keep_intermediary: Whether to write intermediary files or not. Will also save the final masked image.
     :type keep_intermediary: bool
-    :return: ants.ANTsImage The masked image.
+    :return: The masked image.
     :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
@@ -188,7 +188,7 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     :type deformable_type: str
     :param keep_intermediary: Whether to keep intermediary files or not.
     :type keep_intermediary: bool
-    :return: ants.ANTsImage The aligned annotation.
+    :return: The aligned annotation.
     :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
