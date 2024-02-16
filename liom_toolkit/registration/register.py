@@ -98,6 +98,11 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
+    # Make sure all images are in RAS+ orientation
+    target_volume = ants.reorient_image2(target_volume, orientation='RAS')
+    mask = ants.reorient_image2(mask, orientation='RAS')
+    template = ants.reorient_image2(template, orientation='RAS')
+
     pbar = tqdm(total=5, desc="Masking image", leave=True, unit="step", position=0)
 
     # Create the data directory if it does not exist
@@ -203,6 +208,11 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+
+    # Make sure all images are in RAS+ orientation
+    target_volume = ants.reorient_image2(target_volume, orientation='RAS')
+    mask = ants.reorient_image2(mask, orientation='RAS')
+    template = ants.reorient_image2(template, orientation='RAS')
 
     pbar = tqdm(total=4, desc="Aligning annotation", leave=True, unit="step", position=0)
 
