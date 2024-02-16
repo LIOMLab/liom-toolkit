@@ -7,8 +7,10 @@ from .utils import construct_reference_space_cache, download_allen_template, \
     convert_allen_nrrd_to_ants, download_allen_atlas
 
 
-def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                               rigid_type='Rigid', deformable_type='SyN') -> (ants.ANTsImage, dict, dict):
+def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage,
+                               rigid_type: str = 'Rigid', deformable_type: str = 'SyN', interpolator: str = 'linear',
+                               rigid_interpolator: str = 'linear') -> (
+        ants.ANTsImage, dict, dict):
     """
     Register an image to a template using a rigid registration followed by a deformable registration.
 
@@ -22,21 +24,25 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, temp
     :type rigid_type: str
     :param deformable_type: The type of deformable registration to use
     :type deformable_type: str
+    :param interpolator: The interpolator to use to apply the transform.
+    :type interpolator: str
+    :param rigid_interpolator: The interpolator to use for applying the rigid transform.
+    :type rigid_interpolator: str
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
     :rtype: tuple[ants.ANTsImage, dict, dict]
     """
-    rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type)
+    rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type, rigid_interpolator)
 
     syn_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=deformable_type,
                                       initial_transform=rigid_transform['fwdtransforms'][0])
     syn = ants.apply_transforms(fixed=template, moving=image,
-                                transformlist=syn_transform['fwdtransforms'])
+                                transformlist=syn_transform['fwdtransforms'], interpolator=interpolator)
     return syn, syn_transform, rigid_transform
 
 
 def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                            rigid_type='Rigid') -> (ants.ANTsImage, dict):
+                            rigid_type: str = 'Rigid', interpolator: str = 'linear') -> (ants.ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
 
@@ -48,12 +54,15 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     :type template: ants.ANTsImage
     :param rigid_type: The type of rigid registration to use
     :type rigid_type: str
+    :param interpolator: The interpolator to use to apply the transform.
+    :type interpolator: str
     :return: The registered image and the transform from the rigid registration
     :rtype: tuple[ants.ANTsImage, dict]
     """
     rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type)
     rigid = ants.apply_transforms(fixed=template, moving=image,
-                                  transformlist=rigid_transform['fwdtransforms'])
+                                  transformlist=rigid_transform['fwdtransforms'],
+                                  interpolator=interpolator)
     return rigid, rigid_transform
 
 
@@ -146,9 +155,11 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
 
     # Apply transforms from structure mask to final image
     region_mask_transformed = ants.apply_transforms(fixed=template, moving=region_mask,
-                                                    transformlist=syn_transform_allen['fwdtransforms'])
+                                                    transformlist=syn_transform_allen['fwdtransforms'],
+                                                    interpolator='genericLabel')
     region_mask_transformed = ants.apply_transforms(fixed=registration_volume, moving=region_mask_transformed,
-                                                    transformlist=syn_transform_image['invtransforms'])
+                                                    transformlist=syn_transform_image['invtransforms'],
+                                                    interpolator='genericLabel')
     if keep_intermediary:
         ants.image_write(region_mask_transformed, f"{data_dir}/region_{str(region_id)}_mask_transformed.nii")
     pbar.update(1)
@@ -235,9 +246,11 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     pbar.update(1)
 
     atlas_transformed = ants.apply_transforms(fixed=template, moving=atlas,
-                                              transformlist=syn_transform_allen['fwdtransforms'])
+                                              transformlist=syn_transform_allen['fwdtransforms'],
+                                              interpolator="genericLabel")
     atlas_transformed = ants.apply_transforms(fixed=target_volume, moving=atlas_transformed,
-                                              transformlist=syn_transform_image['invtransforms'])
+                                              transformlist=syn_transform_image['invtransforms'],
+                                              interpolator="genericLabel")
     if keep_intermediary:
         ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
     pbar.update(1)
