@@ -115,7 +115,8 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6
     """
 
     color_dict = generate_label_color_dict_allen()
-    save_annotation_to_zarr(atlas.numpy(), zarr_file, color_dict, scales, chunks, resolution_level)
+    save_label_to_zarr(label=atlas.numpy(), zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
+                       resolution_level=resolution_level, name="atlas")
 
 
 def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
@@ -136,7 +137,8 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     mask = mask.astype("int8")
     mask_transposed = np.transpose(mask, (2, 1, 0))
     color_dict = generate_label_color_dict()
-    save_annotation_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict)
+    save_label_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
+                       name="mask")
 
 
 def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarray:
@@ -156,13 +158,14 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     return mask
 
 
-def save_annotation_to_zarr(mask: np.ndarray, zarr_file: str, color_dict: list[dict], scales: tuple = (6.5, 6.5, 6.5),
-                            chunks: tuple = (128, 128, 128), resolution_level: int = 0) -> None:
+def save_label_to_zarr(label: np.ndarray, zarr_file: str, color_dict: list[dict], name: str,
+                       scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
+                       resolution_level: int = 0, ) -> None:
     """
     Save a mask to a zarr file inside the labels group.
 
-    :param mask: The mask to save.
-    :type mask: np.ndarray
+    :param label: The mask to save.
+    :type label: np.ndarray
     :param zarr_file: The zarr file to save the mask to.
     :type zarr_file: str
     :param color_dict: The color dictionary to use for the mask.
@@ -173,6 +176,8 @@ def save_annotation_to_zarr(mask: np.ndarray, zarr_file: str, color_dict: list[d
     :type chunks: tuple
     :param resolution_level: The resolution level of the mask.
     :type resolution_level: int
+    :param name: The name of the mask.
+    :type name: str
     """
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
@@ -183,11 +188,11 @@ def save_annotation_to_zarr(mask: np.ndarray, zarr_file: str, color_dict: list[d
                       }
                       }
 
-    write_labels(labels=mask, group=root, axes=generate_axes_dict(),
+    write_labels(labels=label, group=root, axes=generate_axes_dict(),
                  coordinate_transformations=create_transformation_dict(scales, 5),
                  chunks=chunks, scaler=CustomScaler(order=0, anti_aliasing=False, downscale=2, method="nearest",
                                                     input_layer=resolution_level),
-                 name="mask", label_metadata=label_metadata)
+                 name=name, label_metadata=label_metadata)
 
 
 def set_physical_shape(image: ants.ANTsImage) -> None:
