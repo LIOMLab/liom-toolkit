@@ -29,12 +29,26 @@ class CustomScaler(Scaler):
     :type downscale: int
     :param method: The method to use for downscaling. **Disclaimer:** Only "nearest" is supported.
     :type method: str
+    :param input_layer: The input layer to use for the transformation.
+    :type input_layer: int
+    :param max_layer: The maximum layer to use for the transformation.
+    :type max_layer: int
+    : param do_upscale: Whether to upscale the image or not. Only used internally.
+    : type do_upscale: bool
     """
+    order: int
+    anti_aliasing: bool
+    input_layer: int
+    to_down_scale: np.ndarray
+    to_up_scale: np.ndarray
+    do_upscale: bool = True
 
-    def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest"):
-        super().__init__(downscale=downscale, method=method)
+    def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest",
+                 input_layer: int = 0, max_layer: int = 4):
+        super().__init__(downscale=downscale, method=method, max_layer=max_layer)
         self.order = order
         self.anti_aliasing = anti_aliasing
+        self.input_layer = input_layer
 
     def nearest(self, base: np.ndarray) -> list[np.ndarray]:
         """
@@ -45,6 +59,13 @@ class CustomScaler(Scaler):
         :return: The down-sampled image.
         :rtype: list[np.ndarray]
         """
+        # Determine the levels to scale and in which direction
+        scales = np.linspace(0, self.max_layer, self.max_layer + 1, dtype=int)
+        base_layer = self.input_layer
+
+        self.to_up_scale = scales[:base_layer]
+        self.to_down_scale = scales[base_layer + 1:]
+
         return self._by_plane(base, self.__nearest)
 
     def __nearest(self, plane: ArrayLike, size_y: int, size_x: int) -> np.ndarray:
@@ -69,10 +90,16 @@ class CustomScaler(Scaler):
         else:
             _resize = resize
 
+        if self.do_upscale:
+            output_shape = plane.shape[0] * self.downscale, plane.shape[1] * self.downscale, plane.shape[
+                2] * self.downscale
+        else:
+            output_shape = plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[
+                2] // self.downscale
+
         return _resize(
             plane,
-            output_shape=(
-                plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[2] // self.downscale),
+            output_shape=output_shape,
             order=self.order,
             preserve_range=True,
             anti_aliasing=self.anti_aliasing,
@@ -82,7 +109,7 @@ class CustomScaler(Scaler):
             self,
             base: np.ndarray,
             func: Callable[[np.ndarray, int, int], np.ndarray],
-    ) -> list[Union[ndarray, ndarray, None]]:
+    ) -> list[Union[np.ndarray, np.ndarray, None]]:
         """Loop over 3 of the 5 dimensions and apply the func transform.
 
         :param base: The base image to transform.
@@ -92,34 +119,56 @@ class CustomScaler(Scaler):
         :return: The transformed image.
         :rtype: list[Union[ndarray, ndarray, None]]
         """
+        aa = self.anti_aliasing
+        start_scale = self.input_layer
+        rv = [None] * (self.max_layer + 1)
+        rv[start_scale] = base
 
-        rv = [base]
-        for i in range(self.max_layer):
-            stack_to_scale = rv[-1]
-            shape_5d = (*(1,) * (5 - stack_to_scale.ndim), *stack_to_scale.shape)
-            T, C, Z, Y, X = shape_5d
+        # Do up-scaling first
+        self.anti_aliasing = False
+        self.do_upscale = True
+        scales = self.to_up_scale
+        if scales.size > 0:
+            for scale in np.flip(scales):
+                stack_to_scale = rv[scale + 1]
+                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
 
-            # If our data is already 2D, simply resize and add to pyramid
-            if stack_to_scale.ndim == 2:
-                rv.append(func(stack_to_scale, Y, X))
-                continue
+        # Do down-scaling
+        self.anti_aliasing = True
+        self.do_upscale = aa
+        scales = self.to_down_scale
+        if scales.size > 0:
+            for scale in scales:
+                stack_to_scale = rv[scale - 1]
+                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
 
-            # stack_dims is any dims over 3D
-            new_stack = None
-            for t in range(T):
-                for c in range(C):
-                    plane = stack_to_scale[:]
-                    out = func(plane, Y, X)
-                    # first iteration of loop creates the new nd stack
-                    if new_stack is None:
-                        new_stack = np.zeros(
-                            (out.shape[0], out.shape[1], out.shape[2]),
-                            dtype=base.dtype,
-                        )
-                    # insert resized plane into the stack at correct indices
-                    new_stack[:] = out
-            rv.append(new_stack)
         return rv
+
+    def _scale_by_plane(self, base, stack_to_scale, func):
+        shape_5d = (*(1,) * (5 - stack_to_scale.ndim), *stack_to_scale.shape)
+        T, C, Z, Y, X = shape_5d
+
+        # If our data is already 2D, simply resize and add to pyramid
+        if stack_to_scale.ndim == 2:
+            image = func(stack_to_scale, Y, X)
+            return image
+
+        # stack_dims is any dims over 3D
+        new_stack = None
+        for t in range(T):
+            for c in range(C):
+                plane = stack_to_scale[:]
+                out = func(plane, Y, X)
+                # first iteration of loop creates the new nd stack
+                if new_stack is None:
+                    new_stack = np.zeros(
+                        (out.shape[0], out.shape[1], out.shape[2]),
+                        dtype=base.dtype,
+                    )
+                # insert resized plane into the stack at correct indices
+                new_stack[:] = out
+        image = new_stack
+        return image
 
 
 def create_transformation_dict(scales: tuple, levels: int) -> list:
