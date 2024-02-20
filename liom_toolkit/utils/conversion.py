@@ -171,7 +171,7 @@ class CustomScaler(Scaler):
         return image
 
 
-def create_transformation_dict(scales: tuple, levels: int) -> list:
+def create_transformation_dict(scales: tuple, levels: int, dimensions: int) -> list:
     """
     Create a dictionary with the transformation information for 3D images.
 
@@ -179,22 +179,33 @@ def create_transformation_dict(scales: tuple, levels: int) -> list:
     :type scales: tuple
     :param levels: The number of levels in the pyramid.
     :type levels: int
+    :param dimensions: The number of dimensions in the image.
+    :type dimensions: int
     :return: The transformation dictionary.
     :rtype: list
     """
     coord_transforms = []
     for i in range(levels):
-        transform_dict = [{
-            "type": "scale",
-            "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-        }]
+        if dimensions == 4:
+            transform_dict = [{
+                "type": "scale",
+                "scale": [1, scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
+            }]
+        else:
+            transform_dict = [{
+                "type": "scale",
+                "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
+            }]
         coord_transforms.append(transform_dict)
     return coord_transforms
 
 
-def generate_axes_dict() -> list:
+def generate_axes_dict(dimensions: int) -> list:
     """
     Generate the axes dictionary for the zarr file.
+
+    :param dimensions: The number of dimensions in the image.
+    :type dimensions: int
 
     :return: The axes dictionary.
     :rtype: list
@@ -204,6 +215,8 @@ def generate_axes_dict() -> list:
         {"name": "y", "type": "space", "unit": "micrometer"},
         {"name": "x", "type": "space", "unit": "micrometer"}
     ]
+    if dimensions == 4:
+        axes.insert(0, {"name": "c", "type": "channel"})
     return axes
 
 
