@@ -138,7 +138,7 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     mask_transposed = np.transpose(mask, (2, 1, 0))
     color_dict = generate_label_color_dict()
     save_label_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
-                       name="mask")
+                       name="mask", resolution_level=resolution_level)
 
 
 def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarray:
@@ -154,6 +154,8 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     """
     node = load_zarr(zarr_file)[0]
     image = load_zarr_image_from_node(node, resolution_level=resolution_level)
+    if image.dimension == 4:
+        image = image[0]
     mask = segment_3d_brain(image)
     return mask
 

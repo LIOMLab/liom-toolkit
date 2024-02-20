@@ -182,9 +182,8 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
 
 
 def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                                resolution: int = 25, data_dir: str = "registration_test",
-                                rigid_type: str = 'Similarity', deformable_type: str = "SyN",
-                                keep_intermediary: bool = False) -> ants.ANTsImage:
+                                data_dir: str, resolution: int = 25, rigid_type: str = 'Similarity',
+                                deformable_type: str = "SyN", keep_intermediary: bool = False) -> ants.ANTsImage:
     """
     Align an annotation to a target image.
 
