@@ -154,6 +154,8 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     """
     node = load_zarr(zarr_file)[0]
     image = load_zarr_image_from_node(node, resolution_level=resolution_level)
+    if image.dimension == 4:
+        image = image[0]
     mask = segment_3d_brain(image)
     return mask
 
