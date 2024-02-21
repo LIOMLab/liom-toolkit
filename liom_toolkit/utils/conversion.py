@@ -361,7 +361,7 @@ def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, sc
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
     write_image(image=data, group=root, axes=generate_axes_dict(n_dims),
-                coordinate_transformations=create_transformation_dict(scales, 5),
+                coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
                 storage_options=dict(chunks=chunks),
                 scaler=CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest"))
     print("Done!")
