@@ -181,6 +181,7 @@ def save_label_to_zarr(label: np.ndarray, zarr_file: str, color_dict: list[dict]
     :param name: The name of the mask.
     :type name: str
     """
+    n_dims = len(label.shape)
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
 
@@ -190,7 +191,7 @@ def save_label_to_zarr(label: np.ndarray, zarr_file: str, color_dict: list[dict]
                       }
                       }
 
-    write_labels(labels=label, group=root, axes=generate_axes_dict(),
+    write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
                  coordinate_transformations=create_transformation_dict(scales, 5),
                  chunks=chunks, scaler=CustomScaler(order=0, anti_aliasing=False, downscale=2, method="nearest",
                                                     input_layer=resolution_level),
