@@ -29,9 +29,10 @@ def load_zarr(zarr_file: str) -> list[Node]:
 
 
 def load_zarr_image_from_node(node: Node, resolution_level: int = 1,
-                              volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.])) -> ants.ANTsImage:
+                              volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.]),
+                              channel=0) -> ants.ANTsImage:
     """
-    Load a zarr file to an ANTs image.
+    Load a zarr file to an ANTs image. Loads one channel at a time.
 
     :param node: The zarr node to load.
     :type node: Node
@@ -39,13 +40,19 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1,
     :type resolution_level: int
     :param volume_direction: The direction of the volume.
     :type volume_direction: tuple
+    :param channel: The channel to load.
+    :type channel: int
     :return: The ANTs image.
     :rtype: ants.ANTsImage
     """
     volume = np.array(node.data[resolution_level])
+    if len(volume.shape) == 4:
+        volume = volume[channel]
     volume = np.transpose(volume, (2, 1, 0)).astype("uint32")
     volume = ants.from_numpy(volume)
     transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
+    if len(transform) == 4:
+        transform = transform[1:]
 
     # Convert to mm
     transform = [element / 1000 for element in transform]
@@ -153,9 +160,7 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     :rtype: np.ndarray
     """
     node = load_zarr(zarr_file)[0]
-    image = load_zarr_image_from_node(node, resolution_level=resolution_level)
-    if image.dimension == 4:
-        image = image[0]
+    image = load_zarr_image_from_node(node, resolution_level=resolution_level, channel=0)
     mask = segment_3d_brain(image)
     return mask
 
