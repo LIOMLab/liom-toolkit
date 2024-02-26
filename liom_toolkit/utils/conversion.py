@@ -66,6 +66,9 @@ class CustomScaler(Scaler):
         self.to_up_scale = scales[:base_layer]
         self.to_down_scale = scales[base_layer + 1:]
 
+        if len(self.to_up_scale) == 0:
+            self.do_upscale = False
+
         return self._by_plane(base, self.__nearest)
 
     def __nearest(self, plane: ArrayLike, size_y: int, size_x: int) -> np.ndarray:
@@ -157,16 +160,28 @@ class CustomScaler(Scaler):
         new_stack = None
         for t in range(T):
             for c in range(C):
-                plane = stack_to_scale[:]
+                if C > 1:
+                    plane = stack_to_scale[c]
+                else:
+                    plane = stack_to_scale[:]
                 out = func(plane, Y, X)
                 # first iteration of loop creates the new nd stack
                 if new_stack is None:
-                    new_stack = np.zeros(
-                        (out.shape[0], out.shape[1], out.shape[2]),
-                        dtype=base.dtype,
-                    )
+                    if C > 1:
+                        new_stack = np.zeros(
+                            (C, out.shape[0], out.shape[1], out.shape[2]),
+                            dtype=base.dtype,
+                        )
+                    else:
+                        new_stack = np.zeros(
+                            (out.shape[0], out.shape[1], out.shape[2]),
+                            dtype=base.dtype,
+                        )
                 # insert resized plane into the stack at correct indices
-                new_stack[:] = out
+                if C > 1:
+                    new_stack[c] = out
+                else:
+                    new_stack[:] = out
         image = new_stack
         return image
 
@@ -363,7 +378,7 @@ def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, sc
     write_image(image=data, group=root, axes=generate_axes_dict(n_dims),
                 coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
                 storage_options=dict(chunks=chunks),
-                scaler=CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest"))
+                scaler=CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest", input_layer=0))
     print("Done!")
 
 
