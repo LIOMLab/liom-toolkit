@@ -16,6 +16,6 @@ setup(
     license='GPLv3+',
     license_files=['LICENSE'],
     python_requires='>=3.10',
-    install_requires=['antspyx', 'tqdm', 'scikit-image', 'ome-zarr', 'nibabel', 'zarr', 'h5py', 'pynrrd', 'PyWavelets',
+    install_requires=['antspyx', 'tqdm', 'scikit-image', 'ome-zarr==0.8.2', 'nibabel', 'zarr', 'h5py', 'pynrrd', 'PyWavelets',
                       'SimpleITK', 'allensdk', 'dask']
 )
