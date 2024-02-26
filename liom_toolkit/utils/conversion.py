@@ -137,8 +137,8 @@ class CustomScaler(Scaler):
                 rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
 
         # Do down-scaling
-        self.anti_aliasing = True
-        self.do_upscale = aa
+        self.anti_aliasing = aa
+        self.do_upscale = False
         scales = self.to_down_scale
         if scales.size > 0:
             for scale in scales:
