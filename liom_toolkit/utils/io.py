@@ -143,7 +143,7 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     mask = create_mask_from_zarr(zarr_file, resolution_level)
     mask = mask.astype("int8")
     mask_transposed = np.transpose(mask, (2, 1, 0))
-    color_dict = generate_label_color_dict()
+    color_dict = generate_label_color_dict_mask()
     save_label_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
                        name="mask", resolution_level=resolution_level)
 
@@ -216,9 +216,9 @@ def set_physical_shape(image: ants.ANTsImage) -> None:
     image.physical_shape = physical_shape
 
 
-def generate_label_color_dict() -> list[dict]:
+def generate_label_color_dict_mask() -> list[dict]:
     """
-    Generate a label color dictionary for the mask. Black is background, green is foreground.
+    Generate a label color dictionary for the mask. Black is background, white is foreground.
 
     :return: The label color dictionary.
     :rtype: list[dict]
@@ -230,7 +230,7 @@ def generate_label_color_dict() -> list[dict]:
         },
         {
             "label-value": 1,
-            "rgba": [0, 255, 0, 64]
+            "rgba": [255, 255, 255, 64]
         }
     ]
     return label_colors
