@@ -105,7 +105,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
 
 
 def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6.5, 6.5, 6.5),
-                       chunks: tuple = (128, 128, 128), resolution_level: int = 0) -> None:
+                       chunks: tuple = (128, 128, 128), resolution_level: int = 0, orientation: str = "RSP") -> None:
     """
     Save an atlas to a zarr file inside the labels group.
 
@@ -119,10 +119,16 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6
     :type chunks: tuple
     :param resolution_level: The resolution level of the atlas.
     :type resolution_level: int
+    :param orientation: The wanted orientation of the atlas. RSP is the orientation of the light microscope acquisitions.
+    :type orientation: str
     """
+    atlas = ants.reorient_image2(atlas, orientation)
+    atlas = atlas.numpy()
+    # Switch x and z axis as zarr expects (z, y, x)
+    atlas = np.transpose(atlas, (2, 1, 0))
 
     color_dict = generate_label_color_dict_allen()
-    save_label_to_zarr(label=atlas.numpy(), zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
+    save_label_to_zarr(label=atlas, zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
                        resolution_level=resolution_level, name="atlas")
 
 
@@ -143,7 +149,7 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     mask = create_mask_from_zarr(zarr_file, resolution_level)
     mask = mask.astype("int8")
     mask_transposed = np.transpose(mask, (2, 1, 0))
-    color_dict = generate_label_color_dict()
+    color_dict = generate_label_color_dict_mask()
     save_label_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
                        name="mask", resolution_level=resolution_level)
 
@@ -216,9 +222,9 @@ def set_physical_shape(image: ants.ANTsImage) -> None:
     image.physical_shape = physical_shape
 
 
-def generate_label_color_dict() -> list[dict]:
+def generate_label_color_dict_mask() -> list[dict]:
     """
-    Generate a label color dictionary for the mask. Black is background, green is foreground.
+    Generate a label color dictionary for the mask. Black is background, white is foreground.
 
     :return: The label color dictionary.
     :rtype: list[dict]
@@ -230,7 +236,7 @@ def generate_label_color_dict() -> list[dict]:
         },
         {
             "label-value": 1,
-            "rgba": [0, 255, 0, 64]
+            "rgba": [255, 255, 255, 64]
         }
     ]
     return label_colors

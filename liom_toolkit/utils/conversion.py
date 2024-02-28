@@ -382,7 +382,7 @@ def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, sc
     print("Done!")
 
 
-def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = True, remove_stripes: bool = False,
+def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True, remove_stripes: bool = False,
                          scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
                          base_key: str = "reconstructed_frame") -> None:
     """
@@ -392,8 +392,8 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = Tru
     :type hdf5_file: str
     :param zarr_file: Path to the zarr file.
     :type zarr_file: str
-    :param use_mem_map: Whether to use a memmap or not.
-    :type use_mem_map: bool
+    :param use_memmap: Whether to use a memmap or not.
+    :type use_memmap: bool
     :param remove_stripes: Whether to remove stripes from the data.
     :type remove_stripes: bool
     :param scales: The resolution of the image, in z y x order.
@@ -405,10 +405,10 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_mem_map: bool = Tru
     """
 
     map_file = "temp.dat"
-    data = load_hdf5(hdf5_file, use_mem_map, map_file, base_key=base_key)
+    data = load_hdf5(hdf5_file, use_memmap, map_file, base_key=base_key)
 
     save_zarr(data, zarr_file, remove_stripes, scales=scales, chunks=chunks)
-    if use_mem_map:
+    if use_memmap:
         os.remove(map_file)
 
 
