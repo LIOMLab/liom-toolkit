@@ -105,7 +105,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
 
 
 def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6.5, 6.5, 6.5),
-                       chunks: tuple = (128, 128, 128), resolution_level: int = 0) -> None:
+                       chunks: tuple = (128, 128, 128), resolution_level: int = 0, orientation: str = "RSP") -> None:
     """
     Save an atlas to a zarr file inside the labels group.
 
@@ -119,10 +119,16 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6
     :type chunks: tuple
     :param resolution_level: The resolution level of the atlas.
     :type resolution_level: int
+    :param orientation: The wanted orientation of the atlas.
+    :type orientation: str
     """
+    atlas = ants.reorient_image2(atlas, orientation)
+    atlas = atlas.numpy()
+    # Switch x and z axis as zarr expects (z, y, x)
+    atlas = np.transpose(atlas, (2, 1, 0))
 
     color_dict = generate_label_color_dict_allen()
-    save_label_to_zarr(label=atlas.numpy(), zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
+    save_label_to_zarr(label=atlas, zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
                        resolution_level=resolution_level, name="atlas")
 
 
