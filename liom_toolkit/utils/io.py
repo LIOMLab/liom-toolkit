@@ -119,7 +119,7 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ants.ANTsImage, scales: tuple = (6
     :type chunks: tuple
     :param resolution_level: The resolution level of the atlas.
     :type resolution_level: int
-    :param orientation: The wanted orientation of the atlas.
+    :param orientation: The wanted orientation of the atlas. RSP is the orientation of the light microscope acquisitions.
     :type orientation: str
     """
     atlas = ants.reorient_image2(atlas, orientation)
