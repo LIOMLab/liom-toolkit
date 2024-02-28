@@ -235,3 +235,76 @@ def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6
     print("Loading...")
     data, header = nrrd.read(nrrd_file)
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
+
+
+def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
+                            scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128), use_mem_map: bool = False,
+                            remove_stripes: bool = False, original_volume_orientation: str = "RSP") -> None:
+    """
+    Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
+    auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
+
+    :param auto_fluo_file: The path to the auto-fluorescence hdf5 file.
+    :type auto_fluo_file: str
+    :param vascular_file: The path to the vascular hdf5 file.
+    :type vascular_file: str
+    :param zarr_file: The path to the zarr file to save the volume to.
+    :type zarr_file: str
+    :param template_path: The path to the template to align the annotations to.
+    :type template_path: str
+    :param scales: The physical resolution of the volume per axis.
+    :type scales: tuple
+    :param chunks: The chunk size to use for the volume.
+    :type chunks: tuple
+    :param use_mem_map: Whether to use a memory map for the hdf5 files.
+    :type use_mem_map: bool
+    :param remove_stripes: Whether to remove stripes from the volume.
+    :type remove_stripes: bool
+    :param original_volume_orientation: The original orientation of the volume.
+    :type original_volume_orientation: str
+    """
+    temp_dir = tempfile.TemporaryDirectory()
+    resolution_level = 2
+
+    pbar = tqdm(total=5, desc="Creating zarr volume")
+    pbar.set_postfix({"step": "Loading data from hdf5 files"})
+    # Extract data from the hdf5 files
+    auto_fluo = load_hdf5(auto_fluo_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/647nm.dat")
+    vascular = load_hdf5(vascular_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/555nm.dat")
+
+    # Merge the data along a new fourth dimension at index 0
+    volume = np.stack((auto_fluo, vascular), axis=0)
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Saving volume to zarr file"})
+    # Save the volume to a zarr file
+    save_zarr(volume, zarr_file, scales=scales, chunks=chunks, remove_stripes=remove_stripes)
+    pbar.update(1)
+
+    # Delete the volume to free up memory
+    del volume
+
+    pbar.set_postfix({"step": "Creating and writing mask to zarr file"})
+    # Create the mask
+    create_and_write_mask(zarr_file, scales=scales, chunks=chunks, resolution_level=resolution_level)
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Aligning annotations to volume"})
+    # Align the annotations to the volume
+
+    nodes = load_zarr(zarr_file)
+    target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
+    mask = load_zarr_image_from_node(nodes[2], resolution_level)
+    template = ants.image_read(template_path)
+
+    atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, resolution=25,
+                                        keep_intermediary=False, data_dir=temp_dir.name)
+
+    save_atlas_to_zarr(zarr_file, atlas, scales=scales, chunks=chunks, resolution_level=resolution_level,
+                       orientation=original_volume_orientation)
+    temp_dir.cleanup()
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Done"})
+    pbar.update(1)
+    pbar.close()
