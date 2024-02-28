@@ -1,238 +1,20 @@
 import os
-from typing import Callable, Union
+import tempfile
 
-import dask.array as da
+import ants
 import h5py as h5
 import nibabel as nib
 import nrrd
 import numpy as np
 import pywt
-import tqdm as tqdm
 import zarr
-from numpy import ndarray
-from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
-from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_image
-from skimage.transform import resize
+from tqdm import tqdm
 
-
-class CustomScaler(Scaler):
-    """
-    A custom scaler that can down-sample 3D images for OME-Zarr Conversion.
-
-    :param order: The order of the transformation.
-    :type order: int
-    :param anti_aliasing: Whether to use anti-aliasing
-    :type anti_aliasing: bool
-    :param downscale: The amount to downscale by
-    :type downscale: int
-    :param method: The method to use for downscaling. **Disclaimer:** Only "nearest" is supported.
-    :type method: str
-    :param input_layer: The input layer to use for the transformation.
-    :type input_layer: int
-    :param max_layer: The maximum layer to use for the transformation.
-    :type max_layer: int
-    : param do_upscale: Whether to upscale the image or not. Only used internally.
-    : type do_upscale: bool
-    """
-    order: int
-    anti_aliasing: bool
-    input_layer: int
-    to_down_scale: np.ndarray
-    to_up_scale: np.ndarray
-    do_upscale: bool = True
-
-    def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest",
-                 input_layer: int = 0, max_layer: int = 4):
-        super().__init__(downscale=downscale, method=method, max_layer=max_layer)
-        self.order = order
-        self.anti_aliasing = anti_aliasing
-        self.input_layer = input_layer
-
-    def nearest(self, base: np.ndarray) -> list[np.ndarray]:
-        """
-        Down-sample using :func:`skimage.transform.resize`.
-
-        :param base: The base image to down-sample.
-        :type base: np.ndarray
-        :return: The down-sampled image.
-        :rtype: list[np.ndarray]
-        """
-        # Determine the levels to scale and in which direction
-        scales = np.linspace(0, self.max_layer, self.max_layer + 1, dtype=int)
-        base_layer = self.input_layer
-
-        self.to_up_scale = scales[:base_layer]
-        self.to_down_scale = scales[base_layer + 1:]
-
-        if len(self.to_up_scale) == 0:
-            self.do_upscale = False
-
-        return self._by_plane(base, self.__nearest)
-
-    def __nearest(self, plane: ArrayLike, size_y: int, size_x: int) -> np.ndarray:
-        """Apply the 2-dimensional transformation.
-
-        :param plane: The plane to transform.
-        :type plane: ArrayLike
-        :param size_y: The size of the y dimension.
-        :type size_y: int
-        :param size_x: The size of the x dimension.
-        :type size_x: int
-        :return: The transformed plane.
-        :rtype: np.ndarray
-        """
-        if isinstance(plane, da.Array):
-
-            def _resize(
-                    image: ArrayLike, output_shape: tuple, **kwargs
-            ) -> ArrayLike:
-                return dask_resize(image, output_shape, **kwargs)
-
-        else:
-            _resize = resize
-
-        if self.do_upscale:
-            output_shape = plane.shape[0] * self.downscale, plane.shape[1] * self.downscale, plane.shape[
-                2] * self.downscale
-        else:
-            output_shape = plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[
-                2] // self.downscale
-
-        return _resize(
-            plane,
-            output_shape=output_shape,
-            order=self.order,
-            preserve_range=True,
-            anti_aliasing=self.anti_aliasing,
-        ).astype(plane.dtype)
-
-    def _by_plane(
-            self,
-            base: np.ndarray,
-            func: Callable[[np.ndarray, int, int], np.ndarray],
-    ) -> list[Union[np.ndarray, np.ndarray, None]]:
-        """Loop over 3 of the 5 dimensions and apply the func transform.
-
-        :param base: The base image to transform.
-        :type base: np.ndarray
-        :param func: The function to apply to the image.
-        :type func: Callable[[np.ndarray, int, int], np.ndarray]
-        :return: The transformed image.
-        :rtype: list[Union[ndarray, ndarray, None]]
-        """
-        aa = self.anti_aliasing
-        start_scale = self.input_layer
-        rv = [None] * (self.max_layer + 1)
-        rv[start_scale] = base
-
-        # Do up-scaling first
-        self.anti_aliasing = False
-        self.do_upscale = True
-        scales = self.to_up_scale
-        if scales.size > 0:
-            for scale in np.flip(scales):
-                stack_to_scale = rv[scale + 1]
-                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
-
-        # Do down-scaling
-        self.anti_aliasing = aa
-        self.do_upscale = False
-        scales = self.to_down_scale
-        if scales.size > 0:
-            for scale in scales:
-                stack_to_scale = rv[scale - 1]
-                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
-
-        return rv
-
-    def _scale_by_plane(self, base, stack_to_scale, func):
-        shape_5d = (*(1,) * (5 - stack_to_scale.ndim), *stack_to_scale.shape)
-        T, C, Z, Y, X = shape_5d
-
-        # If our data is already 2D, simply resize and add to pyramid
-        if stack_to_scale.ndim == 2:
-            image = func(stack_to_scale, Y, X)
-            return image
-
-        # stack_dims is any dims over 3D
-        new_stack = None
-        for t in range(T):
-            for c in range(C):
-                if C > 1:
-                    plane = stack_to_scale[c]
-                else:
-                    plane = stack_to_scale[:]
-                out = func(plane, Y, X)
-                # first iteration of loop creates the new nd stack
-                if new_stack is None:
-                    if C > 1:
-                        new_stack = np.zeros(
-                            (C, out.shape[0], out.shape[1], out.shape[2]),
-                            dtype=base.dtype,
-                        )
-                    else:
-                        new_stack = np.zeros(
-                            (out.shape[0], out.shape[1], out.shape[2]),
-                            dtype=base.dtype,
-                        )
-                # insert resized plane into the stack at correct indices
-                if C > 1:
-                    new_stack[c] = out
-                else:
-                    new_stack[:] = out
-        image = new_stack
-        return image
-
-
-def create_transformation_dict(scales: tuple, levels: int, dimensions: int) -> list:
-    """
-    Create a dictionary with the transformation information for 3D images.
-
-    :param scales: The scale of the image, in z y x order.
-    :type scales: tuple
-    :param levels: The number of levels in the pyramid.
-    :type levels: int
-    :param dimensions: The number of dimensions in the image.
-    :type dimensions: int
-    :return: The transformation dictionary.
-    :rtype: list
-    """
-    coord_transforms = []
-    for i in range(levels):
-        if dimensions == 4:
-            transform_dict = [{
-                "type": "scale",
-                "scale": [1, scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-            }]
-        else:
-            transform_dict = [{
-                "type": "scale",
-                "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-            }]
-        coord_transforms.append(transform_dict)
-    return coord_transforms
-
-
-def generate_axes_dict(dimensions: int) -> list:
-    """
-    Generate the axes dictionary for the zarr file.
-
-    :param dimensions: The number of dimensions in the image.
-    :type dimensions: int
-
-    :return: The axes dictionary.
-    :rtype: list
-    """
-    axes = [
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"}
-    ]
-    if dimensions == 4:
-        axes.insert(0, {"name": "c", "type": "channel"})
-    return axes
+from liom_toolkit.registration import align_annotations_to_volume
+from liom_toolkit.utils import create_and_write_mask, load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
+    CustomScaler, create_transformation_dict, generate_axes_dict
 
 
 def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: int = 1, order: int = 8,
@@ -316,8 +98,8 @@ def load_hdf5(hdf5_file: str, use_mem_map: bool = True, map_file: str = "temp.da
         else:
             data = np.zeros((n_frames, frame.shape[0], frame.shape[1]), dtype=np.uint32)
         for i, key in enumerate(
-                tqdm.tqdm(key_list, desc="Loading HDF5 file..", unit=" frames", total=len(key_list),
-                          leave=False, position=1)):
+                tqdm(key_list, desc="Loading HDF5 file..", unit=" frames", total=len(key_list),
+                     leave=False, position=1)):
             frame = file[key][:]
             data[i, :, :] = frame
 
@@ -367,8 +149,8 @@ def save_zarr(data: np.ndarray, zarr_file: str, remove_stripes: bool = False, sc
     """
     n_dims = len(data.shape)
     if remove_stripes:
-        for i in tqdm.tqdm(range(data.shape[0]), desc="Removing stripes", leave=False, unit="frames",
-                           total=data.shape[0], position=1):
+        for i in tqdm(range(data.shape[0]), desc="Removing stripes", leave=False, unit="frames",
+                      total=data.shape[0], position=1):
             data[i, :, :] = remove_stripe_based_wavelet_fft(data[i, :, :])
 
     print("Saving...")
@@ -453,3 +235,76 @@ def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6
     print("Loading...")
     data, header = nrrd.read(nrrd_file)
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
+
+
+def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
+                            scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128), use_mem_map: bool = False,
+                            remove_stripes: bool = False, original_volume_orientation: str = "RSP") -> None:
+    """
+    Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
+    auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
+
+    :param auto_fluo_file: The path to the auto-fluorescence hdf5 file.
+    :type auto_fluo_file: str
+    :param vascular_file: The path to the vascular hdf5 file.
+    :type vascular_file: str
+    :param zarr_file: The path to the zarr file to save the volume to.
+    :type zarr_file: str
+    :param template_path: The path to the template to align the annotations to.
+    :type template_path: str
+    :param scales: The physical resolution of the volume per axis.
+    :type scales: tuple
+    :param chunks: The chunk size to use for the volume.
+    :type chunks: tuple
+    :param use_mem_map: Whether to use a memory map for the hdf5 files.
+    :type use_mem_map: bool
+    :param remove_stripes: Whether to remove stripes from the volume.
+    :type remove_stripes: bool
+    :param original_volume_orientation: The original orientation of the volume.
+    :type original_volume_orientation: str
+    """
+    temp_dir = tempfile.TemporaryDirectory()
+    resolution_level = 2
+
+    pbar = tqdm(total=5, desc="Creating zarr volume")
+    pbar.set_postfix({"step": "Loading data from hdf5 files"})
+    # Extract data from the hdf5 files
+    auto_fluo = load_hdf5(auto_fluo_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/647nm.dat")
+    vascular = load_hdf5(vascular_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/555nm.dat")
+
+    # Merge the data along a new fourth dimension at index 0
+    volume = np.stack((auto_fluo, vascular), axis=0)
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Saving volume to zarr file"})
+    # Save the volume to a zarr file
+    save_zarr(volume, zarr_file, scales=scales, chunks=chunks, remove_stripes=remove_stripes)
+    pbar.update(1)
+
+    # Delete the volume to free up memory
+    del volume
+
+    pbar.set_postfix({"step": "Creating and writing mask to zarr file"})
+    # Create the mask
+    create_and_write_mask(zarr_file, scales=scales, chunks=chunks, resolution_level=resolution_level)
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Aligning annotations to volume"})
+    # Align the annotations to the volume
+
+    nodes = load_zarr(zarr_file)
+    target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
+    mask = load_zarr_image_from_node(nodes[2], resolution_level)
+    template = ants.image_read(template_path)
+
+    atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, resolution=25,
+                                        keep_intermediary=False, data_dir=temp_dir.name)
+
+    save_atlas_to_zarr(zarr_file, atlas, scales=scales, chunks=chunks, resolution_level=resolution_level,
+                       orientation=original_volume_orientation)
+    temp_dir.cleanup()
+    pbar.update(1)
+
+    pbar.set_postfix({"step": "Done"})
+    pbar.update(1)
+    pbar.close()
