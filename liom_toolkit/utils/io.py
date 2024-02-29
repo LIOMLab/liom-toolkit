@@ -254,25 +254,20 @@ def generate_label_color_dict_allen() -> list[dict]:
     :rtype: list[dict]
     """
     temp_dir = tempfile.TemporaryDirectory()
-    atlas = download_allen_atlas(temp_dir.name, 25)
-    atlas = atlas.numpy()
 
     # Grab the structure tree instance
     mcc = MouseConnectivityCache()
     structure_tree = mcc.get_structure_tree()
 
-    # Get a list of structures inside the slice
-    structure_id_list = np.unique(atlas.ravel()).tolist()
-    structure_id_list.remove(0)  # Remove the background
-    structures = structure_tree.get_structures_by_id(structure_id_list)
-
-    # Generate a color dictionary for the input atlas image
-    color_dict = []
-    for structure_id, structure in zip(structure_id_list, structures):
-        if structure is None:
-            continue
-        color = structure['rgb_triplet']
+    # Get the colour map of the structure tree
+    colour_map = structure_tree.get_colormap()
+    # Append alpha channel to the colours
+    for structure_id, color in colour_map.items():
         color.append(255)
+
+    # Generate a color dictionary according to the OME-NGFF specification
+    color_dict = []
+    for structure_id, color in colour_map.items():
         color_dict.append({"label-value": structure_id, "rgba": color})
 
     temp_dir.cleanup()
