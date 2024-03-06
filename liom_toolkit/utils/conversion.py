@@ -238,6 +238,42 @@ def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
+def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file: str, temp_dir: str | None,
+                             scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
+                             use_mem_map: bool = False, remove_stripes: bool = False) -> None:
+    """
+    Create a multichannel zarr file from the auto-fluorescence and vascular data.
+
+    :param auto_fluo_file: The path to the auto-fluorescence hdf5 file.
+    :type auto_fluo_file: str
+    :param vascular_file: The path to the vascular hdf5 file.
+    :type vascular_file: str
+    :param zarr_file: The path to the zarr file to save the volume to.
+    :type zarr_file: str
+    :param temp_dir: The temporary directory to save the memmap files to.
+    :type temp_dir: str
+    :param scales: The physical resolution of the volume per axis.
+    :type scales: tuple
+    :param chunks: The chunk size to use for the volume.
+    :type chunks: tuple
+    :param use_mem_map: Whether to use a memory map for the hdf5 files.
+    :type use_mem_map: bool
+    :param remove_stripes: Whether to remove stripes from the volume.
+    :type remove_stripes: bool
+    :return:
+    """
+    # Extract data from the hdf5 files
+    auto_fluo = load_hdf5(auto_fluo_file, use_mem_map=use_mem_map, map_file=f"{temp_dir}/647nm.dat")
+    vascular = load_hdf5(vascular_file, use_mem_map=use_mem_map, map_file=f"{temp_dir}/555nm.dat")
+
+    # Merge the data along a new fourth dimension at index 0
+    volume = np.stack((auto_fluo, vascular), axis=0)
+
+    # Save the volume to a zarr file
+    save_zarr(volume, zarr_file, scales=scales, chunks=chunks, remove_stripes=remove_stripes)
+    del auto_fluo, vascular, volume
+
+
 def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
                             scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128), use_mem_map: bool = False,
                             remove_stripes: bool = False, original_volume_orientation: str = "RSP") -> None:
@@ -267,23 +303,11 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
 
-    pbar = tqdm(total=6, desc="Creating zarr volume")
-    pbar.set_postfix({"step": "Loading data from hdf5 files"})
-    # Extract data from the hdf5 files
-    auto_fluo = load_hdf5(auto_fluo_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/647nm.dat")
-    vascular = load_hdf5(vascular_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/555nm.dat")
-
-    # Merge the data along a new fourth dimension at index 0
-    volume = np.stack((auto_fluo, vascular), axis=0)
+    pbar = tqdm(total=5, desc="Creating zarr volume")
+    pbar.set_postfix({"step": "Creating multichannel zarr"})
+    create_multichannel_zarr(auto_fluo_file, vascular_file, zarr_file, temp_dir.name, scales=scales, chunks=chunks,
+                             use_mem_map=use_mem_map, remove_stripes=remove_stripes)
     pbar.update(1)
-
-    pbar.set_postfix({"step": "Saving volume to zarr file"})
-    # Save the volume to a zarr file
-    save_zarr(volume, zarr_file, scales=scales, chunks=chunks, remove_stripes=remove_stripes)
-    pbar.update(1)
-
-    # Delete the volume to free up memory
-    del volume
 
     pbar.set_postfix({"step": "Creating temporary mask"})
     # Load image for image information
