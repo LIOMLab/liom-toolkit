@@ -14,7 +14,6 @@ from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_labels
 from skimage.transform import resize
 
-from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
 
 
@@ -240,7 +239,7 @@ def generate_label_color_dict_mask() -> list[dict]:
         },
         {
             "label-value": 1,
-            "rgba": [255, 255, 255, 64]
+            "rgba": [255, 255, 255, 255]
         }
     ]
     return label_colors
