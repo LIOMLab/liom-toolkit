@@ -23,12 +23,12 @@ def load_zarr(zarr_file: str) -> list[Node]:
 
     :param zarr_file: The zarr file to load.
     :type zarr_file: str
-    :return: The ANTs image.
-    :rtype: ants.ANTsImage
+    :return: The loaded zarr file.
+    :rtype: list[Node]
     """
     reader = Reader(parse_url(zarr_file))
-    image_node = list(reader())
-    return image_node
+    nodes = list(reader())
+    return nodes
 
 
 def load_zarr_image_from_node(node: Node, resolution_level: int = 1,
