@@ -208,7 +208,7 @@ def save_label_to_zarr(label: np.ndarray, zarr_file: str, color_dict: list[dict]
     write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
                  coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
                  chunks=chunks, scaler=CustomScaler(order=0, anti_aliasing=False, downscale=2, method="nearest",
-                                                    input_layer=resolution_level),
+                                                    input_layer=resolution_level, original_image=zarr_file),
                  name=name, label_metadata=label_metadata)
 
 
@@ -298,13 +298,16 @@ class CustomScaler(Scaler):
     to_down_scale: np.ndarray
     to_up_scale: np.ndarray
     do_upscale: bool = True
+    original_image: str | None
+    current_scale: int = None
 
     def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest",
-                 input_layer: int = 0, max_layer: int = 4):
+                 input_layer: int = 0, max_layer: int = 4, original_image: str | None = None):
         super().__init__(downscale=downscale, method=method, max_layer=max_layer)
         self.order = order
         self.anti_aliasing = anti_aliasing
         self.input_layer = input_layer
+        self.original_image = original_image
 
     def nearest(self, base: np.ndarray) -> list[np.ndarray]:
         """
@@ -350,8 +353,19 @@ class CustomScaler(Scaler):
             _resize = resize
 
         if self.do_upscale:
-            output_shape = plane.shape[0] * self.downscale, plane.shape[1] * self.downscale, plane.shape[
+            shape = plane.shape[0] * self.downscale, plane.shape[1] * self.downscale, plane.shape[
                 2] * self.downscale
+            if self.original_image is not None:
+                nodes = load_zarr(self.original_image)
+                image_node = nodes[0]
+                image = image_node.data[self.current_scale]
+                shape = image.shape
+                del image
+                del image_node
+                del nodes
+                if len(shape) == 4:
+                    shape = shape[1:]
+            output_shape = shape
         else:
             output_shape = plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[
                 2] // self.downscale
@@ -389,6 +403,7 @@ class CustomScaler(Scaler):
         scales = self.to_up_scale
         if scales.size > 0:
             for scale in np.flip(scales):
+                self.current_scale = scale
                 stack_to_scale = rv[scale + 1]
                 rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
 
