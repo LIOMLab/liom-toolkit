@@ -10,11 +10,12 @@ import pywt
 import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from liom_toolkit.registration import align_annotations_to_volume
-from liom_toolkit.utils import create_and_write_mask, load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
-    CustomScaler, create_transformation_dict, generate_axes_dict
+from liom_toolkit.utils import load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
+    CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
+    generate_label_color_dict_mask
 
 
 def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: int = 1, order: int = 8,
@@ -266,7 +267,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
 
-    pbar = tqdm(total=5, desc="Creating zarr volume")
+    pbar = tqdm(total=6, desc="Creating zarr volume")
     pbar.set_postfix({"step": "Loading data from hdf5 files"})
     # Extract data from the hdf5 files
     auto_fluo = load_hdf5(auto_fluo_file, use_mem_map=use_mem_map, map_file=f"{temp_dir.name}/647nm.dat")
@@ -284,14 +285,23 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     # Delete the volume to free up memory
     del volume
 
-    pbar.set_postfix({"step": "Creating and writing mask to zarr file"})
-    # Create the mask
-    create_and_write_mask(zarr_file, scales=scales, chunks=chunks, resolution_level=resolution_level)
+    pbar.set_postfix({"step": "Creating temporary mask"})
+    # Load image for image information
+    nodes = load_zarr(zarr_file)
+    target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
+    # Create the temporary mask
+    mask = create_mask_from_zarr(zarr_file, resolution_level)
+    # mask = mask.astype("int8")
+    # mask = np.transpose(mask, (2, 1, 0))
+    mask = ants.from_numpy(mask)
+    mask.set_direction(target_image.direction)
+    mask.set_spacing(target_image.spacing)
+    mask.set_origin(target_image.origin)
+
     pbar.update(1)
 
     pbar.set_postfix({"step": "Aligning annotations to volume"})
     # Align the annotations to the volume
-
     nodes = load_zarr(zarr_file)
     target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
     mask = load_zarr_image_from_node(nodes[2], resolution_level)
@@ -304,6 +314,23 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
                        orientation=original_volume_orientation)
     temp_dir.cleanup()
     pbar.update(1)
+
+    # Creating final mask
+    pbar.set_postfix({"step": "Creating final mask"})
+    nodes = load_zarr(zarr_file)
+    atlas_node = nodes[3]
+    atlas = load_zarr_image_from_node(atlas_node, resolution_level)
+
+    # Set all non-zero pixels of the atlas to 1
+    new_mask = atlas.numpy()
+    new_mask[new_mask > 0] = 1
+
+    # Save to zarr
+    new_mask = np.transpose(new_mask, (2, 1, 0))
+    new_mask = new_mask.astype("int8")
+    color_dict = generate_label_color_dict_mask()
+    save_label_to_zarr(new_mask, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
+                       name="mask", resolution_level=resolution_level)
 
     pbar.set_postfix({"step": "Done"})
     pbar.update(1)

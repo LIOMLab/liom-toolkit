@@ -14,7 +14,7 @@ from skimage.measure import label
 from skimage.measure._regionprops import RegionProperties
 from skimage.morphology import skeletonize
 from skimage.util import img_as_ubyte, img_as_uint
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 PIL.Image.MAX_IMAGE_PIXELS = None
 
