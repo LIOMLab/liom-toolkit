@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import ants
 from tqdm.auto import tqdm
@@ -8,7 +9,8 @@ from .utils import construct_reference_space_cache, download_allen_template, \
 
 
 def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage,
-                               rigid_type: str = 'Rigid', deformable_type: str = 'SyN', interpolator: str = 'linear',
+                               rigid_type: str = 'Similarity', deformable_type: str = 'SyN',
+                               interpolator: str = 'linear',
                                rigid_interpolator: str = 'linear') -> (
         ants.ANTsImage, dict, dict):
     """
@@ -42,7 +44,7 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | Non
 
 
 def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                            rigid_type: str = 'Rigid', interpolator: str = 'linear') -> (ants.ANTsImage, dict):
+                            rigid_type: str = 'Similarity', interpolator: str = 'linear') -> (ants.ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
 
@@ -267,3 +269,27 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     pbar.set_description("Done")
     pbar.close()
     return atlas_transformed
+
+
+def align_volume_to_allen(image: ants.ANTsImage, mask: ants.ANTsImage | None, resolution: int = 25) -> ants.ANTsImage:
+    """
+    Align a volume to the Allen template using the Allen template as a reference.
+
+    :param image: The image to align
+    :type image: ants.ANTsImage
+    :param mask: The mask to use in registration
+    :type mask: ants.ANTsImage | None
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :return: The aligned image
+    :rtype: ants.ANTsImage
+    """
+    temp_folder = tempfile.TemporaryDirectory()
+    # Get the Allen template
+    template = download_allen_template(temp_folder.name, resolution=resolution, keep_nrrd=False)
+
+    # Align the image to the Allen template
+    aligned_image, _ = deformably_register_volume(image, mask, template)
+
+    temp_folder.cleanup()
+    return aligned_image
