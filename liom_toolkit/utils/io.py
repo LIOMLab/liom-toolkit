@@ -23,12 +23,12 @@ def load_zarr(zarr_file: str) -> list[Node]:
 
     :param zarr_file: The zarr file to load.
     :type zarr_file: str
-    :return: The ANTs image.
-    :rtype: ants.ANTsImage
+    :return: The loaded zarr file.
+    :rtype: list[Node]
     """
     reader = Reader(parse_url(zarr_file))
-    image_node = list(reader())
-    return image_node
+    nodes = list(reader())
+    return nodes
 
 
 def load_zarr_image_from_node(node: Node, resolution_level: int = 1,
@@ -504,3 +504,24 @@ def generate_axes_dict(dimensions: int) -> list:
     if dimensions == 4:
         axes.insert(0, {"name": "c", "type": "channel"})
     return axes
+
+
+def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
+    """
+    Load a node by name from a zarr file. Returns None if the node is not found.
+
+    :param nodes: The nodes to search through.
+    :type nodes: list[Node]
+    :param name: The name of the node to load.
+    :type name: str
+    :return: The loaded node.
+    :rtype: Node | None
+    """
+    for node in nodes:
+        # Check for empy dict
+        if node.metadata == {}:
+            continue
+
+        if node.metadata["name"] == name:
+            return node
+    return None

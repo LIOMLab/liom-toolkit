@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 from liom_toolkit.registration import align_annotations_to_volume
 from liom_toolkit.utils import load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
-    generate_label_color_dict_mask
+    generate_label_color_dict_mask, load_node_by_name
 
 
 def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: int = 1, order: int = 8,
@@ -291,8 +291,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
     # Create the temporary mask
     mask = create_mask_from_zarr(zarr_file, resolution_level)
-    # mask = mask.astype("int8")
-    # mask = np.transpose(mask, (2, 1, 0))
+    mask = mask.astype("uint32")
     mask = ants.from_numpy(mask)
     mask.set_direction(target_image.direction)
     mask.set_spacing(target_image.spacing)
@@ -304,7 +303,6 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     # Align the annotations to the volume
     nodes = load_zarr(zarr_file)
     target_image = load_zarr_image_from_node(nodes[0], resolution_level, channel=0)
-    mask = load_zarr_image_from_node(nodes[2], resolution_level)
     template = ants.image_read(template_path)
 
     atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, resolution=25,
@@ -318,7 +316,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     # Creating final mask
     pbar.set_postfix({"step": "Creating final mask"})
     nodes = load_zarr(zarr_file)
-    atlas_node = nodes[3]
+    atlas_node = load_node_by_name(nodes, "atlas")
     atlas = load_zarr_image_from_node(atlas_node, resolution_level)
 
     # Set all non-zero pixels of the atlas to 1
@@ -331,6 +329,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     color_dict = generate_label_color_dict_mask()
     save_label_to_zarr(new_mask, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
                        name="mask", resolution_level=resolution_level)
+    pbar.update(1)
 
     pbar.set_postfix({"step": "Done"})
     pbar.update(1)

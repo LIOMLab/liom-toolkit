@@ -9,7 +9,7 @@ from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import load_zarr_image_from_node, load_zarr
+from liom_toolkit.utils import load_zarr_image_from_node, load_zarr, load_node_by_name
 from .utils import download_allen_template
 from ..segmentation import segment_3d_brain
 
@@ -250,7 +250,7 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
         zarr_file = file
         nodes = load_zarr(zarr_file)
         image_node = nodes[0]
-        mask_node = nodes[2]
+        mask_node = load_node_by_name(nodes, "mask")
 
         brain_volume, mask = load_volume_for_registration(image_node, mask_node, resolution_level, flipped=False)
         brain_volumes.append(brain_volume)
