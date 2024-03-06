@@ -98,18 +98,20 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    # Download resolution is 10 micron to fix wrong region labels
+    download_resolution = 10
 
     # Temporary filename
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
 
     # Downloading the annotation (if not already downloaded)
     if rsc is None:
-        rsc = construct_reference_space_cache(resolution=10)
+        rsc = construct_reference_space_cache(resolution=download_resolution)
     vol, metadata = rsc.get_annotation_volume(str(nrrd_file))
 
     # Convert to ants image
-    ants_image = convert_allen_nrrd_to_ants(vol, resolution / 1000)
-    if resolution != 10:
+    ants_image = convert_allen_nrrd_to_ants(vol, download_resolution / 1000)
+    if resolution != download_resolution:
         ants_image = ants.resample_image(ants_image, (resolution / 1000, resolution / 1000, resolution / 1000),
                                          interp_type=1)
 
