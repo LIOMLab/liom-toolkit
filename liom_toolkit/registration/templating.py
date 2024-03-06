@@ -6,7 +6,7 @@ import ants.utils as utils
 import numpy as np
 from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def create_template(images: list, masks: list, brain_names: list, atlas_volume: ants.ANTsImage,

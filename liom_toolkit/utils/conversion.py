@@ -10,7 +10,7 @@ import pywt
 import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from liom_toolkit.registration import align_annotations_to_volume
 from liom_toolkit.utils import create_and_write_mask, load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
