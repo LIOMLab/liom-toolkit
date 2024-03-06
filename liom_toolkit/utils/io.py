@@ -504,3 +504,24 @@ def generate_axes_dict(dimensions: int) -> list:
     if dimensions == 4:
         axes.insert(0, {"name": "c", "type": "channel"})
     return axes
+
+
+def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
+    """
+    Load a node by name from a zarr file. Returns None if the node is not found.
+
+    :param nodes: The nodes to search through.
+    :type nodes: list[Node]
+    :param name: The name of the node to load.
+    :type name: str
+    :return: The loaded node.
+    :rtype: Node | None
+    """
+    for node in nodes:
+        # Check for empy dict
+        if node.metadata == {}:
+            continue
+
+        if node.metadata["name"] == name:
+            return node
+    return None

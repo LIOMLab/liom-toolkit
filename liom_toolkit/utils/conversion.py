@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 from liom_toolkit.registration import align_annotations_to_volume
 from liom_toolkit.utils import load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
-    generate_label_color_dict_mask
+    generate_label_color_dict_mask, load_node_by_name
 
 
 def remove_stripe_based_wavelet_fft(image: np.ndarray, level: int = 5, sigma: int = 1, order: int = 8,
@@ -318,7 +318,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     # Creating final mask
     pbar.set_postfix({"step": "Creating final mask"})
     nodes = load_zarr(zarr_file)
-    atlas_node = nodes[3]
+    atlas_node = load_node_by_name(nodes, "atlas")
     atlas = load_zarr_image_from_node(atlas_node, resolution_level)
 
     # Set all non-zero pixels of the atlas to 1
