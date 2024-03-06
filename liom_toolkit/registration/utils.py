@@ -104,11 +104,14 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
 
     # Downloading the annotation (if not already downloaded)
     if rsc is None:
-        rsc = construct_reference_space_cache(resolution=resolution)
+        rsc = construct_reference_space_cache(resolution=10)
     vol, metadata = rsc.get_annotation_volume(str(nrrd_file))
 
     # Convert to ants image
     ants_image = convert_allen_nrrd_to_ants(vol, resolution / 1000)
+    if resolution != 10:
+        ants_image = ants.resample_image(ants_image, (resolution / 1000, resolution / 1000, resolution / 1000),
+                                         interp_type=1)
 
     # Remove nrrd file if unwanted
     if not keep_nrrd:
