@@ -98,8 +98,8 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage | None, temp
     """
     image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
                                             type_of_transform=registration_type)
-    image_reg = ants.apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
-    mask_reg = ants.apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
+    image_reg = apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
+    mask_reg = apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
     if save_pre_reg:
         if not os.path.exists("pre_registered"):
             os.makedirs("pre_registered")
@@ -272,8 +272,8 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
                                    init_with_template=init_with_template, pre_registration_type="Rigid")
     if register_to_template:
         template_transform = ants.registration(fixed=template_volume, moving=template, type_of_transform="SyN")
-        template = ants.apply_transforms(fixed=template_volume, moving=template,
-                                         transformlist=template_transform["fwdtransforms"])
+        template = apply_transforms(fixed=template_volume, moving=template,
+                                    transformlist=template_transform["fwdtransforms"])
     # Mask template to remove noise
     template_mask = segment_3d_brain(template)
     new_template = template * template_mask
