@@ -160,12 +160,12 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     if keep_intermediary:
         ants.image_write(region_mask, f"{data_dir}/region_{str(region_id)}_mask.nii")
 
+    region_moving = ants.image_clone(region_mask, pixeltype="double")
+    image_fixed = ants.image_clone(registration_volume, pixeltype="double")
     # Apply transforms from structure mask to final image
-    region_mask_transformed = apply_transforms(fixed=template, moving=region_mask,
-                                               transformlist=syn_transform_allen['fwdtransforms'],
-                                               interpolator='genericLabel')
-    region_mask_transformed = apply_transforms(fixed=registration_volume, moving=region_mask_transformed,
-                                               transformlist=syn_transform_image['invtransforms'],
+    region_mask_transformed = apply_transforms(fixed=image_fixed, moving=region_moving,
+                                               transformlist=[syn_transform_image['invtransforms'],
+                                                              syn_transform_allen['fwdtransforms']],
                                                interpolator='genericLabel')
     if keep_intermediary:
         ants.image_write(region_mask_transformed, f"{data_dir}/region_{str(region_id)}_mask_transformed.nii")
@@ -256,14 +256,11 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
         ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
     pbar.update(1)
 
-    atlas_transformed = apply_transforms(fixed=template, moving=atlas,
-                                         transformlist=syn_transform_allen['fwdtransforms'],
-                                         interpolator="genericLabel")
-    if keep_intermediary:
-        ants.image_write(atlas_transformed, f"{data_dir}/atlas_template.nii")
-
-    atlas_transformed = apply_transforms(fixed=target_volume, moving=atlas_transformed,
-                                         transformlist=syn_transform_image['invtransforms'],
+    atlas_moving = ants.image_clone(atlas, pixeltype="double")
+    image_fixed = ants.image_clone(target_volume, pixeltype="double")
+    atlas_transformed = apply_transforms(fixed=image_fixed, moving=atlas_moving,
+                                         transformlist=[syn_transform_image['invtransforms'],
+                                                        syn_transform_allen['fwdtransforms']],
                                          interpolator="genericLabel")
     if keep_intermediary:
         ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
