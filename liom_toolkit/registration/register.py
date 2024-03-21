@@ -226,12 +226,12 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
 
     # Get the allen template
     pbar.set_description("Downloading Allen template and annotations")
-    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False, rsc=rsc)
+    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=keep_intermediary, rsc=rsc)
     if keep_intermediary:
         ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
 
     # Get the annotations
-    atlas = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=False)
+    atlas = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=keep_intermediary)
     if keep_intermediary:
         ants.image_write(atlas, f"{data_dir}/atlas.nii")
     pbar.update(1)
