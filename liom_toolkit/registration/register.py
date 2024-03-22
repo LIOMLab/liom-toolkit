@@ -10,8 +10,8 @@ from .utils import construct_reference_space_cache, download_allen_template, \
 
 def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage,
                                rigid_type: str = 'Similarity', deformable_type: str = 'SyN',
-                               interpolator: str = 'linear',
-                               rigid_interpolator: str = 'linear') -> (
+                               interpolator: str = 'linear', rigid_interpolator: str = 'linear',
+                               use_composite: bool = True) -> (
         ants.ANTsImage, dict, dict):
     """
     Register an image to a template using a rigid registration followed by a deformable registration.
@@ -30,21 +30,30 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | Non
     :type interpolator: str
     :param rigid_interpolator: The interpolator to use for applying the rigid transform.
     :type rigid_interpolator: str
+    :param use_composite: Whether to create a composite transform or not
+    :type use_composite: bool
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
     :rtype: tuple[ants.ANTsImage, dict, dict]
     """
-    rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type, rigid_interpolator)
+    rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type=rigid_type,
+                                                     interpolator=rigid_interpolator, use_composite=use_composite)
+
+    if use_composite:
+        initial_transform = rigid_transform['fwdtransforms']
+    else:
+        initial_transform = rigid_transform['fwdtransforms'][0]
 
     syn_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=deformable_type,
-                                      initial_transform=rigid_transform['fwdtransforms'][0])
+                                      initial_transform=initial_transform, write_composite_transform=use_composite)
     syn = apply_transforms(fixed=template, moving=image,
                            transformlist=syn_transform['fwdtransforms'], interpolator=interpolator)
     return syn, syn_transform, rigid_transform
 
 
 def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                            rigid_type: str = 'Similarity', interpolator: str = 'linear') -> (ants.ANTsImage, dict):
+                            rigid_type: str = 'Similarity', interpolator: str = 'linear',
+                            use_composite: bool = True) -> (ants.ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
 
@@ -58,10 +67,13 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     :type rigid_type: str
     :param interpolator: The interpolator to use to apply the transform.
     :type interpolator: str
+    :param use_composite: Whether to create a composite transform or not
+    :type use_composite: bool
     :return: The registered image and the transform from the rigid registration
     :rtype: tuple[ants.ANTsImage, dict]
     """
-    rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type)
+    rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type,
+                                        write_composite_transform=use_composite)
     rigid = apply_transforms(fixed=template, moving=image,
                              transformlist=rigid_transform['fwdtransforms'],
                              interpolator=interpolator)
@@ -136,7 +148,8 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     syn_allen, syn_transform_allen, rigid_transform_allen = deformably_register_volume(template_allen, None,
                                                                                        template,
                                                                                        rigid_type=rigid_type,
-                                                                                       deformable_type=deformable_type)
+                                                                                       deformable_type=deformable_type,
+                                                                                       use_composite=True)
     if keep_intermediary:
         ants.image_write(syn_allen, f"{data_dir}/syn_allen.nii")
     pbar.update(1)
@@ -146,7 +159,8 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     syn_image, syn_transform_image, rigid_transform_image = deformably_register_volume(registration_volume, mask,
                                                                                        template,
                                                                                        rigid_type=rigid_type,
-                                                                                       deformable_type=deformable_type)
+                                                                                       deformable_type=deformable_type,
+                                                                                       use_composite=True)
     if keep_intermediary:
         ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
     pbar.update(1)
@@ -242,7 +256,8 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     syn_allen, syn_transform_allen, rigid_transform_allen = deformably_register_volume(template_allen, None,
                                                                                        template,
                                                                                        rigid_type=rigid_type,
-                                                                                       deformable_type=deformable_type)
+                                                                                       deformable_type=deformable_type,
+                                                                                       use_composite=True)
     if keep_intermediary:
         ants.image_write(syn_allen, f"{data_dir}/syn_allen.nii")
     pbar.update(1)
@@ -251,7 +266,8 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     syn_image, syn_transform_image, rigid_transform_image = deformably_register_volume(target_volume, mask,
                                                                                        template,
                                                                                        rigid_type=rigid_type,
-                                                                                       deformable_type=deformable_type)
+                                                                                       deformable_type=deformable_type,
+                                                                                       use_composite=True)
     if keep_intermediary:
         ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
     pbar.update(1)
