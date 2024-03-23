@@ -5,7 +5,6 @@ import ants
 import nrrd
 import numpy as np
 import zarr
-from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from dask import array as da
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
@@ -14,6 +13,7 @@ from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_labels
 from skimage.transform import resize
 
+from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
 
 
@@ -254,20 +254,13 @@ def generate_label_color_dict_allen() -> list[dict]:
     """
     temp_dir = tempfile.TemporaryDirectory()
 
-    # Grab the structure tree instance
-    mcc = MouseConnectivityCache()
-    structure_tree = mcc.get_structure_tree()
-
-    # Get the colour map of the structure tree
-    colour_map = structure_tree.get_colormap()
-    # Append alpha channel to the colours
-    for structure_id, color in colour_map.items():
-        color.append(255)
+    annotation, meta = download_allen_atlas(temp_dir.name, resolution=25, keep_nrrd=False)
 
     # Generate a color dictionary according to the OME-NGFF specification
     color_dict = []
-    for structure_id, color in colour_map.items():
-        color_dict.append({"label-value": structure_id, "rgba": color})
+    for row in meta.iterrows():
+        color_dict.append({"label-value": row[1]['IDX'],
+                           "rgba": [row[1]['-R-'], row[1]['-G-'], row[1]['-B-'], (int(row[1]['-A-'] * 255))]})
 
     temp_dir.cleanup()
     return color_dict
