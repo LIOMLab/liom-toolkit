@@ -282,9 +282,10 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
         ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
     pbar.update(1)
 
+    atlas_transformed_int = ants.image_clone(atlas_transformed, pixeltype="unsigned int")
     pbar.set_description("Done")
     pbar.close()
-    return atlas_transformed
+    return atlas_transformed_int
 
 
 def align_volume_to_allen(image: ants.ANTsImage, mask: ants.ANTsImage | None, resolution: int = 25) -> ants.ANTsImage:

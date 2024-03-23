@@ -3,6 +3,8 @@ import os
 import ants
 import ants.core.ants_image as iio
 import numpy as np
+import pandas as pd
+from allensdk.core.reference_space import ReferenceSpace
 from allensdk.core.reference_space_cache import ReferenceSpaceCache
 from ants import utils
 
@@ -29,12 +31,15 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ants.AN
     return volume
 
 
-def construct_reference_space_cache(resolution: int = 25) -> ReferenceSpaceCache:
+def construct_reference_space_cache(resolution: int = 25,
+                                    reference_space_key: str = "annotation/ccf_2017") -> ReferenceSpaceCache:
     """
     Construct a reference space cache for the Allen brain atlas. Will use the 2017 adult version of the atlas.
 
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
+    :param reference_space_key: The reference space key to use.
+    :type reference_space_key: str
     :return: The reference space cache.
     :rtype: ReferenceSpaceCache
     """
@@ -42,9 +47,37 @@ def construct_reference_space_cache(resolution: int = 25) -> ReferenceSpaceCache
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
     # Construct the reference space cache
-    rsc = ReferenceSpaceCache(resolution=resolution, reference_space_key="annotation/ccf_2017")
+    rsc = ReferenceSpaceCache(resolution=resolution, reference_space_key=reference_space_key)
 
     return rsc
+
+
+def construct_reference_space(data_dir: str, resolution: int = 25,
+                              reference_space_key: str = "annotation/ccf_2017") -> ReferenceSpace:
+    """
+    Construct a reference space for the Allen brain atlas. Will use the 2017 adult version of the atlas.
+
+    :param data_dir: The directory where the atlas and structure tree are saved.
+    :type data_dir: str
+    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
+    :type resolution: int
+    :param reference_space_key: The reference space key to use.
+    :type reference_space_key: str
+    :return: The reference space.
+    :rtype: ReferenceSpace
+    """
+    # Check the resolution
+    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+
+    # Construct the reference space cache
+    rsc = construct_reference_space_cache(resolution=resolution, reference_space_key=reference_space_key)
+
+    # Construct the reference space
+    annotation, meta = rsc.get_annotation_volume(f"{data_dir}/allen_atlas_{resolution}.nrrd")
+    structure_tree = rsc.get_structure_tree(f"{data_dir}/structure_tree_{resolution}.json")
+    rs = ReferenceSpace(resolution=resolution, annotation=annotation, structure_tree=structure_tree)
+
+    return rs
 
 
 def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool = False,
@@ -83,8 +116,8 @@ def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool
     return ants_image
 
 
-def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = False,
-                         rsc: ReferenceSpaceCache = None) -> ants.ANTsImage:
+def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = False) -> (
+        ants.ANTsImage, pd.DataFrame):
     """
     Download the allen mouse brain atlas and reorient it to RAS+.
 
@@ -97,7 +130,7 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     :param rsc: The reference space cache to use. If None, a new one will be constructed.
     :param rsc: ReferenceSpaceCache
     :return: The atlas as an ants image.
-    :rtype: ants.ANTsImage
+    :rtype:(ants.ANTsImage, pd.DataFrame)
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
     # Download resolution is 10 micron to fix wrong region labels
@@ -105,10 +138,9 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     # Temporary filename
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
 
-    # Downloading the annotation (if not already downloaded)
-    if rsc is None:
-        rsc = construct_reference_space_cache(resolution=resolution)
-    vol, metadata = rsc.get_annotation_volume(str(nrrd_file))
+    # Downloading the atlas
+    rs = construct_reference_space(data_dir, resolution=resolution)
+    vol, metadata = rs.export_itksnap_labels()
 
     # Convert to ants image
     ants_image = convert_allen_nrrd_to_ants(vol, resolution / 1000)
@@ -117,7 +149,7 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     if not keep_nrrd:
         os.remove(nrrd_file)
 
-    return ants_image
+    return ants_image, metadata
 
 
 def apply_transforms(fixed, moving, transformlist,
