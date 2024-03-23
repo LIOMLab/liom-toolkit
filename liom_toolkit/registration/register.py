@@ -245,7 +245,7 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
         ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
 
     # Get the annotations
-    atlas = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=keep_intermediary)
+    atlas, meta = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=keep_intermediary)
     if keep_intermediary:
         ants.image_write(atlas, f"{data_dir}/atlas.nii")
     pbar.update(1)
