@@ -4,8 +4,9 @@ import tempfile
 import ants
 from tqdm.auto import tqdm
 
-from .utils import construct_reference_space_cache, download_allen_template, \
-    convert_allen_nrrd_to_ants, download_allen_atlas, apply_transforms
+from .utils import download_allen_template, \
+    convert_allen_nrrd_to_ants, download_allen_atlas, apply_transforms, construct_reference_space, \
+    construct_reference_space_cache
 
 
 def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage,
@@ -128,15 +129,11 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
         registration_volume = target_volume
 
     # Construct the reference space cache
-    rsc = construct_reference_space_cache(resolution=resolution)
+    rs = construct_reference_space(data_dir=data_dir, resolution=resolution)
 
     # Get the allen template
     pbar.set_description("Downloading Allen template")
-    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False, rsc=rsc)
-
-    # Get the id of the region
-    structure_tree = rsc.get_structure_tree(f"{data_dir}/structure_tree_safe_2017.csv")
-    region_id = structure_tree.get_structures_by_name([region])[0]['id']
+    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False)
 
     if keep_intermediary:
         ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
@@ -166,11 +163,12 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     pbar.update(1)
 
     # Get the structure mask from the Allen atlas
-    pbar.set_description("Getting structure mask")
-    region_mask, structure_mask_metadata = rsc.get_structure_mask(region_id,
-                                                                  file_name=f"{data_dir}/region_{str(region_id)}.nrrd",
-                                                                  annotation_file_name=f"{data_dir}/annotations.nrrd")
+    structure_tree = rs.structure_tree
+    region_id = structure_tree.get_structures_by_name([region])[0]['id']
+    region_mask = rs.make_structure_mask([region_id])
     region_mask = convert_allen_nrrd_to_ants(region_mask, resolution / 1000)
+
+    pbar.set_description("Getting structure mask")
     if keep_intermediary:
         ants.image_write(region_mask, f"{data_dir}/region_{str(region_id)}_mask.nii")
 
