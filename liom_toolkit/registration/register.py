@@ -123,11 +123,11 @@ def get_transformations_for_atlas(image: ants.ANTsImage, mask: ants.ANTsImage, t
     return syn_transform_image, syn_transform_allen
 
 
-def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                                 region: str, data_dir: str, resolution: int = 25,
-                                 registration_volume: ants.ANTsImage = None, rigid_type: str = 'Similarity',
-                                 deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
-                                 syn_allen: dict = None) -> ants.ANTsImage:
+def align_brain_region_to_atlas(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+                                region: str, data_dir: str, resolution: int = 25,
+                                registration_volume: ants.ANTsImage = None, rigid_type: str = 'Similarity',
+                                deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
+                                syn_allen: dict = None) -> ants.ANTsImage:
     """
     Mask an image with a brain region. Assumes all images are in RAS+ orientation.
 
@@ -155,7 +155,7 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     :type syn_image: dict
     :param syn_allen: The syn transform for the Allen template. If None, it will be calculated.
     :type syn_allen: dict
-    :return: The masked image.
+    :return: The brain region mask aligned to the target volume.
     :rtype: ants.ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
@@ -164,8 +164,9 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     target_volume = ants.reorient_image2(target_volume, orientation='RAS')
     mask = ants.reorient_image2(mask, orientation='RAS')
     template = ants.reorient_image2(template, orientation='RAS')
+    registration_volume = ants.reorient_image2(registration_volume, orientation='RAS')
 
-    pbar = tqdm(total=4, desc="Masking image", leave=True, unit="step", position=0)
+    pbar = tqdm(total=3, desc="Aligning region mask", leave=True, unit="step", position=0)
 
     # Create the data directory if it does not exist
     if not os.path.exists(data_dir):
@@ -180,7 +181,7 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
 
     # Get the allen template
     pbar.set_description("Downloading Allen template")
-    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=False)
+    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=keep_intermediary)
 
     if keep_intermediary:
         ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
@@ -221,16 +222,9 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
         ants.image_write(region_mask_transformed, f"{data_dir}/region_{str(region_id)}_mask_transformed.nii")
     pbar.update(1)
 
-    # Mask the image
-    pbar.set_description("Masking image")
-    masked_image = target_volume * region_mask_transformed
-    if keep_intermediary:
-        ants.image_write(masked_image, f"{data_dir}/masked_image.nii")
-    pbar.update(1)
-
     pbar.set_description("Done")
     pbar.close()
-    return masked_image
+    return region_mask_transformed
 
 
 def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
