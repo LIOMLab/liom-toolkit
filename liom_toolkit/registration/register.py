@@ -5,7 +5,7 @@ import ants
 from tqdm.auto import tqdm
 
 from .utils import download_allen_template, \
-    convert_allen_nrrd_to_ants, download_allen_atlas, apply_transforms, construct_reference_space, \
+    convert_allen_nrrd_to_ants, download_allen_atlas, construct_reference_space, \
     construct_reference_space_cache
 
 
@@ -47,8 +47,8 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | Non
 
     syn_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=deformable_type,
                                       initial_transform=initial_transform, write_composite_transform=use_composite)
-    syn = apply_transforms(fixed=template, moving=image,
-                           transformlist=syn_transform['fwdtransforms'], interpolator=interpolator)
+    syn = ants.apply_transforms(fixed=template, moving=image,
+                                transformlist=syn_transform['fwdtransforms'], interpolator=interpolator)
     return syn, syn_transform, rigid_transform
 
 
@@ -75,9 +75,9 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     """
     rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type,
                                         write_composite_transform=use_composite)
-    rigid = apply_transforms(fixed=template, moving=image,
-                             transformlist=rigid_transform['fwdtransforms'],
-                             interpolator=interpolator)
+    rigid = ants.apply_transforms(fixed=template, moving=image,
+                                  transformlist=rigid_transform['fwdtransforms'],
+                                  interpolator=interpolator)
     return rigid, rigid_transform
 
 
@@ -213,10 +213,10 @@ def mask_image_with_brain_region(target_volume: ants.ANTsImage, mask: ants.ANTsI
     region_moving = ants.image_clone(region_mask, pixeltype="double")
     image_fixed = ants.image_clone(registration_volume, pixeltype="double")
     # Apply transforms from structure mask to final image
-    region_mask_transformed = apply_transforms(fixed=image_fixed, moving=region_moving,
-                                               transformlist=[syn_transform_image['invtransforms'],
-                                                              syn_transform_allen['fwdtransforms']],
-                                               interpolator='genericLabel')
+    region_mask_transformed = ants.apply_transforms(fixed=image_fixed, moving=region_moving,
+                                                    transformlist=[syn_transform_image['invtransforms'],
+                                                                   syn_transform_allen['fwdtransforms']],
+                                                    interpolator='genericLabel')
     if keep_intermediary:
         ants.image_write(region_mask_transformed, f"{data_dir}/region_{str(region_id)}_mask_transformed.nii")
     pbar.update(1)
@@ -307,10 +307,10 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
 
     atlas_moving = ants.image_clone(atlas, pixeltype="double")
     image_fixed = ants.image_clone(target_volume, pixeltype="double")
-    atlas_transformed = apply_transforms(fixed=image_fixed, moving=atlas_moving,
-                                         transformlist=[syn_transform_image['invtransforms'],
-                                                        syn_transform_allen['fwdtransforms']],
-                                         interpolator="genericLabel")
+    atlas_transformed = ants.apply_transforms(fixed=image_fixed, moving=atlas_moving,
+                                              transformlist=[syn_transform_image['invtransforms'],
+                                                             syn_transform_allen['fwdtransforms']],
+                                              interpolator="genericLabel")
     if keep_intermediary:
         ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
     pbar.update(1)
