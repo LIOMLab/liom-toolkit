@@ -5,18 +5,31 @@ import numpy as np
 from skimage.io import imread
 
 from .cldice import cl_dice
+from .model import VsegModel
 from .predict_one import predict_one
 from .utils import calculate_metrics
 
 
-def show_diff(mask, prediction, output_path, id, acq) -> None:
+def show_diff(mask: np.ndarray, prediction: np.ndarray, output_path: str, id: str, acq: str) -> None:
     """
-       - Black: TN
-       - Red: FP
-       - Blue: FN
-       - White: TP
-    """
+    Show the difference between the mask and the prediction.
+    - Black: TN
+    - Red: FP
+    - Blue: FN
+    - White: TP
 
+    :param mask: The mask
+    :type mask: np.ndarray
+    :param prediction: The prediction
+    :type prediction: np.ndarray
+    :param output_path: The output path
+    :type output_path: str
+    :param id: The id of the image
+    :type id: str
+    :param acq: The acquisition of the image
+    :type acq: str
+    :return: None
+    """
     mask = mask > 0.5
     prediction = prediction > 0.5
 
@@ -28,8 +41,20 @@ def show_diff(mask, prediction, output_path, id, acq) -> None:
     plt.imsave(f"{output_path}/{acq}_{id}_comparison.png", rgb)
 
 
-def validate_model(model, img_list, save_path, device):
-    # img_list: list of image paths to validate. The mask has to be in the same folder
+def validate_model(model: VsegModel, img_list: list[np.ndarray], save_path: str, device: str) -> None:
+    """
+    Validate a model on a list of images.
+
+    :param model: The model to validate
+    :type model: VsegModel
+    :param img_list: list of image paths to validate. The mask has to be in the same folder
+    :type img_list: list[np.ndarray]
+    :param save_path: The path to save the results
+    :type save_path: str
+    :param device: The device to use for prediction
+    :type device: str
+    :return: None
+    """
     f1 = []
     recall = []
     accuracy = []
