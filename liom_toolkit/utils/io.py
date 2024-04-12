@@ -1,3 +1,4 @@
+import os
 import tempfile
 from typing import Callable, Union
 
@@ -11,10 +12,13 @@ from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
 from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_labels
+from skimage.io import imsave
 from skimage.transform import resize
+from tqdm import tqdm
 
 from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
+from .utils import convert_to_png_for_saving
 
 
 def load_zarr(zarr_file: str) -> list[Node]:
@@ -518,3 +522,20 @@ def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
         if node.metadata["name"] == name:
             return node
     return None
+
+
+def extract_zarr_to_png(zarr_file: str, target_dir: str) -> None:
+    node = load_zarr(zarr_file)[0]
+    volume = node.data[0]
+
+    # Create if not exists, empty if exists
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+    else:
+        for file in os.listdir(target_dir):
+            os.remove(os.path.join(target_dir, file))
+
+    for z in tqdm(range(volume.shape[0])):
+        image = volume[z, :, :]
+        image = convert_to_png_for_saving(image)
+        imsave(f"{target_dir}/{str(z)}.png", image, check_contrast=False)
