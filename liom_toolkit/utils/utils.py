@@ -22,3 +22,10 @@ def clean_dir(directory: str) -> None:
     """
     if os.path.exists(directory + '.DS_Store'):
         os.remove(directory + '.DS_Store')
+
+
+def convert_to_png_for_saving(img: np.ndarray) -> np.ndarray:
+    normalized_image = (img - np.min(img)) * (
+            255.0 / (np.max(img) - np.min(img)))
+    normalized_image = normalized_image.astype('uint8')
+    return normalized_image
