@@ -17,15 +17,25 @@ pip install liom-toolkit
 
 The package requires the following packages to be installed and will attempt to install them using installation:
 
-- antspyx
-- allensdk
+- antspyx 
+- tqdm
 - scikit-image
 - ome-zarr
 - nibabel
 - zarr
 - h5py
 - pynrrd
+- PyWavelets
 - SimpleITK
+- allensdk
+- dask
+- opencv-python
+- torch
+- torchvision
+- wandb
+- patchify
+- natsort
+- albumentations
 
 To create an anaconda environment with all the required packages, run the following commands:
 
