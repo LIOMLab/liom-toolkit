@@ -4,6 +4,10 @@ import wandb
 
 
 class ConvBlock(nn.Module):
+    """
+    Convolutional block for the U-Net architecture
+    """
+
     def __init__(self, in_c, out_c):
         super().__init__()
 
@@ -15,7 +19,15 @@ class ConvBlock(nn.Module):
 
         self.relu = nn.ReLU()
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the convolutional block
+
+        :param inputs: The input tensor
+        :type inputs: torch.Tensor
+        :return: The output tensor
+        :rtype: torch.Tensor
+        """
         x = self.conv1(inputs)
         x = self.bn1(x)
         x = self.relu(x)
@@ -27,13 +39,25 @@ class ConvBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
+    """
+    Encoder block for the U-Net architecture
+    """
+
     def __init__(self, in_c, out_c):
         super().__init__()
 
         self.conv = ConvBlock(in_c, out_c)
         self.pool = nn.MaxPool2d((2, 2))
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> (torch.Tensor, torch.Tensor):
+        """
+        Forward pass of the encoder block
+
+        :param inputs: The input tensor
+        :type inputs: torch.Tensor
+        :return: The output tensor
+        :rtype: torch.Tensor
+        """
         x = self.conv(inputs)
         p = self.pool(x)
 
@@ -41,13 +65,27 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+    """
+    Decoder block for the U-Net architecture
+    """
+
     def __init__(self, in_c, out_c):
         super().__init__()
 
         self.up = nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2, padding=0)
         self.conv = ConvBlock(out_c + out_c, out_c)
 
-    def forward(self, inputs, skip):
+    def forward(self, inputs: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the decoder block
+
+        :param inputs: The input tensor
+        :type inputs: torch.Tensor
+        :param skip: The skip tensor
+        :type skip: torch.Tensor
+        :return: The output tensor
+        :rtype: torch.Tensor
+        """
         x = self.up(inputs)
         x = torch.cat([x, skip], axis=1)
         x = self.conv(x)
@@ -56,6 +94,10 @@ class DecoderBlock(nn.Module):
 
 
 class VsegModel(nn.Module):
+    """
+    U-Net model for vessel segmentation
+    """
+
     def __init__(self, pretrained: bool = False, device: torch.device = torch.device('cpu')):
         super().__init__()
 
@@ -88,7 +130,15 @@ class VsegModel(nn.Module):
             self.load_state_dict(state)
             self.to(device)
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the U-Net model
+
+        :param inputs: The input tensor
+        :type inputs: torch.Tensor
+        :return: The output tensor
+        :rtype: torch.Tensor
+        """
         s1, p1 = self.e1(inputs)
         s2, p2 = self.e2(p1)
         s3, p3 = self.e3(p2)

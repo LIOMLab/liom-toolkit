@@ -1,10 +1,33 @@
 import shutil
 
+from .model import VsegModel
 from .utils import *
 
 
-def predict_one(model, img_path, save_path, stride=256, width=256, norm=True, dev="cuda", patching=True):
-    """ Hyperparameters """
+def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
+                dev: str = "cuda", patching: bool = True) -> np.ndarray:
+    """
+    Predict one image
+
+    :param model: The model to use for prediction
+    :type model: VsegModel
+    :param img_path: The path to the image to predict
+    :type img_path: str
+    :param save_path: The path to save the results
+    :type save_path: str
+    :param stride: The stride of the patches
+    :type stride: int
+    :param width: The width of the patches
+    :type width: int
+    :param norm: Normalize the images
+    :type norm: bool
+    :param dev: The device to use for prediction
+    :type dev: str
+    :param patching: Whether to use patching
+    :type patching: bool
+    :return: The predicted image
+    :rtype: np.ndarray
+    """
     if patching:
         H = width
         W = width
@@ -91,7 +114,6 @@ def predict_one(model, img_path, save_path, stride=256, width=256, norm=True, de
     inference = np.floor(inference)
     inference = (inference / inference.max() * 255).astype(np.uint8)
     inference = inference.astype(bool)
-    # inference = remove_small_objects(inference)
     inference = inference.astype(np.uint8) * 255
 
     save_inf = f"{save_path}/{image_id}_segmented.png"

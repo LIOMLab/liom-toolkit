@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
-from .utils import convert_to_png_for_saving
+from liom_toolkit.visualization import convert_to_png_for_saving
 
 
 def load_zarr(zarr_file: str) -> list[Node]:

@@ -1,3 +1,4 @@
+import torch.nn
 import wandb
 from skimage.color import label2rgb
 from torch.utils.data import DataLoader
@@ -8,7 +9,24 @@ from .model import VsegModel
 from .utils import *
 
 
-def train(model, loader, optimizer, loss_fn, device):
+def train(model: VsegModel, loader: DataLoader, optimizer: torch.optim.Optimizer, loss_fn: torch.nn.Module,
+          device: torch.device) -> (float, torch.Tensor, torch.Tensor, torch.Tensor):
+    """
+    Train the model for an epoch
+
+    :param model: The model to train
+    :type model: VsegModel
+    :param loader: The data loader
+    :type loader: torch.utils.data.DataLoader
+    :param optimizer: The optimizer
+    :type optimizer: torch.optim.Optimizer
+    :param loss_fn: The loss function
+    :type loss_fn: torch.nn.Module
+    :param device: The device to use for training
+    :type device: torch.device
+    :return: The loss, the true labels, the predicted labels, and the input
+    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor)
+    """
     # Initialize epoch loss to 0
     epoch_loss = 0.0
 
@@ -31,7 +49,22 @@ def train(model, loader, optimizer, loss_fn, device):
     return epoch_loss, y, y_pred, x
 
 
-def evaluate(model, loader, loss_fn, device):
+def evaluate(model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, device: torch.device) -> (
+        float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float):
+    """
+    Evaluate the model for an epoch
+
+    :param model: The model to evaluate
+    :type model: VsegModel
+    :param loader: The data loader
+    :type loader: torch.utils.data.DataLoader
+    :param loss_fn: The loss function
+    :type loss_fn: torch.nn.Module
+    :param device: The device to use for evaluation
+    :type device: torch.device
+    :return: The loss, the true labels, the predicted labels, the input, and the metrics
+    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float)
+    """
     # Initialize epoch loss to 0
     # Added metrics
     epoch_loss = 0.0
@@ -71,7 +104,21 @@ def evaluate(model, loader, loss_fn, device):
     return epoch_loss, y, y_pred, x, f1, accuracy, jaccard, recall
 
 
-def create_images(x, y, pred, num_images=4):
+def create_images(x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_images: int = 4) -> list[np.ndarray]:
+    """
+    Create images for visualization
+
+    :param x: The input tensor
+    :type x: torch.Tensor
+    :param y: The true labels
+    :type y: torch.Tensor
+    :param pred: The predicted labels
+    :type pred: torch.Tensor
+    :param num_images: The number of images to create
+    :type num_images: int
+    :return: The images
+    :rtype: List[np.ndarray]
+    """
     y_mask = y.cpu().detach().numpy()
     pred_mask = pred.cpu().detach().numpy()
     x = x.cpu().detach().numpy()
@@ -114,8 +161,25 @@ def mask_image(x, y_mask, pred_mask, i):
     return img
 
 
-def train_model(dataset_dir="data/patches", dev="cuda", output_train="data/training", learning_rate=0.003673,
-                batch_size=35, epochs=62, config=None):
+def train_model(dataset_dir: str = "data/patches", dev: str = "cuda", output_train: str = "data/training",
+                learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62) -> None:
+    """
+    Train the vessel segmentation model
+
+    :param dataset_dir: The directory of the dataset
+    :type dataset_dir: str
+    :param dev: The device to use for training
+    :type dev: str
+    :param output_train: The output directory for the training
+    :type output_train: str
+    :param learning_rate: The learning rate for the optimizer
+    :type learning_rate: float
+    :param batch_size: The batch size for training
+    :type batch_size: int
+    :param epochs: The number of epochs to train
+    :type epochs: int
+    :return: None
+    """
     # Setup training parameters and wandb run
     hyperparameter_defaults = dict(
         batch_size=batch_size,
@@ -238,11 +302,9 @@ def train_model(dataset_dir="data/patches", dev="cuda", output_train="data/train
 
 if __name__ == "__main__":
     # Hardcoded for wandb sweeps
-    # dataset_dir = "/Users/frans/docker_data/confocal/vseg/patches"
-    # output = "/Users/frans/docker_data/confocal/vseg/training"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset_dir = "/home/frans/code/vseg/data/patches"
-    output = "/home/frans/code/vseg/data/training"
+    dataset_dir = "vseg/data/patches"
+    output = "vseg/data/training"
 
     train_model(dataset_dir=dataset_dir,
                 dev=device,

@@ -2,33 +2,35 @@ import numpy as np
 from skimage.morphology import skeletonize, skeletonize_3d
 
 
-def cl_score(v, s):
-    """[this function computes the skeleton volume overlap]
-
-    Args:
-        v ([bool]): [image]
-        s ([bool]): [skeleton]
-
-    Returns:
-        [float]: [computed skeleton volume intersection]
+def cl_score(image: np.ndarray, skeleton: np.ndarray) -> float:
     """
-    return np.sum(v * s) / np.sum(s)
+    Compute the skeleton volume intersection
 
-
-def cl_dice(v_p, v_l):
-    """[this function computes the cldice metric]
-
-    Args:
-        v_p ([bool]): [predicted image]
-        v_l ([bool]): [ground truth image]
-
-    Returns:
-        [float]: [cldice metric]
+    :param image: image
+    :type image: np.ndarray
+    :param skeleton: skeleton
+    :type skeleton: np.ndarray
+    :return: computed skeleton volume intersection
+    :rtype: float
     """
-    if len(v_p.shape) == 2:
-        tprec = cl_score(v_p, skeletonize(v_l))
-        tsens = cl_score(v_l, skeletonize(v_p))
-    elif len(v_p.shape) == 3:
-        tprec = cl_score(v_p, skeletonize_3d(v_l))
-        tsens = cl_score(v_l, skeletonize_3d(v_p))
+    return np.sum(image * skeleton) / np.sum(skeleton)
+
+
+def cl_dice(image_predicted: np.ndarray, image_truth: np.ndarray) -> float:
+    """
+    Compute the CLDice metric
+
+    :param image_predicted: predicted image
+    :type image_predicted: np.ndarray
+    :param image_truth: ground truth image
+    :type image_truth: np.ndarray
+    :return: CLDice metric
+    :rtype: float
+    """
+    if len(image_predicted.shape) == 2:
+        tprec = cl_score(image_predicted, skeletonize(image_truth))
+        tsens = cl_score(image_truth, skeletonize(image_predicted))
+    elif len(image_predicted.shape) == 3:
+        tprec = cl_score(image_predicted, skeletonize_3d(image_truth))
+        tsens = cl_score(image_truth, skeletonize_3d(image_predicted))
     return 2 * tprec * tsens / (tprec + tsens)

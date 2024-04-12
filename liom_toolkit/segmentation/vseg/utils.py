@@ -1,6 +1,7 @@
 import os
 import random
 from glob import glob
+from typing import Any
 
 import matplotlib.pyplot as plt
 import natsort
@@ -9,6 +10,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from albumentations import HorizontalFlip, VerticalFlip, Rotate
+from numpy import ndarray, dtype
 from patchify import patchify
 from skimage.color import gray2rgb
 from skimage.exposure import equalize_adapthist
@@ -17,8 +19,19 @@ from skimage.transform import resize
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
 from tqdm.auto import tqdm
 
+Image.MAX_IMAGE_PIXELS = None
 
-def matplotlib_imshow(img, one_channel=False):
+
+def matplotlib_imshow(img: torch.Tensor, one_channel: bool = False) -> None:
+    """
+    Visualize an image using matplotlib
+
+    :param img: The image to visualize
+    :type img: torch.Tensor
+    :param one_channel: Whether the image has one channel
+    :type one_channel: bool
+    :return: None
+    """
     if one_channel:
         img = img.mean(dim=0)
     img = img / 2 + 0.5  # unnormalize
@@ -29,8 +42,14 @@ def matplotlib_imshow(img, one_channel=False):
         plt.imshow(np.transpose(npimg, (1, 2, 0)))
 
 
-## Create a seed for reproducibility 
-def seeding(seed):
+def seeding(seed: int) -> None:
+    """
+    Set seed for reproducibility
+
+    :param seed: The seed to set
+    :type seed: int
+    :return: None
+    """
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
@@ -39,23 +58,46 @@ def seeding(seed):
     torch.backends.cudnn.deterministic = True
 
 
-## Creates a directory if it does not exist yet
-def create_dir(path):
+def create_dir(path: str) -> None:
+    """
+    Create a directory if it does not exist yet
+
+    :param path: The path to create
+    :type path: str
+    :return: None
+    """
     if not os.path.exists(path):
         os.makedirs(path)
 
 
-## Calculates time elapsed between start_time and end_time
-def epoch_time(start_time, end_time):
+def epoch_time(start_time: float, end_time: float) -> tuple[int, int]:
+    """
+    Calculate the elapsed time between start and end time
+
+    :param start_time: The start time
+    :type start_time: float
+    :param end_time: The end time
+    :type end_time: float
+    :return: The elapsed time in minutes and seconds
+    :rtype: tuple[int, int]
+    """
     elapsed_time = end_time - start_time
     elapsed_mins = int(elapsed_time / 60)
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
 
 
-## Calculates relevant metrics between an instance of ground truth and prediction
-## Metrics are F1, Recall, Precision, Accuracy, Jaccard
-def calculate_metrics(y_true, y_pred):
+def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
+    """
+    Calculate metrics between ground truth and prediction. Metrics are F1, Recall, Precision, Accuracy, and Jaccard.
+
+    :param y_true: Ground truth
+    :type y_true: np.ndarray
+    :param y_pred: Prediction
+    :type y_pred: np.ndarray
+    :return: List of metrics
+    :rtype: list[float]
+    """
     y_true = y_true > 0.5
     y_true = y_true.astype(np.uint8)
     y_true = y_true.reshape(-1)
@@ -73,8 +115,17 @@ def calculate_metrics(y_true, y_pred):
     return [score_f1, score_recall, score_acc, score_jaccard, score_precision]
 
 
-# Process an image to present to U-net model
-def process_image(image, device):
+def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
+    """
+    Process an image to present to U-net model
+
+    :param image: The image to process
+    :type image: np.ndarray
+    :param device: The device to use
+    :type device: torch.device
+    :return: The processed image
+    :rtype: torch.Tensor
+    """
     x = np.expand_dims(image, axis=0)
     x = np.expand_dims(x, axis=0)
     x = x.astype(np.float32)
@@ -85,7 +136,19 @@ def process_image(image, device):
 
 # Sort a list of filenames by numerical order
 # This is used to order the patches as they are names 0_0_png, 1_0_png 2_0_png ... (instead of 0, 1, 10, 11 ...)
-def numeric_filesort(path, folder="images", extension='png'):
+def numeric_filesort(path: str, folder: str = "images", extension: str = 'png') -> list[str]:
+    """
+    Sort a list of filenames by numerical order
+
+    :param path: The path to the folder
+    :type path: str
+    :param folder: The folder to sort
+    :type folder: str
+    :param extension: The extension of the files
+    :type extension: str
+    :return: The sorted list of filenames
+    :rtype: list[str]
+    """
     test = sorted(glob(f'{path}/{folder}/*{extension}'))
     test = natsort.natsorted(test, reverse=False)
 
@@ -93,7 +156,26 @@ def numeric_filesort(path, folder="images", extension='png'):
 
 
 # Add a inferred patch to empty array
-def add_patch_to_empty_array(inference, pred_y, coords, stride, overlap, size, npatches):
+def add_patch_to_empty_array(inference: np.ndarray, pred_y: np.ndarray, coords: tuple[int, int], stride: int,
+                             overlap: int, size: tuple[int, int]) -> np.ndarray:
+    """
+    Add a inferred patch to empty array
+
+    :param inference: The empty array to add the patch to
+    :type inference: np.ndarray
+    :param pred_y: The predicted patch
+    :type pred_y: np.ndarray
+    :param coords: The coordinates of the patch
+    :type coords: tuple[int, int]
+    :param stride: The stride of the patch
+    :type stride: int
+    :param overlap: The overlap of the patch
+    :type overlap: int
+    :param size: The size of the patch
+    :type size: tuple[int, int]
+    :return: The array with the patch added
+    :rtype: np.ndarray
+    """
     H = size[0]
     W = size[1]
 
@@ -143,13 +225,22 @@ def add_patch_to_empty_array(inference, pred_y, coords, stride, overlap, size, n
             inference[rectangle[0]:rectangle[1], rectangle[2]:rectangle[3]] = inference[rectangle[0]:rectangle[1],
                                                                               rectangle[2]:rectangle[3]] / 2
 
-    return (inference)
+    return inference
 
 
-Image.MAX_IMAGE_PIXELS = None
+def crop_image(image: np.ndarray, size: tuple[int, int], stride: int) -> np.ndarray:
+    """
+    Crop an image to a specific size and stride
 
-
-def crop_image(image, size, stride):
+    :param image: The image to crop
+    :type image: np.ndarray
+    :param size: The size to crop to
+    :type size: tuple[int, int]
+    :param stride: The stride to crop with
+    :type stride: int
+    :return: The cropped image
+    :rtype: np.ndarray
+    """
     to_remove_x = (image.shape[1] - size[0]) % stride
     to_remove_left_x = np.floor(to_remove_x / 2).astype(int)
     to_remove_right_x = np.ceil(to_remove_x / 2).astype(int)
@@ -162,7 +253,22 @@ def crop_image(image, size, stride):
             to_remove_left_x:image.shape[1] - to_remove_right_x])
 
 
-def create_patches(image_path, size=(256, 256), stride=64, norm=False):
+def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: int = 64, norm: bool = False) -> tuple[
+    list[Any], tuple[int, ...], tuple[int, ...], ndarray[Any, dtype[Any]] | Any]:
+    """
+    Create patches from an image
+
+    :param image_path: The path to the image
+    :type image_path: str
+    :param size: The size of the patches
+    :type size: tuple[int, int]
+    :param stride: The stride of the patches
+    :type stride: int
+    :param norm: Normalize the patches
+    :type norm: bool
+    :return: The patches, the shape of the image, the shape of the patches, and the image
+    :rtype: tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray]
+    """
     patches = []
 
     image = imread(image_path, as_gray=True)
@@ -182,8 +288,36 @@ def create_patches(image_path, size=(256, 256), stride=64, norm=False):
     return patches, image.shape, patch.shape, image_clahe
 
 
-def patch(image_path, save_path, norm, size=(256, 256), stride=64, augment=True, threshold=5, save_image=True,
-          mask_path='0', use_mask=True, remove_background_tiles=False):
+def patch(image_path: str, save_path: str, norm: bool, size: tuple[int, int] = (256, 256), stride: int = 64,
+          augment: bool = True, threshold: int = 5, save_image: bool = True, use_mask: bool = True,
+          remove_background_tiles: bool = False) -> tuple[tuple[int, ...], tuple[int, ...], Any, Any] | tuple[
+    tuple[int, ...], tuple[int, ...], Any]:
+    """
+    Patch an image
+
+    :param image_path: The path to the image
+    :type image_path: str
+    :param save_path: The path to save the patches
+    :type save_path: str
+    :param norm: Normalize the image
+    :type norm: bool
+    :param size: The size of the patches
+    :type size: tuple[int, int]
+    :param stride: The stride of the patches
+    :type stride: int
+    :param augment: Augment the patches
+    :type augment: bool
+    :param threshold: The threshold for removing background tiles
+    :type threshold: int
+    :param save_image: Save the image
+    :type save_image: bool
+    :param use_mask: Use a mask
+    :type use_mask: bool
+    :param remove_background_tiles: Remove background tiles
+    :type remove_background_tiles: bool
+    :return: The shape of the image, the shape of the patches, and the image
+    :rtype: tuple[tuple[int, int], tuple[int, int], np.ndarray]
+    """
     image_name = image_path.split('/')
     image_name = image_name[len(image_name) - 1]
     image_name = image_name.replace('.png', '')
