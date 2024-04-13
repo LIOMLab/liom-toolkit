@@ -4,21 +4,11 @@ liom\_toolkit.visualization package
 Submodules
 ----------
 
-liom\_toolkit.visualization.slice\_extraction module
-----------------------------------------------------
+.. toctree::
+   :maxdepth: 4
 
-.. automodule:: liom_toolkit.visualization.slice_extraction
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-liom\_toolkit.visualization.utils module
-----------------------------------------
-
-.. automodule:: liom_toolkit.visualization.utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   liom_toolkit.visualization.slice_extraction
+   liom_toolkit.visualization.utils
 
 Module contents
 ---------------
