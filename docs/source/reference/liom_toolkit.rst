@@ -10,6 +10,7 @@ Subpackages
    liom_toolkit.registration
    liom_toolkit.segmentation
    liom_toolkit.utils
+   liom_toolkit.visualization
 
 Module contents
 ---------------

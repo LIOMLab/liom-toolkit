@@ -1,6 +1,14 @@
 liom\_toolkit.segmentation package
 ==================================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   liom_toolkit.segmentation.vseg
+
 Submodules
 ----------
 
