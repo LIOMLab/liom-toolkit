@@ -14,7 +14,7 @@ from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_labels
 from skimage.io import imsave
 from skimage.transform import resize
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
@@ -525,6 +525,15 @@ def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
 
 
 def extract_zarr_to_png(zarr_file: str, target_dir: str) -> None:
+    """
+    Extract a zarr file to a directory of PNG images.
+
+    :param zarr_file: The zarr file to extract.
+    :type zarr_file: str
+    :param target_dir: The directory to save the PNG images to.
+    :type target_dir: str
+    :return: None
+    """
     node = load_zarr(zarr_file)[0]
     volume = node.data[0]
 
