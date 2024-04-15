@@ -2,7 +2,7 @@ import numpy as np
 from skimage.io import imsave
 
 from liom_toolkit.utils import load_zarr, load_node_by_name, generate_label_color_dict_allen
-from utils import convert_to_png_for_saving
+from liom_toolkit.utils import convert_to_png_for_saving
 
 
 def extract_single_slice_from_zarr(zarr_file: str, z: int, channel: int = 0, resolution_level: int = 0) -> np.ndarray:
