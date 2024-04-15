@@ -13,7 +13,7 @@ from ome_zarr.writer import write_image
 from tqdm.auto import tqdm
 
 from liom_toolkit.registration import align_annotations_to_volume
-from liom_toolkit.utils import load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
+from .io import load_zarr, load_zarr_image_from_node, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
     generate_label_color_dict_mask, load_node_by_name
 
