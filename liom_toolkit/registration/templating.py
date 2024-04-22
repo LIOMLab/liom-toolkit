@@ -226,12 +226,19 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
     :type zarr_files: list
     :param brain_names: The list of brain names to use for saving the pre-registered images.
     :type brain_names: list
-    :param resolution_level:
-    :param template_resolution:
-    :param iterations:
-    :param init_with_template:
-    :param register_to_template:
-    :param flipped_brains:
+    :param resolution_level: The resolution level to load the images at.
+    :type resolution_level: int
+    :param template_resolution: The resolution of the template.
+    :type template_resolution: int
+    :param iterations: The number of iterations to use to create the template.
+    :type iterations: int
+    :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
+    :type init_with_template: bool
+    :param register_to_template: Whether to register the template to the atlas volume.
+    :type register_to_template: bool
+    :param flipped_brains: Whether to include flipped brains in the template.
+    :type flipped_brains: bool
+    :return: None
     """
     temp_folder = tempfile.TemporaryDirectory()
     resolution_mm = template_resolution / 1000

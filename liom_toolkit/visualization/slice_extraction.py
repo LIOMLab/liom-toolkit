@@ -1,8 +1,8 @@
 import numpy as np
 from skimage.io import imsave
 
-from liom_toolkit.utils import load_zarr, load_node_by_name, generate_label_color_dict_allen
 from liom_toolkit.utils import convert_to_png_for_saving
+from liom_toolkit.utils import load_zarr, load_node_by_name, generate_label_color_dict_allen
 
 
 def extract_single_slice_from_zarr(zarr_file: str, z: int, channel: int = 0, resolution_level: int = 0) -> np.ndarray:
@@ -54,7 +54,6 @@ def extract_and_save_slice_form_zarr(zarr_file: str, z: int, data_dir: str, chan
     image = extract_single_slice_from_zarr(zarr_file, z, channel, resolution_level)
     image = convert_to_png_for_saving(image)
     imsave(f"{data_dir}/{name}_C={channel}_Z={z}.png", image)
-
     return image
 
 
@@ -131,25 +130,25 @@ def extract_and_save_slices_form_zarr(zarr_file: str, start_z: int, num_slices: 
     return volume
 
 
-def colour_image(slice: np.ndarray, colour_dict: list):
+def colour_image(slice_image: np.ndarray, colour_dict: list):
     """
     Colour an image based on a colour dictionary
 
-    :param slice: The slice to colour
-    :type slice: np.ndarray
+    :param slice_image: The slice to colour
+    :type slice_image: np.ndarray
     :param colour_dict: The colour dictionary
     :type colour_dict: list
     :return: The coloured image
     :rtype: np.ndarray
     """
-    slice_png = np.zeros_like(slice, dtype='uint8')
+    slice_png = np.zeros_like(slice_image, dtype='uint8')
 
-    # Add 3th dimension of size 3 to png
+    # Add 3rd dimension of size 3 to png
     slice_png = np.repeat(slice_png[:, :, np.newaxis], 3, axis=2)
 
     # Apply colour dict to image
     for i in range(len(colour_dict)):
-        x, y = np.where(slice == colour_dict[i]['label-value'])
+        x, y = np.where(slice_image == colour_dict[i]['label-value'])
         slice_png[x, y, :] = colour_dict[i]['rgba'][0:3]
 
     return slice_png

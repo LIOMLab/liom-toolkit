@@ -286,8 +286,8 @@ class CustomScaler(Scaler):
     :type input_layer: int
     :param max_layer: The maximum layer to use for the transformation.
     :type max_layer: int
-    : param do_upscale: Whether to upscale the image or not. Only used internally.
-    : type do_upscale: bool
+    :param original_image: The original image to use for the transformation.
+    :type original_image: str | None
     """
     order: int
     anti_aliasing: bool
