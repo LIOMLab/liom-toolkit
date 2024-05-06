@@ -13,11 +13,18 @@ The package can be installed using pip:
 pip install liom-toolkit
 ```
 
+Due to the complicated requirements, a detailed installation guide is provided below.
+
+## Usage
+
+Demonstrations of some of the functionalities of the package can be found in the notebooks in the LIOM Notebooks repository.
+The repository can be found here: [LIOM Notebooks](https://github.com/LIOMLab/liom-notebooks)
+
 ## Requirements
 
 The package requires the following packages to be installed and will attempt to install them using installation:
 
-- antspyx 
+- antspyx
 - tqdm
 - scikit-image
 - ome-zarr
@@ -44,12 +51,32 @@ conda create -n <name>
 conda activate <name>
 conda install python=3.10
 
-# The line below is for Apple Silicon specifically. 
+# Install Pytorch at this point, follow the instructions on the Pytorch website:
+# https://pytorch.org/get-started/locally/
+# Make sure the right version is installed for your system. Check for CUDA compatibility.
+# For example, for Linux with a CUDA compatible GPU:
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+# For MacOS:
+conda install pytorch::pytorch torchvision torchaudio -c pytorch
+
+# The lines below are for Apple Silicon specifically. 
 # Hdf5 needs to be installed using homebrew.
-HDF5_DIR=/opt/homebrew/Cellar/hdf5/1.14.3 pip install tables
+# Tables is used by the allenSDK and requires hdf5 to be installed.
+# On apple silicon, HDF5 is not automatically installed by tables or detected on the system.
+brew install hdf5
+HDF5_DIR=/opt/homebrew/Cellar/hdf5/1.14.3_1 pip install tables
+
+# From now on pip will be used to install the packages. Some packages are not available on conda, or are out of date.
 pip install allensdk
 pip install antspyx
 pip install liom-toolkit
+
+# To build the documentation of the package
+pip install sphinx-rtd-theme
+pip install sphinxcontrib-apidoc
+
+# To run the LIOM Notebooks
+pip install jupyterlab
 ```
 
 ## Package Structure
@@ -63,7 +90,9 @@ registering mouse brains to the Allen Atlas as well as functions for creating br
 
 ### Segmentation
 
-The segmentation module is concerned with segmenting brain imagery. It contains scripts to segment vessels in 2d slices.
+The segmentation module is concerned with segmenting brain imagery. It contains methods for segmenting brain images into
+different regions of interest. The vseg submodule contains methods for segmenting vasculature using deep learning using
+a U-net architecture. The pretrained model is trained on LSFM data.
 
 ### Utils
 
