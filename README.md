@@ -76,7 +76,7 @@ pip install sphinx-rtd-theme
 pip install sphinxcontrib-apidoc
 
 # To run the LIOM Notebooks
-pip install jupyterlab
+pip install jupyter
 ```
 
 ## Package Structure

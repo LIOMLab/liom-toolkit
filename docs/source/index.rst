@@ -103,7 +103,7 @@ To create an anaconda environment with all the required packages, run the follow
     pip install sphinxcontrib-apidoc
 
     # To run the LIOM Notebooks
-    pip install jupyterlab
+    pip install jupyter
 
 
 Package Structure
