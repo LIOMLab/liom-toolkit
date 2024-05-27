@@ -193,8 +193,7 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
 
 
 def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
-                            scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128), use_mem_map: bool = False,
-                            remove_stripes: bool = False, original_volume_orientation: str = "RSP") -> None:
+                            scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)) -> None:
     """
     Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
     auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
@@ -211,12 +210,6 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     :type scales: tuple
     :param chunks: The chunk size to use for the volume.
     :type chunks: tuple
-    :param use_mem_map: Whether to use a memory map for the hdf5 files.
-    :type use_mem_map: bool
-    :param remove_stripes: Whether to remove stripes from the volume.
-    :type remove_stripes: bool
-    :param original_volume_orientation: The original orientation of the volume.
-    :type original_volume_orientation: str
     """
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
