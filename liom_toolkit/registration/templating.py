@@ -9,7 +9,7 @@ from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import load_zarr_image_from_node, load_zarr, load_node_by_name
+from liom_toolkit.utils import load_zarr, load_node_by_name, load_ants_image_from_node
 from .utils import download_allen_template
 from ..segmentation import segment_3d_brain
 
@@ -310,8 +310,8 @@ def load_volume_for_registration(image_node, mask_node, resolution_level, flippe
     :return: The loaded volume and mask.
     :rtype: tuple[ants.ANTsImage, ants.ANTsImage]
     """
-    brain_volume = load_zarr_image_from_node(image_node, resolution_level=resolution_level)
-    mask = load_zarr_image_from_node(mask_node, resolution_level=resolution_level)
+    brain_volume = load_ants_image_from_node(image_node, resolution_level=resolution_level, channel=0)
+    mask = load_ants_image_from_node(mask_node, resolution_level=resolution_level)
     brain_volume = brain_volume * mask
     if flipped:
         direction = brain_volume.direction
