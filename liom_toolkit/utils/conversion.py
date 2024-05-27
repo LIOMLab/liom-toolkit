@@ -78,7 +78,7 @@ def save_zarr(data: ArrayLike, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
-    if isinstance(data, da.array):
+    if isinstance(data, da.Array):
         scaler = Scaler()
     else:
         scaler = CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest", input_layer=0)
