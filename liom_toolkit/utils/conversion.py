@@ -21,14 +21,14 @@ from .io import load_zarr, save_atlas_to_zarr, \
     generate_label_color_dict_mask, load_node_by_name, load_ants_image_from_node, load_zarr_image_from_node
 
 
-def load_hdf5(hdf5_file: str) -> da.array:
+def load_hdf5(hdf5_file: str) -> da.Array:
     """
     Load the data from a HDF5 file. If use_mem_map is True, the data will be saved to a memmap file to save memory.
 
     :param hdf5_file: The HDF5 file to load.
     :type hdf5_file: str
     :return: The data from the HDF5 file.
-    :rtype: np.ndarray
+    :rtype: da.Array
     """
     f = h5py.File(hdf5_file, "r")
     keys = natsorted(list(f.keys()))
@@ -185,7 +185,7 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
     vascular = load_hdf5(vascular_file)
 
     # Merge the data along a new fourth dimension at index 0
-    volume = da.stack([auto_fluo, vascular], axis=0)
+    volume = da.stack([auto_fluo, vascular], axis=0).compute()
 
     # Save the volume to a zarr file
     save_zarr(volume, zarr_file, scales=scales, chunks=chunks)
