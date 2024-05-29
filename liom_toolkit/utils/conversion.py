@@ -36,6 +36,7 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     paths = [f"/{key}" for key in keys]
     data_list = [da.from_array(f[path], chunks=(128, 128)) for path in paths]
     data = da.stack(data_list, axis=0)
+    data = da.rechunk(data, chunks=(128, 128, 128))
 
     return data
 
