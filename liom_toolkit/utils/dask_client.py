@@ -32,3 +32,6 @@ class DaskClientManager:
         :return: The client
         """
         return Client(address)
+
+
+dask_client_manager = DaskClientManager()
