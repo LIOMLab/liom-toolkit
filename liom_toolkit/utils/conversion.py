@@ -16,7 +16,7 @@ from ome_zarr.writer import write_image, ArrayLike
 from tqdm.auto import tqdm
 
 from liom_toolkit.registration import align_annotations_to_volume
-from .dask_client import client
+from .dask_client import dask_client_manager
 from .io import load_zarr, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
     generate_label_color_dict_mask, load_node_by_name, load_ants_image_from_node, load_zarr_image_from_node
@@ -31,12 +31,20 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     :return: The data from the HDF5 file.
     :rtype: da.Array
     """
+    client = dask_client_manager.get_client()
+
     f = h5py.File(hdf5_file, "r")
     keys = natsorted(list(f.keys()))
     paths = [f"/{key}" for key in keys]
-    data_list = [da.from_array(f[path], chunks=(128, 128)) for path in paths]
-    data = da.stack(data_list, axis=0)
+    data_list = [client.submit(da.from_array, (f[path])) for path in paths]
+    loaded_data = [client.gather(data) for data in data_list]
+    data = da.stack(loaded_data, axis=0)
     data = da.rechunk(data, chunks=(128, 128, 128))
+    data = client.persist(data)
+
+    # Clean up
+    del data_list
+    del loaded_data
 
     return data
 
@@ -185,9 +193,6 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
     # Extract data from the hdf5 files
     auto_fluo = load_hdf5(auto_fluo_file)
     vascular = load_hdf5(vascular_file)
-
-    client.scatter(auto_fluo)
-    client.scatter(vascular)
 
     # Merge the data along a new fourth dimension at index 0
     volume = da.stack([auto_fluo, vascular], axis=0).compute()
