@@ -17,7 +17,7 @@ class DiceLoss(nn.Module):
 
         :param inputs: input tensor
         :type inputs: torch.Tensor
-        :param targets : target tensor
+        :param targets: target tensor
         :type targets: torch.Tensor
         :param smooth: smoothing factor
         :type smooth: int

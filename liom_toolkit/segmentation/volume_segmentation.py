@@ -6,7 +6,7 @@ from scipy.ndimage import binary_fill_holes
 from liom_toolkit.segmentation import remove_small_structures
 
 
-def segment_3d_brain(volume: ants.ANTsImage, k: int = 5, use_log: bool = True,
+def segment_3d_brain(volume: np.ndarray, k: int = 5, use_log: bool = True,
                      threshold_method: str = "otsu") -> np.ndarray:
     """
     Segment a 3D brain volume using a watershed algorithm.
@@ -23,10 +23,9 @@ def segment_3d_brain(volume: ants.ANTsImage, k: int = 5, use_log: bool = True,
     :return: The segmented mask
     :rtype: np.ndarray
     """
-    np_volume = volume.numpy()
-    vol_p = np.copy(np_volume)
+    vol_p = np.copy(volume)
     if use_log:
-        vol_p[np_volume > 0] = np.log(vol_p[np_volume > 0])
+        vol_p[volume > 0] = np.log(vol_p[volume > 0])
 
     # Creating a sitk image + smoothing
     img = sitk.GetImageFromArray(vol_p)

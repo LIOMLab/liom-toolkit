@@ -125,8 +125,6 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     :param resolution: int
     :param keep_nrrd: Whether to keep the nrrd file or not.
     :param keep_nrrd: bool
-    :param rsc: The reference space cache to use. If None, a new one will be constructed.
-    :param rsc: ReferenceSpaceCache
     :return: The atlas as an ants image.
     :rtype:(ants.ANTsImage, pd.DataFrame)
     """
