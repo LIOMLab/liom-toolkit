@@ -15,6 +15,7 @@ class DaskClientManager:
         return self.client
 
     def create_local_cluster(self):
+    def __create_local_cluster__(self):
         """
         Create a local cluster with the number of cores - 1
 
@@ -24,7 +25,7 @@ class DaskClientManager:
         cluster = LocalCluster(n_workers=cores, threads_per_worker=1)
         return cluster.get_client()
 
-    def connect_to_cluster(self, address):
+    def __connect_to_cluster__(self, address):
         """
         Connect to a cluster
 
