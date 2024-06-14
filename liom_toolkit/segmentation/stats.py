@@ -1,10 +1,13 @@
 import math
 import os
+import tempfile
 
 import PIL.Image
+import dask.array as da
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
+from dask.distributed import Future
 from scipy.ndimage import distance_transform_edt
 from skimage import measure
 from skimage.color import gray2rgb
@@ -15,6 +18,9 @@ from skimage.measure._regionprops import RegionProperties
 from skimage.morphology import skeletonize
 from skimage.util import img_as_ubyte, img_as_uint
 from tqdm.auto import tqdm
+
+from liom_toolkit.registration.utils import construct_reference_space
+from liom_toolkit.utils.dask_client import dask_client_manager
 
 PIL.Image.MAX_IMAGE_PIXELS = None
 
@@ -288,3 +294,88 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     heatmap = heatmap.astype(float)
     heatmap = heatmap / (square_size ** 2)
     imsave(output_dir + 'heatmap.tif', heatmap, check_contrast=False)
+
+
+def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
+    """
+    Generate a list of itk ids for a given region. Will reconstruct the structure tree and get the descendants
+    contained within the region
+
+    :param region: The region to get the ids for.
+    :type region: str
+    :param data_dir: The directory where the atlas and structure tree are saved. Optional.
+    :type data_dir: str
+    :return: The list of itk ids for the region and its descendants.
+    :rtype: list[int]
+    """
+    # Setup temporary directory if not given
+    if data_dir == "":
+        temp_dir = tempfile.TemporaryDirectory()
+        data_dir = temp_dir.name
+
+    # Construct reference space and get itk ids
+    rs = construct_reference_space(data_dir)
+    structure_tree = rs.structure_tree
+    _, labels = rs.export_itksnap_labels()
+
+    # Get the itk ids for the region
+    region = structure_tree.get_structures_by_name([region])
+    region_id = region[0]['id']
+    region_sub = structure_tree.descendant_ids([region_id])
+    region_sub_acronyms = [region['acronym'] for region in structure_tree.get_structures_by_id(region_sub[0])]
+    itk_ids = labels.loc[labels['LABEL'].isin(region_sub_acronyms)]['IDX'].values.tolist()
+
+    if data_dir == "":
+        temp_dir.cleanup()
+
+    return itk_ids
+
+
+def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.Array:
+    """
+    Create a filter image based on the region ids.
+
+    :param atlas: The atlas containing the region ids.
+    :type atlas: da.Array | Future
+    :param region_ids: The region ids to filter.
+    :type region_ids: list[int]
+    :return: The filter image.
+    :rtype: da.Array
+    """
+    client = dask_client_manager.get_client()
+    filter_image = client.submit(da.isin, atlas, region_ids)
+    filter_image = client.gather(filter_image)
+    return filter_image
+
+
+def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> da.Array:
+    """
+    Filter an image to a region based on a filter.
+
+    :param image_filter: The filter to apply.
+    :type image_filter: da.Array
+    :param data: The data to filter.
+    :type data: da.Array | Future
+    :return: The filtered image.
+    :rtype: da.Array
+    """
+    client = dask_client_manager.get_client()
+    filtered_image = client.submit(da.where, image_filter, data, 0)
+    filtered_image = client.gather(filtered_image)
+    return filtered_image
+
+
+def compute_mask_area(mask: da.Array | Future) -> np.uint64:
+    """
+    Compute the area of a mask. Sums the binary masks.
+
+    :param mask: The mask to compute the area of.
+    :type mask: da.Array | Future
+    :return: The area of the mask.
+    :rtype: np.uint64
+    """
+    client = dask_client_manager.get_client()
+    total_area = client.submit(da.sum, mask)
+    total_area = client.gather(total_area)
+    total_area = total_area.compute()
+    return total_area
