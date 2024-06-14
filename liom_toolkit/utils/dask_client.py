@@ -9,9 +9,9 @@ class DaskClientManager:
 
     def get_client(self, address=""):
         if self.client is None and address == "":
-            self.client = self.create_local_cluster()
+            self.__create_local_cluster__()
         elif self.client is None and address != "":
-            self.client = self.connect_to_cluster(address)
+            self.__connect_to_cluster__(address)
         return self.client
 
     def create_local_cluster(self):
