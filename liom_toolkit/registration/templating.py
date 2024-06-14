@@ -9,7 +9,7 @@ from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import load_zarr_image_from_node, load_zarr, load_node_by_name
+from liom_toolkit.utils import load_zarr, load_node_by_name, load_ants_image_from_node
 from .utils import download_allen_template
 from ..segmentation import segment_3d_brain
 
@@ -226,12 +226,19 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
     :type zarr_files: list
     :param brain_names: The list of brain names to use for saving the pre-registered images.
     :type brain_names: list
-    :param resolution_level:
-    :param template_resolution:
-    :param iterations:
-    :param init_with_template:
-    :param register_to_template:
-    :param flipped_brains:
+    :param resolution_level: The resolution level to load the images at.
+    :type resolution_level: int
+    :param template_resolution: The resolution of the template.
+    :type template_resolution: int
+    :param iterations: The number of iterations to use to create the template.
+    :type iterations: int
+    :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
+    :type init_with_template: bool
+    :param register_to_template: Whether to register the template to the atlas volume.
+    :type register_to_template: bool
+    :param flipped_brains: Whether to include flipped brains in the template.
+    :type flipped_brains: bool
+    :return: None
     """
     temp_folder = tempfile.TemporaryDirectory()
     resolution_mm = template_resolution / 1000
@@ -303,8 +310,8 @@ def load_volume_for_registration(image_node, mask_node, resolution_level, flippe
     :return: The loaded volume and mask.
     :rtype: tuple[ants.ANTsImage, ants.ANTsImage]
     """
-    brain_volume = load_zarr_image_from_node(image_node, resolution_level=resolution_level)
-    mask = load_zarr_image_from_node(mask_node, resolution_level=resolution_level)
+    brain_volume = load_ants_image_from_node(image_node, resolution_level=resolution_level, channel=0)
+    mask = load_ants_image_from_node(mask_node, resolution_level=resolution_level)
     brain_volume = brain_volume * mask
     if flipped:
         direction = brain_volume.direction
