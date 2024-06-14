@@ -21,9 +21,11 @@ class DaskClientManager:
 
         :return:
         """
+        if self.client is not None:
+            return
         cores = multiprocessing.cpu_count() - 1
         cluster = LocalCluster(n_workers=cores, threads_per_worker=1)
-        return cluster.get_client()
+        self.client = cluster.get_client()
 
     def __connect_to_cluster__(self, address):
         """
@@ -32,7 +34,9 @@ class DaskClientManager:
         :param address: The address of the cluster
         :return: The client
         """
-        return Client(address)
+        if self.client is not None:
+            return
+        self.client = Client(address)
 
 
 dask_client_manager = DaskClientManager()
