@@ -8,6 +8,14 @@ class DaskClientManager:
         self.client = None
 
     def get_client(self, address=""):
+        """
+        Get the client to a local cluster or a cluster. Implicitly sets the client when not yet initialized. Defaults to
+        local cluster, but will connect when given an address.
+
+        :param address: The address of the cluster
+        :type address: str
+        :return: The client
+        """
         if self.client is None and address == "":
             self.__create_local_cluster__()
         elif self.client is None and address != "":
@@ -29,8 +37,6 @@ class DaskClientManager:
     def __create_local_cluster__(self):
         """
         Create a local cluster with the number of cores - 1
-
-        :return:
         """
         if self.client is not None:
             return
@@ -43,11 +49,12 @@ class DaskClientManager:
         Connect to a cluster
 
         :param address: The address of the cluster
-        :return: The client
+        :type address: str
         """
         if self.client is not None:
             return
         self.client = Client(address)
 
 
+# Create a global Dask client manager. Can be interpreted as a singleton.
 dask_client_manager = DaskClientManager()
