@@ -14,7 +14,18 @@ class DaskClientManager:
             self.__connect_to_cluster__(address)
         return self.client
 
-    def create_local_cluster(self):
+    def set_client(self, address=""):
+        """
+        Set the client to a local cluster or a cluster. Explicit function.
+
+        :param address: The address of the cluster
+        :type address: str
+        """
+        if self.client is None and address == "":
+            self.__create_local_cluster__()
+        elif self.client is None and address != "":
+            self.__connect_to_cluster__(address)
+
     def __create_local_cluster__(self):
         """
         Create a local cluster with the number of cores - 1
