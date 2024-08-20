@@ -3,11 +3,12 @@ import os
 import ants
 import numpy as np
 import pandas as pd
+from ants.core.ants_image import ANTsImage
 from allensdk.core.reference_space import ReferenceSpace
 from allensdk.core.reference_space_cache import ReferenceSpaceCache
 
 
-def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ants.ANTsImage:
+def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsImage:
     """
     Convert a nrrd file form the Allen reference spaces to an ants image. The returned image will be in RAS+ orientation.
 
@@ -16,7 +17,7 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ants.AN
     :param resolution: The resolution of the nrrd file in millimeters.
     :type resolution: float
     :return: The converted image.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     # Set axis to RAS
     volume = np.moveaxis(volume, [0, 1, 2], [1, 2, 0])
@@ -79,7 +80,7 @@ def construct_reference_space(data_dir: str, resolution: int = 25,
 
 
 def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool = False,
-                            rsc: ReferenceSpaceCache = None) -> ants.ANTsImage:
+                            rsc: ReferenceSpaceCache = None) -> ANTsImage:
     """
     Download the allen mouse brain template in RAS+ orientation.
 
@@ -92,7 +93,7 @@ def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool
     :param rsc: The reference space cache to use. If None, a new one will be constructed.
     :type rsc: ReferenceSpaceCache
     :return: The template as an ants image.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     # Check the resolution
     assert int(resolution) in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
@@ -115,7 +116,7 @@ def download_allen_template(data_dir: str, resolution: int = 25, keep_nrrd: bool
 
 
 def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = False) -> (
-        ants.ANTsImage, pd.DataFrame):
+        ANTsImage, pd.DataFrame):
     """
     Download the allen mouse brain atlas and reorient it to RAS+.
 
@@ -126,7 +127,7 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
     :param keep_nrrd: Whether to keep the nrrd file or not.
     :param keep_nrrd: bool
     :return: The atlas as an ants image.
-    :rtype:(ants.ANTsImage, pd.DataFrame)
+    :rtype:(ANTsImage, pd.DataFrame)
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
     # Download resolution is 10 micron to fix wrong region labels

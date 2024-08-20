@@ -190,12 +190,15 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
     :type chunks: tuple
     :return:
     """
+    client = dask_client_manager.get_client()
     # Extract data from the hdf5 files
     auto_fluo = load_hdf5(auto_fluo_file)
     vascular = load_hdf5(vascular_file)
 
     # Merge the data along a new fourth dimension at index 0
-    volume = da.stack([auto_fluo, vascular], axis=0).compute()
+    volume = client.submit(da.stack, [auto_fluo, vascular], axis=0).result()
+    volume = client.gather(volume)
+    volume = volume.compute()
 
     # Save the volume to a zarr file
     save_zarr(volume, zarr_file, scales=scales, chunks=chunks)

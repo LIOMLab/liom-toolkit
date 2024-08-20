@@ -7,6 +7,7 @@ import ants.utils as utils
 import numpy as np
 from ants import resample_image_to_target, registration, apply_transforms
 from ants.core import ants_image_io as iio
+from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils import load_zarr, load_node_by_name, load_ants_image_from_node
@@ -14,11 +15,11 @@ from .utils import download_allen_template
 from ..segmentation import segment_3d_brain
 
 
-def create_template(images: list, masks: list, brain_names: list, template_volume: ants.ANTsImage,
+def create_template(images: list, masks: list, brain_names: list, template_volume: ANTsImage,
                     template_resolution: int | float = 10, iterations: int = 3, init_with_template=True,
                     save_pre_reg: bool = False, remove_temp_output: bool = False,
                     save_templating_progress: bool = False, pre_registration_type: str = "Rigid",
-                    templating_registration_type: str = "SyN") -> ants.ANTsImage:
+                    templating_registration_type: str = "SyN") -> ANTsImage:
     """
     Create a template from a folder of images.
 
@@ -29,7 +30,7 @@ def create_template(images: list, masks: list, brain_names: list, template_volum
     :param brain_names: List of brain names to use for saving the pre-registered images.
     :type brain_names: list
     :param template_volume: Default template to pre-register the brains to and possible the initial volume for registration.
-    :type template_volume: ants.ANTsImage
+    :type template_volume: ANTsImage
     :param template_resolution: The resolution of the template.
     :type template_resolution: int
     :param iterations: The number of iterations to use to create the template.
@@ -47,7 +48,7 @@ def create_template(images: list, masks: list, brain_names: list, template_volum
     :param templating_registration_type: The type of registration to use to create the template.
     :type templating_registration_type: str
     :return: The newly created template.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     template_images = []
     template_masks = []
@@ -75,18 +76,18 @@ def create_template(images: list, masks: list, brain_names: list, template_volum
     return template
 
 
-def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage, brain: str,
+def pre_register_brain(volume: ANTsImage, mask: ANTsImage | None, template: ANTsImage, brain: str,
                        save_pre_reg: bool = False, registration_type: str = "Rigid") -> (
-        ants.ANTsImage, ants.ANTsImage):
+        ANTsImage, ANTsImage):
     """
     Register an image to a template and return the registered image and mask.
 
     :param volume: The volume to register
-    :type volume: ants.ANTsImage
+    :type volume: ANTsImage
     :param mask: The mask to use in registration
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The template to register to
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param brain: The name of the brain
     :type brain: str
     :param save_pre_reg: Whether to save the pre-registered image and mask
@@ -94,7 +95,7 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage | None, temp
     :param registration_type: The type of registration to use
     :type registration_type: str
     :return: The registered image and registered mask
-    :rtype: tuple[ants.ANTsImage, ants.ANTsImage]
+    :rtype: tuple[ANTsImage, ANTsImage]
     """
     image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
                                             type_of_transform=registration_type)
@@ -109,8 +110,8 @@ def pre_register_brain(volume: ants.ANTsImage, mask: ants.ANTsImage | None, temp
 
 
 def build_template(
-        initial_template: ants.ANTsImage = None,
-        image_list: list[ants.ANTsImage] = None,
+        initial_template: ANTsImage = None,
+        image_list: list[ANTsImage] = None,
         iterations: int = 3,
         gradient_step: float = 0.2,
         blending_weight: float = 0.75,
@@ -120,16 +121,16 @@ def build_template(
         save_progress: bool = False,
         type_of_transform: str = "SyN",
         **kwargs
-) -> ants.ANTsImage:
+) -> ANTsImage:
     """
     Estimate an optimal template from an input image_list
     A modification of the ANTsPy function build_template to use masks.
     Source here: https://antspyx.readthedocs.io/en/latest/_modules/ants/registration/build_template.html#build_template
 
     :param initial_template: The initial template to use
-    :type initial_template: ants.ANTsImage
+    :type initial_template: ANTsImage
     :param image_list: The list of images to use to create the template
-    :type image_list: list[ants.ANTsImage]
+    :type image_list: list[ANTsImage]
     :param iterations: The number of iterations to use to create the template
     :type iterations: int
     :param gradient_step: For shape update gradient
@@ -139,7 +140,7 @@ def build_template(
     :param weights: Weight for each input image
     :type weights: List[float]
     :param masks: List of masks corresponding to the images in image_list
-    :type masks: List[ants.ANTsImage]
+    :type masks: List[ANTsImage]
     :param remove_temp_output: Whether to remove the temporary output files
     :type remove_temp_output: bool
     :param save_progress: Whether to save the progress of the template building
@@ -148,7 +149,7 @@ def build_template(
     :type type_of_transform: str
     :param kwargs: Extra arguments passed to ants registration
     :return: The newly created template
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
 
     Example
     ^^^^^^^
@@ -294,7 +295,7 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
 
 
 def load_volume_for_registration(image_node, mask_node, resolution_level, flipped=False) -> (
-        ants.ANTsImage, ants.ANTsImage):
+        ANTsImage, ANTsImage):
     """
     Load a volume from a zarr file to use in registration. Will apply the mask to the volume and load it in
     RAS+ orientation. Can also flip the volume.
@@ -308,7 +309,7 @@ def load_volume_for_registration(image_node, mask_node, resolution_level, flippe
     :param flipped: Whether to flip the volume or not.
     :type flipped: bool
     :return: The loaded volume and mask.
-    :rtype: tuple[ants.ANTsImage, ants.ANTsImage]
+    :rtype: tuple[ANTsImage, ANTsImage]
     """
     brain_volume = load_ants_image_from_node(image_node, resolution_level=resolution_level, channel=0)
     mask = load_ants_image_from_node(mask_node, resolution_level=resolution_level)
