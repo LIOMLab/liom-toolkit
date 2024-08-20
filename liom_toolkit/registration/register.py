@@ -2,6 +2,7 @@ import os
 import tempfile
 
 import ants
+from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
 from .utils import download_allen_template, \
@@ -9,20 +10,20 @@ from .utils import download_allen_template, \
     construct_reference_space_cache
 
 
-def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | None, template: ants.ANTsImage,
+def deformably_register_volume(image: ANTsImage, mask: ANTsImage | None, template: ANTsImage,
                                rigid_type: str = 'Similarity', deformable_type: str = 'SyN',
                                interpolator: str = 'linear', rigid_interpolator: str = 'linear',
                                use_composite: bool = True) -> (
-        ants.ANTsImage, dict, dict):
+        ANTsImage, dict, dict):
     """
     Register an image to a template using a rigid registration followed by a deformable registration.
 
     :param image: The image to register
-    :type image: ants.ANTsImage
+    :type image: ANTsImage
     :param mask: The mask to use in registration
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The template to register to
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param rigid_type: The type of rigid registration to use
     :type rigid_type: str
     :param deformable_type: The type of deformable registration to use
@@ -35,7 +36,7 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | Non
     :type use_composite: bool
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
-    :rtype: tuple[ants.ANTsImage, dict, dict]
+    :rtype: tuple[ANTsImage, dict, dict]
     """
     rigid, rigid_transform = rigidly_register_volume(image, mask, template, rigid_type=rigid_type,
                                                      interpolator=rigid_interpolator, use_composite=use_composite)
@@ -52,18 +53,18 @@ def deformably_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage | Non
     return syn, syn_transform, rigid_transform
 
 
-def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+def rigidly_register_volume(image: ANTsImage, mask: ANTsImage, template: ANTsImage,
                             rigid_type: str = 'Similarity', interpolator: str = 'linear',
-                            use_composite: bool = True) -> (ants.ANTsImage, dict):
+                            use_composite: bool = True) -> (ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
 
     :param image: The image to register
-    :type image: ants.ANTsImage
+    :type image: ANTsImage
     :param mask: The mask to use in registration
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The template to register to
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param rigid_type: The type of rigid registration to use
     :type rigid_type: str
     :param interpolator: The interpolator to use to apply the transform.
@@ -71,7 +72,7 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     :param use_composite: Whether to create a composite transform or not
     :type use_composite: bool
     :return: The registered image and the transform from the rigid registration
-    :rtype: tuple[ants.ANTsImage, dict]
+    :rtype: tuple[ANTsImage, dict]
     """
     rigid_transform = ants.registration(fixed=template, moving=image, moving_mask=mask, type_of_transform=rigid_type,
                                         write_composite_transform=use_composite)
@@ -81,20 +82,20 @@ def rigidly_register_volume(image: ants.ANTsImage, mask: ants.ANTsImage, templat
     return rigid, rigid_transform
 
 
-def get_transformations_for_atlas(image: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
-                                  template_allen: ants.ANTsImage, data_dir: str, rigid_type: str = 'Similarity',
+def get_transformations_for_atlas(image: ANTsImage, mask: ANTsImage, template: ANTsImage,
+                                  template_allen: ANTsImage, data_dir: str, rigid_type: str = 'Similarity',
                                   deformable_type: str = "SyN", keep_intermediary: bool = False) -> (dict, dict):
     """
     Get the transformations for an image to be aligned to the Allen template.
 
     :param image: The image to align.
-    :type image: ants.ANTsImage
+    :type image: ANTsImage
     :param mask: The mask of the image to use in registration.
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The custom template to use for registration.
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param template_allen: The Allen template to use for registration.
-    :type template_allen: ants.ANTsImage
+    :type template_allen: ANTsImage
     :param data_dir: The directory to use for saving temporary files.
     :type data_dir: str
     :param rigid_type: The type of rigid registration to use.
@@ -123,20 +124,20 @@ def get_transformations_for_atlas(image: ants.ANTsImage, mask: ants.ANTsImage, t
     return syn_transform_image, syn_transform_allen
 
 
-def align_brain_region_to_atlas(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+def align_brain_region_to_atlas(target_volume: ANTsImage, mask: ANTsImage, template: ANTsImage,
                                 region: str, data_dir: str, resolution: int = 25,
-                                registration_volume: ants.ANTsImage = None, rigid_type: str = 'Similarity',
+                                registration_volume: ANTsImage = None, rigid_type: str = 'Similarity',
                                 deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
-                                syn_allen: dict = None) -> ants.ANTsImage:
+                                syn_allen: dict = None) -> ANTsImage:
     """
     Mask an image with a brain region. Assumes all images are in RAS+ orientation.
 
     :param target_volume: The image to mask.
-    :type target_volume: ants.ANTsImage
+    :type target_volume: ANTsImage
     :param mask: The mask to use.
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The template to use for registration.
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param region: The brain region to use. Will do a lookup in the Allen ontology.
     :type region: str
     :param data_dir: The directory to use for saving temporary files.
@@ -144,7 +145,7 @@ def align_brain_region_to_atlas(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
     :param registration_volume: The volume to use for registration. If None, the target_volume will be used.
-    :type registration_volume: ants.ANTsImage
+    :type registration_volume: ANTsImage
     :param rigid_type: The type of rigid registration to use.
     :type rigid_type: str
     :param deformable_type: The type of deformable registration to use.
@@ -156,7 +157,7 @@ def align_brain_region_to_atlas(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     :param syn_allen: The syn transform for the Allen template. If None, it will be calculated.
     :type syn_allen: dict
     :return: The brain region mask aligned to the target volume.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
@@ -227,19 +228,19 @@ def align_brain_region_to_atlas(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     return region_mask_transformed
 
 
-def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsImage, template: ants.ANTsImage,
+def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, template: ANTsImage,
                                 data_dir: str, resolution: int = 25, rigid_type: str = 'Similarity',
                                 deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
-                                syn_allen: dict = None) -> ants.ANTsImage:
+                                syn_allen: dict = None) -> ANTsImage:
     """
     Align an annotation to a target image.
 
     :param target_volume: The target image to align to.
-    :type target_volume: ants.ANTsImage
+    :type target_volume: ANTsImage
     :param mask: The mask to use in registration.
-    :type mask: ants.ANTsImage
+    :type mask: ANTsImage
     :param template: The template to use for registration.
-    :type template: ants.ANTsImage
+    :type template: ANTsImage
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
     :param data_dir: The directory to use for saving temporary files.
@@ -255,7 +256,7 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     :param syn_allen: The syn transform for the Allen template. If None, it will be calculated.
     :type syn_allen: dict
     :return: The aligned annotation.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
@@ -315,18 +316,18 @@ def align_annotations_to_volume(target_volume: ants.ANTsImage, mask: ants.ANTsIm
     return atlas_transformed_int
 
 
-def align_volume_to_allen(image: ants.ANTsImage, mask: ants.ANTsImage | None, resolution: int = 25) -> ants.ANTsImage:
+def align_volume_to_allen(image: ANTsImage, mask: ANTsImage | None, resolution: int = 25) -> ANTsImage:
     """
     Align a volume to the Allen template using the Allen template as a reference.
 
     :param image: The image to align
-    :type image: ants.ANTsImage
+    :type image: ANTsImage
     :param mask: The mask to use in registration
-    :type mask: ants.ANTsImage | None
+    :type mask: ANTsImage | None
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
     :return: The aligned image
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     temp_folder = tempfile.TemporaryDirectory()
     # Get the Allen template

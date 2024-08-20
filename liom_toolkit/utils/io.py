@@ -7,6 +7,7 @@ import dask.array as da
 import nrrd
 import numpy as np
 import zarr
+from ants.core.ants_image import ANTsImage
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
@@ -51,7 +52,7 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.array
 
 
 def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int = 2,
-                         volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.])) -> ants.ANTsImage:
+                         volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.])) -> ANTsImage:
     """
     Convert a dask array to an ANTs image.
 
@@ -64,7 +65,7 @@ def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int
     :param volume_direction: The direction of the volume.
     :type volume_direction: tuple
     :return: The converted ANTs image.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     # Compute dask array to get values
     array = dask_array.compute()
@@ -87,7 +88,7 @@ def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int
     return ants_image
 
 
-def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) -> ants.ANTsImage:
+def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) -> ANTsImage:
     """
     Load an ANTs image from a zarr node.
 
@@ -98,7 +99,7 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) 
     :param channel: The channel to load.
     :type channel: int
     :return: The loaded ANTs image.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     image = load_zarr_image_from_node(node, resolution_level)
     if len(image.shape) == 4:
@@ -107,7 +108,7 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) 
     return ants_image
 
 
-def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants.ANTsImage:
+def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTsImage:
     """
     Load the allen template and set the resolution and direction (PIR).
 
@@ -118,7 +119,7 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ants
     :param padding: Whether to pad the atlas or not.
     :type padding: bool
     :return: The loaded template.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     resolution = resolution / 1000
     atlas_data, atlas_header = nrrd.read(atlas_file)
@@ -143,7 +144,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
     :param resolution_level: The resolution level to load.
     :type resolution_level: int
     :return: The coordinate transform matching the resolution level.
-    :rtype: ants.ANTsImage
+    :rtype: ANTsImage
     """
     transform = node.metadata["coordinateTransformations"][resolution_level][0]['scale']
     return transform
@@ -254,12 +255,12 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
                  chunks=chunks, scaler=scaler, name=name, label_metadata=label_metadata)
 
 
-def set_physical_shape(image: ants.ANTsImage) -> None:
+def set_physical_shape(image: ANTsImage) -> None:
     """
     Set the physical shape of an ANTs image by multiplying the shape with the spacing.
 
     :param image: The image to set the physical shape for.
-    :type image: ants.ANTsImage
+    :type image: ANTsImage
     """
     dims = np.array(image.shape)
     spacing = np.array(image.spacing)
