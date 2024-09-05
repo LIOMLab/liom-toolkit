@@ -576,7 +576,10 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
     :return: None
     """
     node = load_zarr(zarr_file)[0]
-    volume = node.data[channel]
+    volume = node.data[0]
+
+    if len(volume.shape) == 4:
+        volume = volume[channel]
 
     # Create if not exists, empty if exists
     if not os.path.exists(target_dir):
