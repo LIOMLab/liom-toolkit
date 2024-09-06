@@ -5,7 +5,7 @@ from .utils import *
 
 
 def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
-                dev: str = "cuda", patching: bool = True) -> np.ndarray:
+                dev: str = "cuda", patching: bool = True, norm_param: tuple = (10, 0.05, 128)) -> np.ndarray:
     """
     Predict one image
 
@@ -25,6 +25,8 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
     :type dev: str
     :param patching: Whether to use patching
     :type patching: bool
+    :param norm_param: The parameters for the normalization. (kernel_size, clip_limit, nbins)
+    :type norm_param: tuple
     :return: The predicted image
     :rtype: np.ndarray
     """
@@ -69,7 +71,8 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
         # Only the clahe is done to the image
         image = imread(img_path)
         image = (image / image.max() * 255).astype(np.uint8)
-        processed_image = equalize_adapthist(image, kernel_size=10, clip_limit=0.05, nbins=128)
+        processed_image = equalize_adapthist(image, kernel_size=norm_param[0], clip_limit=norm_param[1],
+                                             nbins=norm_param[2])
 
         saved_image = gray2rgb(processed_image)
         saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
