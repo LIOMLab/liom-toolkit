@@ -109,8 +109,7 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
                                              [x1, y1],
                                              stride,
                                              overlap,
-                                             size,
-                                             n_patches_by_row)
+                                             size)
 
         y1 += 1
 
