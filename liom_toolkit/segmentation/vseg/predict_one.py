@@ -7,7 +7,7 @@ from .utils import *
 
 
 def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
-                dev: str = "cuda", patching: bool = True, norm_param: tuple = (10, 0.05, 128)) -> np.ndarray:
+                dev: str = "cuda", patching: bool = True, norm_param: tuple = (10, 0.05)) -> np.ndarray:
     """
     Predict one image
 
@@ -27,7 +27,7 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
     :type dev: str
     :param patching: Whether to use patching
     :type patching: bool
-    :param norm_param: The parameters for the normalization. (kernel_size, clip_limit, nbins)
+    :param norm_param: The parameters for the normalization. (kernel_size, clip_limit)
     :type norm_param: tuple
     :return: The predicted image
     :rtype: np.ndarray
@@ -74,7 +74,10 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
         image = imread(img_path)
         image = (image / image.max() * 255).astype(np.uint8)
         # Apply Adaptive Histogram Equalization (AHE)
-        ahe = cv2.createCLAHE(clipLimit=0.1, tileGridSize=(663, 663))
+        kernel_size = norm_param[0]
+        clip_limit = norm_param[1]
+        tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
+        ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
         processed_image = ahe.apply(image)
 
         saved_image = gray2rgb(processed_image)
