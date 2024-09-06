@@ -1,5 +1,7 @@
 import shutil
 
+import cv2
+
 from .model import VsegModel
 from .utils import *
 
@@ -71,8 +73,9 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
         # Only the clahe is done to the image
         image = imread(img_path)
         image = (image / image.max() * 255).astype(np.uint8)
-        processed_image = equalize_adapthist(image, kernel_size=norm_param[0], clip_limit=norm_param[1],
-                                             nbins=norm_param[2])
+        # Apply Adaptive Histogram Equalization (AHE)
+        ahe = cv2.createCLAHE(clipLimit=0.1, tileGridSize=(663, 663))
+        processed_image = ahe.apply(image)
 
         saved_image = gray2rgb(processed_image)
         saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
