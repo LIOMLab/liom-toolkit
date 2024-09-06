@@ -1,9 +1,9 @@
 import torch.nn
 import wandb
 from skimage.color import label2rgb
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
-from .data import PatchDataset
+from .dataset import VascularDataset
 from .loss import DiceBCELoss
 from .model import VsegModel
 from .utils import *
@@ -126,9 +126,6 @@ def create_images(x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_imag
     num_images = min(num_images, x.shape[0])
     i = 0
     while len(images) < num_images or i - 1 == x.shape[0]:
-        # if np.abs(np.round(x.max(), 5) - np.round(x.min(), 5)) <= 0.001:
-        #     continue
-
         img = mask_image(x, y_mask, pred_mask, i)
         images.append(img)
         i += 1
@@ -161,13 +158,13 @@ def mask_image(x, y_mask, pred_mask, i):
     return img
 
 
-def train_model(dataset_dir: str = "data/patches", dev: str = "cuda", output_train: str = "data/training",
+def train_model(dataset_file: str = "data/patches", dev: str = "cuda", output_train: str = "data/training",
                 learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62) -> None:
     """
     Train the vessel segmentation model
 
-    :param dataset_dir: The directory of the dataset
-    :type dataset_dir: str
+    :param dataset_file: The file to the dataset (zarr)
+    :type dataset_file: str
     :param dev: The device to use for training
     :type dev: str
     :param output_train: The output directory for the training
@@ -190,40 +187,25 @@ def train_model(dataset_dir: str = "data/patches", dev: str = "cuda", output_tra
     run = wandb.init(
         project="vseg",
         entity="liom-lab",
-        mode="online",
+        mode="offline",
         config=hyperparameter_defaults)
 
     config = wandb.config
 
-    # Identify the images and labels for training
-    train_x = sorted(glob(f'{dataset_dir}/train/images/*'))
-    train_y = sorted(glob(f'{dataset_dir}/train/masks/*'))
-    val_x = sorted(glob(f'{dataset_dir}/val/images/*'))
-    val_y = sorted(glob(f'{dataset_dir}/val/masks/*'))
+    # Load the dataset
+    full_dataset = VascularDataset(dataset_file, "vessels", (1, 256, 256), dev)
+    train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
-    data_str = f"Dataset Size:\nTrain: {len(train_x)} - Valid: {len(val_x)}\n"
-    print(data_str)
+    # Create data loaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+    validation_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
 
+    # Setup check point dir
     best_epoch = -1
     create_dir(f"{output_train}")
     create_dir(f"{output_train}/files")
     checkpoint_path = f"{output_train}/files/checkpoint"
     create_dir(f'{output_train}/patch_seg')
-
-    train_dataset = PatchDataset(train_x, train_y)
-    val_dataset = PatchDataset(val_x, val_y)
-
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=1)
-
-    val_loader = DataLoader(
-        dataset=val_dataset,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=1)
 
     device = torch.device(dev)
     model = VsegModel()
@@ -251,7 +233,7 @@ def train_model(dataset_dir: str = "data/patches", dev: str = "cuda", output_tra
                                                            device)
 
         val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(model,
-                                                                                           val_loader,
+                                                                                           validation_loader,
                                                                                            loss_fn,
                                                                                            device)
 
@@ -306,6 +288,6 @@ if __name__ == "__main__":
     dataset_dir = "vseg/data/patches"
     output = "vseg/data/training"
 
-    train_model(dataset_dir=dataset_dir,
+    train_model(dataset_file=dataset_dir,
                 dev=device,
                 output_train=output)
