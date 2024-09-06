@@ -563,7 +563,7 @@ def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
     return None
 
 
-def extract_zarr_to_png(zarr_file: str, target_dir: str) -> None:
+def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
     """
     Extract a zarr file to a directory of PNG images.
 
@@ -571,10 +571,15 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str) -> None:
     :type zarr_file: str
     :param target_dir: The directory to save the PNG images to.
     :type target_dir: str
+    :param channel: The channel to extract.
+    :type channel: int
     :return: None
     """
     node = load_zarr(zarr_file)[0]
     volume = node.data[0]
+
+    if len(volume.shape) == 4:
+        volume = volume[channel]
 
     # Create if not exists, empty if exists
     if not os.path.exists(target_dir):
