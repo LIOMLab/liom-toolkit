@@ -15,7 +15,7 @@ from ome_zarr.scale import Scaler
 from ome_zarr.writer import write_image, ArrayLike
 from tqdm.auto import tqdm
 
-from liom_toolkit.registration import align_annotations_to_volume, download_allen_atlas
+from liom_toolkit.registration import align_annotations_to_volume
 from .dask_client import dask_client_manager
 from .io import load_zarr, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
@@ -259,7 +259,9 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     template = ants.image_read(template_path)
 
     if not use_custom_atlas:
-        base_atlas, _ = download_allen_atlas(temp_dir.name, resolution=atlas_resolution, keep_nrrd=False)
+        # TODO: Fix the circular import caused by importing download_allen_atlas
+        # base_atlas, _ = download_allen_atlas(temp_dir.name, resolution=atlas_resolution, keep_nrrd=False)
+        pass
     else:
         base_atlas = ants.image_read(atlas_path)
 
