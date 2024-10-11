@@ -19,7 +19,7 @@ from skimage.morphology import skeletonize
 from skimage.util import img_as_ubyte, img_as_uint
 from tqdm.auto import tqdm
 
-from liom_toolkit.registration.utils import construct_reference_space
+from liom_toolkit.utils import construct_reference_space
 from liom_toolkit.utils.dask_client import dask_client_manager
 
 PIL.Image.MAX_IMAGE_PIXELS = None

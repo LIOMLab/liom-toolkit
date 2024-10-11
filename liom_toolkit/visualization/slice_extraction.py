@@ -1,7 +1,7 @@
 import numpy as np
 from skimage.io import imsave
 
-from liom_toolkit.registration import generate_label_color_dict_allen
+from utils import generate_label_color_dict_allen
 from liom_toolkit.utils import convert_to_png_for_saving, load_zarr, load_node_by_name
 
 

@@ -5,9 +5,8 @@ import ants
 from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
-from .utils import download_allen_template, \
-    convert_allen_nrrd_to_ants, construct_reference_space, \
-    construct_reference_space_cache
+from liom_toolkit.utils import download_allen_template, convert_allen_nrrd_to_ants, construct_reference_space_cache, \
+    construct_reference_space
 
 
 def deformably_register_volume(image: ANTsImage, mask: ANTsImage | None, template: ANTsImage,
