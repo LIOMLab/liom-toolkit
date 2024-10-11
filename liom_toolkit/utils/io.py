@@ -3,7 +3,6 @@ from typing import Callable, Union
 
 import ants
 import dask.array as da
-import nrrd
 import numpy as np
 import zarr
 from ants.core.ants_image import ANTsImage
@@ -17,7 +16,7 @@ from skimage.transform import resize
 from tqdm.auto import tqdm
 
 from liom_toolkit.segmentation import segment_3d_brain
-from registration import generate_label_color_dict_allen
+from .allen_sdk import generate_label_color_dict_allen
 from .utils import convert_to_png_for_saving
 
 
@@ -104,33 +103,6 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) 
         image = image[channel, :, :, :]
     ants_image = convert_dask_to_ants(image, node, resolution_level)
     return ants_image
-
-
-def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTsImage:
-    """
-    Load the allen template and set the resolution and direction (PIR).
-
-    :param atlas_file: The file to load.
-    :type atlas_file: str
-    :param resolution: The resolution to set.
-    :type resolution: int
-    :param padding: Whether to pad the atlas or not.
-    :type padding: bool
-    :return: The loaded template.
-    :rtype: ANTsImage
-    """
-    resolution = resolution / 1000
-    atlas_data, atlas_header = nrrd.read(atlas_file)
-    atlas_data = atlas_data.astype("uint32")
-    if padding:
-        # Pad the atlas to avoid edge effects, the padding is 15% of the atlas size
-        pad_size = int(atlas_data.shape[0] * 0.15)
-        npad = ((pad_size, pad_size), (0, 0), (0, 0))
-        atlas_data = np.pad(atlas_data, pad_width=npad, mode="constant", constant_values=0)
-    atlas_volume = ants.from_numpy(atlas_data)
-    atlas_volume.set_spacing([resolution, resolution, resolution])
-    atlas_volume.set_direction([[0., 0., 1.], [1., 0., 0.], [0., -1., 0.]])
-    return atlas_volume
 
 
 def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict:
