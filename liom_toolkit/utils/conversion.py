@@ -15,7 +15,7 @@ from ome_zarr.scale import Scaler
 from ome_zarr.writer import write_image, ArrayLike
 from tqdm.auto import tqdm
 
-from liom_toolkit.registration import align_annotations_to_volume
+from liom_toolkit.registration import align_annotations_to_volume, download_allen_atlas
 from .dask_client import dask_client_manager
 from .io import load_zarr, save_atlas_to_zarr, \
     CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
@@ -206,7 +206,8 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
 
 
 def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
-                            scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)) -> None:
+                            atlas_path: str, use_custom_atlas=True, scales: tuple = (6.5, 6.5, 6.5),
+                            chunks: tuple = (128, 128, 128)) -> None:
     """
     Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
     auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
@@ -219,6 +220,10 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     :type zarr_file: str
     :param template_path: The path to the template to align the annotations to.
     :type template_path: str
+    :param atlas_path: The path to the atlas to use for the annotations.
+    :type atlas_path: str
+    :param use_custom_atlas: Whether to use a custom atlas or not.
+    :type use_custom_atlas: bool
     :param scales: The physical resolution of the volume per axis.
     :type scales: tuple
     :param chunks: The chunk size to use for the volume.
@@ -226,6 +231,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     """
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
+    atlas_resolution = 25
 
     pbar = tqdm(total=5, desc="Creating zarr volume")
     pbar.set_postfix({"step": "Creating multichannel zarr"})
@@ -252,13 +258,16 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
     template = ants.image_read(template_path)
 
-    atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, resolution=25,
-                                        keep_intermediary=False, data_dir=temp_dir.name)
+    if not use_custom_atlas:
+        base_atlas, _ = download_allen_atlas(temp_dir.name, resolution=atlas_resolution, keep_nrrd=False)
+    else:
+        base_atlas = ants.image_read(atlas_path)
+
+    atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, atlas=base_atlas,
+                                        resolution=25, keep_intermediary=False, data_dir=temp_dir.name)
 
     # Reorient the atlas to the same orientation as the target image
-    atlas = atlas.numpy()
-    atlas = np.flip(atlas, axis=1)
-    atlas = np.transpose(atlas, (0, 2, 1))
+    atlas = ants.reorient_image2(atlas, target_image.orientation)
 
     # Resize the atlas to full size
     atlas_target_shape = nodes[0].data[0].shape

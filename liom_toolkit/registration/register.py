@@ -6,7 +6,7 @@ from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
 from .utils import download_allen_template, \
-    convert_allen_nrrd_to_ants, download_allen_atlas, construct_reference_space, \
+    convert_allen_nrrd_to_ants, construct_reference_space, \
     construct_reference_space_cache
 
 
@@ -228,7 +228,7 @@ def align_brain_region_to_atlas(target_volume: ANTsImage, mask: ANTsImage, templ
     return region_mask_transformed
 
 
-def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, template: ANTsImage,
+def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, template: ANTsImage, atlas: ANTsImage,
                                 data_dir: str, resolution: int = 25, rigid_type: str = 'Similarity',
                                 deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
                                 syn_allen: dict = None) -> ANTsImage:
@@ -241,6 +241,8 @@ def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, templ
     :type mask: ANTsImage
     :param template: The template to use for registration.
     :type template: ANTsImage
+    :param atlas: The annotation to align.
+    :type atlas: ANTsImage
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
     :param data_dir: The directory to use for saving temporary files.
@@ -281,7 +283,6 @@ def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, templ
         ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
 
     # Get the annotations
-    atlas, meta = download_allen_atlas(data_dir, resolution=resolution, keep_nrrd=keep_intermediary)
     if keep_intermediary:
         ants.image_write(atlas, f"{data_dir}/atlas.nii")
     pbar.update(1)
