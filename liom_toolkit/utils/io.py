@@ -1,5 +1,4 @@
 import os
-import tempfile
 from typing import Callable, Union
 
 import ants
@@ -17,8 +16,8 @@ from skimage.io import imsave
 from skimage.transform import resize
 from tqdm.auto import tqdm
 
-from liom_toolkit.registration import download_allen_atlas
 from liom_toolkit.segmentation import segment_3d_brain
+from registration import generate_label_color_dict_allen
 from .utils import convert_to_png_for_saving
 
 
@@ -285,27 +284,6 @@ def generate_label_color_dict_mask() -> list[dict]:
         }
     ]
     return label_colors
-
-
-def generate_label_color_dict_allen() -> list[dict]:
-    """
-    Generate a label color dictionary for the allen atlas.
-
-    :return: The label color dictionary.
-    :rtype: list[dict]
-    """
-    temp_dir = tempfile.TemporaryDirectory()
-
-    annotation, meta = download_allen_atlas(temp_dir.name, resolution=25, keep_nrrd=False)
-
-    # Generate a color dictionary according to the OME-NGFF specification
-    color_dict = []
-    for row in meta.iterrows():
-        color_dict.append({"label-value": row[1]['IDX'],
-                           "rgba": [row[1]['-R-'], row[1]['-G-'], row[1]['-B-'], (int(row[1]['-A-'] * 255))]})
-
-    temp_dir.cleanup()
-    return color_dict
 
 
 class CustomScaler(Scaler):

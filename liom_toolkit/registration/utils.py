@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import ants
 import numpy as np
@@ -147,3 +148,24 @@ def download_allen_atlas(data_dir: str, resolution: int = 25, keep_nrrd: bool = 
         os.remove(nrrd_file)
 
     return ants_image, metadata
+
+
+def generate_label_color_dict_allen() -> list[dict]:
+    """
+    Generate a label color dictionary for the allen atlas.
+
+    :return: The label color dictionary.
+    :rtype: list[dict]
+    """
+    temp_dir = tempfile.TemporaryDirectory()
+
+    annotation, meta = download_allen_atlas(temp_dir.name, resolution=25, keep_nrrd=False)
+
+    # Generate a color dictionary according to the OME-NGFF specification
+    color_dict = []
+    for row in meta.iterrows():
+        color_dict.append({"label-value": row[1]['IDX'],
+                           "rgba": [row[1]['-R-'], row[1]['-G-'], row[1]['-B-'], (int(row[1]['-A-'] * 255))]})
+
+    temp_dir.cleanup()
+    return color_dict
