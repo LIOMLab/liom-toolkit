@@ -255,11 +255,16 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, resolution=25,
                                         keep_intermediary=False, data_dir=temp_dir.name)
 
+    # Reorient the atlas to the same orientation as the target image
+    atlas = atlas.numpy()
+    atlas = np.flip(atlas, axis=1)
+    atlas = np.transpose(atlas, (0, 2, 1))
+
     # Resize the atlas to full size
     atlas_target_shape = nodes[0].data[0].shape
     if len(atlas_target_shape) == 4:
         atlas_target_shape = atlas_target_shape[1:]
-    atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
+    atlas = da.from_array(atlas, chunks=(128, 128, 128))
     atlas_resized = da.transpose(atlas, (2, 1, 0))
     atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 

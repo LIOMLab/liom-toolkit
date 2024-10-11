@@ -83,7 +83,6 @@ def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int
     transform = [element / 1000 for element in transform]
     ants_image.set_spacing(transform)
     ants_image.set_direction(volume_direction)
-    ants_image.physical_shape = tuple(np.array(ants_image.shape) * np.array(ants_image.spacing))
 
     return ants_image
 

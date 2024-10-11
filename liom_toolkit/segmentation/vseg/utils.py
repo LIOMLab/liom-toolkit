@@ -1,9 +1,8 @@
 import os
-import random
 from glob import glob
 from typing import Any
 
-import matplotlib.pyplot as plt
+import cv2
 import natsort
 import numpy as np
 import pandas as pd
@@ -13,49 +12,12 @@ from albumentations import HorizontalFlip, VerticalFlip, Rotate
 from numpy import ndarray, dtype
 from patchify import patchify
 from skimage.color import gray2rgb
-from skimage.exposure import equalize_adapthist
 from skimage.io import imread, imsave
 from skimage.transform import resize
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
 from tqdm.auto import tqdm
 
 Image.MAX_IMAGE_PIXELS = None
-
-
-def matplotlib_imshow(img: torch.Tensor, one_channel: bool = False) -> None:
-    """
-    Visualize an image using matplotlib
-
-    :param img: The image to visualize
-    :type img: torch.Tensor
-    :param one_channel: Whether the image has one channel
-    :type one_channel: bool
-    :return: None
-    """
-    if one_channel:
-        img = img.mean(dim=0)
-    img = img / 2 + 0.5  # unnormalize
-    npimg = img.numpy()
-    if one_channel:
-        plt.imshow(npimg, cmap="Greys")
-    else:
-        plt.imshow(np.transpose(npimg, (1, 2, 0)))
-
-
-def seeding(seed: int) -> None:
-    """
-    Set seed for reproducibility
-
-    :param seed: The seed to set
-    :type seed: int
-    :return: None
-    """
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
 
 
 def create_dir(path: str) -> None:
@@ -68,23 +30,6 @@ def create_dir(path: str) -> None:
     """
     if not os.path.exists(path):
         os.makedirs(path)
-
-
-def epoch_time(start_time: float, end_time: float) -> tuple[int, int]:
-    """
-    Calculate the elapsed time between start and end time
-
-    :param start_time: The start time
-    :type start_time: float
-    :param end_time: The end time
-    :type end_time: float
-    :return: The elapsed time in minutes and seconds
-    :rtype: tuple[int, int]
-    """
-    elapsed_time = end_time - start_time
-    elapsed_mins = int(elapsed_time / 60)
-    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
-    return elapsed_mins, elapsed_secs
 
 
 def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
@@ -253,7 +198,8 @@ def crop_image(image: np.ndarray, size: tuple[int, int], stride: int) -> np.ndar
             to_remove_left_x:image.shape[1] - to_remove_right_x])
 
 
-def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: int = 64, norm: bool = False) -> tuple[
+def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: int = 64, norm: bool = False,
+                   norm_params: tuple = (10, 0.05)) -> tuple[
     list[Any], tuple[int, ...], tuple[int, ...], ndarray[Any, dtype[Any]] | Any]:
     """
     Create patches from an image
@@ -266,6 +212,8 @@ def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: 
     :type stride: int
     :param norm: Normalize the patches
     :type norm: bool
+    :param norm_params: The parameters for the normalization. (kernel_size, clip_limit)
+    :type norm_params: tuple
     :return: The patches, the shape of the image, the shape of the patches, and the image
     :rtype: tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray]
     """
@@ -276,7 +224,7 @@ def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: 
     image = (image / image.max() * 255).astype(np.uint8)
 
     if norm:
-        image_clahe = equalize_adapthist(image, kernel_size=10, clip_limit=0.05, nbins=128)
+        image_clahe = apply_clahe(image, norm_params[0], norm_params[1])
     else:
         image_clahe = image
 
@@ -389,3 +337,11 @@ def patch(image_path: str, save_path: str, norm: bool, size: tuple[int, int] = (
         return shape, patch_shape, image, mask
     else:
         return shape, patch_shape, image
+
+
+def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
+    tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
+    # Apply Adaptive Histogram Equalization (AHE)
+    ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    ahe_result = ahe.apply(image)
+    return ahe_result
