@@ -5,8 +5,7 @@ import ants
 from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import download_allen_template, convert_allen_nrrd_to_ants, construct_reference_space_cache, \
-    construct_reference_space
+from liom_toolkit.utils import download_allen_template, convert_allen_nrrd_to_ants, construct_reference_space
 
 
 def deformably_register_volume(image: ANTsImage, mask: ANTsImage | None, template: ANTsImage,
@@ -229,8 +228,7 @@ def align_brain_region_to_atlas(target_volume: ANTsImage, mask: ANTsImage, templ
 
 def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, template: ANTsImage, atlas: ANTsImage,
                                 data_dir: str, resolution: int = 25, rigid_type: str = 'Similarity',
-                                deformable_type: str = "SyN", keep_intermediary: bool = False, syn_image: dict = None,
-                                syn_allen: dict = None) -> ANTsImage:
+                                deformable_type: str = "SyN", keep_intermediary: bool = False) -> ANTsImage:
     """
     Align an annotation to a target image.
 
@@ -266,45 +264,22 @@ def align_annotations_to_volume(target_volume: ANTsImage, mask: ANTsImage, templ
     mask = ants.reorient_image2(mask, orientation='RAS')
     template = ants.reorient_image2(template, orientation='RAS')
 
-    pbar = tqdm(total=3, desc="Aligning annotation", leave=True, unit="step", position=0)
+    pbar = tqdm(total=2, desc="Aligning annotation", leave=True, unit="step", position=0)
 
     # Create the data directory if it does not exist
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-
-    # Construct the reference space cache
-    rsc = construct_reference_space_cache(resolution=resolution)
-
-    # Get the allen template
-    pbar.set_description("Downloading Allen template and annotations")
-    template_allen = download_allen_template(data_dir, resolution=resolution, keep_nrrd=keep_intermediary, rsc=rsc)
-    if keep_intermediary:
-        ants.image_write(template_allen, f"{data_dir}/template_allen.nii")
-
-    # Get the annotations
-    if keep_intermediary:
-        ants.image_write(atlas, f"{data_dir}/atlas.nii")
-    pbar.update(1)
-
-    # Start registration process
+        # Start registration process
     pbar.set_description("Starting registration process")
-    # Register the Allen template to own template
-    if syn_image is None or syn_allen is None:
-        syn_transform_image, syn_transform_allen = get_transformations_for_atlas(target_volume, mask, template,
-                                                                                 template_allen,
-                                                                                 data_dir, rigid_type=rigid_type,
-                                                                                 deformable_type=deformable_type,
-                                                                                 keep_intermediary=keep_intermediary)
-    else:
-        syn_transform_image = syn_image
-        syn_transform_allen = syn_allen
+    # Register the volume to the template
+    _, syn_transform, rigid_transform = deformably_register_volume(target_volume, mask, template, rigid_type=rigid_type,
+                                                                   deformable_type=deformable_type)
     pbar.update(1)
 
     atlas_moving = ants.image_clone(atlas, pixeltype="double")
     image_fixed = ants.image_clone(target_volume, pixeltype="double")
     atlas_transformed = ants.apply_transforms(fixed=image_fixed, moving=atlas_moving,
-                                              transformlist=[syn_transform_image['invtransforms'],
-                                                             syn_transform_allen['fwdtransforms']],
+                                              transformlist=syn_transform['fwdtransforms'],
                                               interpolator="genericLabel")
     if keep_intermediary:
         ants.image_write(atlas_transformed, f"{data_dir}/atlas_transformed.nii")
