@@ -275,7 +275,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     atlas_target_shape = nodes[0].data[0].shape
     if len(atlas_target_shape) == 4:
         atlas_target_shape = atlas_target_shape[1:]
-    atlas = da.from_array(atlas, chunks=(128, 128, 128))
+    atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
     atlas_resized = da.transpose(atlas, (2, 1, 0))
     atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
