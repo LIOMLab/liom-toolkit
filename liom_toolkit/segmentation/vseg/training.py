@@ -1,9 +1,10 @@
 import torch.nn
 import wandb
 from skimage.color import label2rgb
+from torch import device
 from torch.utils.data import DataLoader, random_split
 
-from .dataset import VascularDataset
+from .dataset import OmeZarrLabelDataSet
 from .loss import DiceBCELoss
 from .model import VsegModel
 from .utils import *
@@ -30,7 +31,7 @@ def train(model: VsegModel, loader: DataLoader, optimizer: torch.optim.Optimizer
     # Initialize epoch loss to 0
     epoch_loss = 0.0
 
-    # Put in training mode 
+    # Put in training mode
     model.train()
 
     # Iterate over train-loader
@@ -73,7 +74,7 @@ def evaluate(model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, dev
     jaccard = 0.0
     recall = 0.0
 
-    # Put in eval mode 
+    # Put in eval mode
     model.eval()
     with torch.no_grad():
         # Iterate over val-loader
@@ -94,7 +95,7 @@ def evaluate(model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, dev
             jaccard += score_jaccard
             recall += score_recall
 
-        # Normalize cumulative loss for number of examples    
+        # Normalize cumulative loss for number of examples
         epoch_loss = epoch_loss / len(loader)
         f1 = f1 / len(loader)
         accuracy = accuracy / len(loader)
@@ -158,13 +159,16 @@ def mask_image(x, y_mask, pred_mask, i):
     return img
 
 
-def train_model(dataset_file: str = "data/patches", dev: str = "cuda", output_train: str = "data/training",
-                learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62) -> None:
+def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", output_train: str = "training",
+                learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62,
+                wandb_mode: str = "offline") -> None:
     """
     Train the vessel segmentation model
 
     :param dataset_file: The file to the dataset (zarr)
     :type dataset_file: str
+    :param node_name: The name of the node in the zarr file
+    :type node_name: str
     :param dev: The device to use for training
     :type dev: str
     :param output_train: The output directory for the training
@@ -175,6 +179,8 @@ def train_model(dataset_file: str = "data/patches", dev: str = "cuda", output_tr
     :type batch_size: int
     :param epochs: The number of epochs to train
     :type epochs: int
+    :param wandb_mode: The mode for wandb
+    :type wandb_mode: str
     :return: None
     """
     # Setup training parameters and wandb run
@@ -187,13 +193,13 @@ def train_model(dataset_file: str = "data/patches", dev: str = "cuda", output_tr
     run = wandb.init(
         project="vseg",
         entity="liom-lab",
-        mode="offline",
+        mode=wandb_mode,
         config=hyperparameter_defaults)
 
     config = wandb.config
 
     # Load the dataset
-    full_dataset = VascularDataset(dataset_file, "vessels", (1, 256, 256), dev)
+    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device=dev, pre_process=False, patch_size=(1, 256, 256))
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
     # Create data loaders
@@ -285,9 +291,11 @@ def train_model(dataset_file: str = "data/patches", dev: str = "cuda", output_tr
 if __name__ == "__main__":
     # Hardcoded for wandb sweeps
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset_dir = "vseg/data/patches"
+    dataset_dir = ""
     output = "vseg/data/training"
+    node_name = ""
 
     train_model(dataset_file=dataset_dir,
                 dev=device,
-                output_train=output)
+                output_train=output,
+                node_name=node_name)

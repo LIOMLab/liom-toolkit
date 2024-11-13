@@ -12,6 +12,7 @@ from albumentations import HorizontalFlip, VerticalFlip, Rotate
 from numpy import ndarray, dtype
 from patchify import patchify
 from skimage.color import gray2rgb
+from skimage.exposure import equalize_adapthist
 from skimage.io import imread, imsave
 from skimage.transform import resize
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
@@ -340,8 +341,9 @@ def patch(image_path: str, save_path: str, norm: bool, size: tuple[int, int] = (
 
 
 def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
-    tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
-    # Apply Adaptive Histogram Equalization (AHE)
-    ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-    ahe_result = ahe.apply(image)
+    # tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
+    # # Apply Adaptive Histogram Equalization (AHE)
+    # ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    # ahe_result = ahe.apply(image)
+    ahe_result = equalize_adapthist(image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256)
     return ahe_result
