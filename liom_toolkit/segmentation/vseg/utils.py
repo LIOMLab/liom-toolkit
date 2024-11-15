@@ -2,7 +2,6 @@ import os
 from glob import glob
 from typing import Any
 
-import cv2
 import natsort
 import numpy as np
 import pandas as pd
@@ -341,9 +340,5 @@ def patch(image_path: str, save_path: str, norm: bool, size: tuple[int, int] = (
 
 
 def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
-    # tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
-    # # Apply Adaptive Histogram Equalization (AHE)
-    # ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-    # ahe_result = ahe.apply(image)
     ahe_result = equalize_adapthist(image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256)
     return ahe_result
