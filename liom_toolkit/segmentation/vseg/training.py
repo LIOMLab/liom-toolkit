@@ -6,7 +6,7 @@ import torch.nn
 import wandb
 from skimage.color import label2rgb, gray2rgb
 from torch import device
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 from tqdm import tqdm
 
 from .dataset import OmeZarrLabelDataSet
@@ -166,7 +166,7 @@ def mask_image(x, y_mask, pred_mask, i):
 
 def train_model(dataset_file: str, node_name: str, dev: device = torch.device("cuda"), output_train: str = "training",
                 learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62,
-                wandb_mode: str = "offline", wandb_project: str = "vseg") -> None:
+                wandb_mode: str = "offline", filter_empty_patches: bool = True, wandb_project: str = "vseg", ) -> None:
     """
     Train the vessel segmentation model
 
@@ -207,20 +207,22 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
 
     # Load the dataset
     full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device='cpu', pre_process=False,
-                                       patch_size=(1, 256, 256), filter_empty=True, normalise_label=False)
+                                       patch_size=(1, 256, 256), filter_empty=filter_empty_patches,
+                                       normalise_label=False)
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
-    # Filter valid train indices
-    train_valid_indices = [idx for idx in train_dataset.indices if idx in full_dataset.valid_indices]
+    if filter_empty_patches:
+        # Filter indices on valid patches
+        train_valid_indices = [idx for idx in train_dataset.indices if idx in full_dataset.valid_indices]
+        test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
 
-    # Filter valid test indices
-    test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
+        # Crate new subsets for dataloaders
+        train_dataset = Subset(train_dataset, train_valid_indices)
+        test_dataset = Subset(test_dataset, test_valid_indices)
 
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                              sampler=train_valid_indices)
-    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                                   sampler=test_valid_indices)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     # Setup check point dir
     best_epoch = -1
