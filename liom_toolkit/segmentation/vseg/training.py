@@ -217,8 +217,8 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
         test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
 
         # Crate new subsets for dataloaders
-        train_dataset = Subset(train_dataset, train_valid_indices)
-        test_dataset = Subset(test_dataset, test_valid_indices)
+        train_dataset = Subset(full_dataset, train_valid_indices)
+        test_dataset = Subset(full_dataset, test_valid_indices)
 
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
