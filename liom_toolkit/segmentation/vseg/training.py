@@ -231,7 +231,7 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
 
     model = VsegModel()
 
-    model = model.to(device)
+    model = model.to(dev)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
@@ -251,12 +251,12 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
                                                            train_loader,
                                                            optimizer,
                                                            loss_fn,
-                                                           device)
+                                                           dev)
 
         val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(model,
                                                                                            validation_loader,
                                                                                            loss_fn,
-                                                                                           device)
+                                                                                           dev)
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
