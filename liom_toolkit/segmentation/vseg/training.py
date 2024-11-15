@@ -206,12 +206,21 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
     config = wandb.config
 
     # Load the dataset
-    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device=dev, pre_process=False, patch_size=(1, 256, 256))
+    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device='cpu', pre_process=False,
+                                       patch_size=(1, 256, 256), filter_empty=True, normalise_label=False)
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
+    # Filter valid train indices
+    train_valid_indices = [idx for idx in train_dataset.indices if idx in full_dataset.valid_indices]
+
+    # Filter valid test indices
+    test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
+
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                              sampler=train_valid_indices)
+    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                                   sampler=test_valid_indices)
 
     # Setup check point dir
     best_epoch = -1
