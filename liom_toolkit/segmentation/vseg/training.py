@@ -7,7 +7,7 @@ import wandb
 from skimage.color import label2rgb, gray2rgb
 from torch import device
 from torch.utils.data import DataLoader, random_split, Subset
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from .dataset import OmeZarrLabelDataSet
 from .loss import DiceBCELoss
