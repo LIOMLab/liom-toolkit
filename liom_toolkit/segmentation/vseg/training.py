@@ -1,13 +1,18 @@
+import os
+
+import numpy as np
+import pandas as pd
 import torch.nn
 import wandb
-from skimage.color import label2rgb
+from skimage.color import label2rgb, gray2rgb
 from torch import device
 from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
 
 from .dataset import OmeZarrLabelDataSet
 from .loss import DiceBCELoss
 from .model import VsegModel
-from .utils import *
+from .utils import calculate_metrics, create_dir
 
 
 def train(model: VsegModel, loader: DataLoader, optimizer: torch.optim.Optimizer, loss_fn: torch.nn.Module,
@@ -159,9 +164,9 @@ def mask_image(x, y_mask, pred_mask, i):
     return img
 
 
-def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", output_train: str = "training",
+def train_model(dataset_file: str, node_name: str, dev: device = torch.device("cuda"), output_train: str = "training",
                 learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62,
-                wandb_mode: str = "offline") -> None:
+                wandb_mode: str = "offline", wandb_project: str = "vseg") -> None:
     """
     Train the vessel segmentation model
 
@@ -181,6 +186,8 @@ def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", o
     :type epochs: int
     :param wandb_mode: The mode for wandb
     :type wandb_mode: str
+    :param wandb_project: The project for wandb. See wandb of LIOM for more details.
+    :type wandb_project: str
     :return: None
     """
     # Setup training parameters and wandb run
@@ -191,7 +198,7 @@ def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", o
 
     # Init wandb
     run = wandb.init(
-        project="vseg",
+        project=wandb_project,
         entity="liom-lab",
         mode=wandb_mode,
         config=hyperparameter_defaults)
@@ -199,12 +206,21 @@ def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", o
     config = wandb.config
 
     # Load the dataset
-    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device=dev, pre_process=False, patch_size=(1, 256, 256))
+    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device='cpu', pre_process=False,
+                                       patch_size=(1, 256, 256), filter_empty=True, normalise_label=False)
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
+    # Filter valid train indices
+    train_valid_indices = [idx for idx in train_dataset.indices if idx in full_dataset.valid_indices]
+
+    # Filter valid test indices
+    test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
+
     # Create data loaders
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
-    validation_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                              sampler=train_valid_indices)
+    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                                   sampler=test_valid_indices)
 
     # Setup check point dir
     best_epoch = -1
@@ -213,17 +229,16 @@ def train_model(dataset_file: str, node_name: str, dev: str | device = "cuda", o
     checkpoint_path = f"{output_train}/files/checkpoint"
     create_dir(f'{output_train}/patch_seg')
 
-    device = torch.device(dev)
     model = VsegModel()
 
     model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
     loss_fn = DiceBCELoss()
 
     # Track model with Wandb
-    wandb.watch(model, criterion=loss_fn, log="all", log_freq=25, log_graph=True)
+    wandb.watch(model, criterion=loss_fn, log="all", log_freq=25, log_graph=False)
 
     """ Training the model """
     train_losses = []
@@ -292,7 +307,7 @@ if __name__ == "__main__":
     # Hardcoded for wandb sweeps
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     dataset_dir = ""
-    output = "vseg/data/training"
+    output = ""
     node_name = ""
 
     train_model(dataset_file=dataset_dir,
