@@ -211,7 +211,7 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
     config = wandb.config
 
     # Load the dataset
-    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device='cpu', pre_process=False,
+    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device=dev, pre_process=False,
                                        patch_size=(1, 256, 256), filter_empty=filter_empty_patches,
                                        normalise_label=False)
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
