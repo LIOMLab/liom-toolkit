@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="liom-toolkit",
-    version="0.8.17",
+    version="0.8.18",
     author="Laboratoire d’Imagerie Optique et Moléculaire",
     author_email="frederic.lesage@polymtl.ca",
     packages=find_packages(),
@@ -18,5 +18,5 @@ setup(
     python_requires='>=3.10',
     install_requires=['antspyx>=0.5.3', 'tqdm', 'scikit-image', 'ome-zarr>=0.9.0', 'nibabel', 'zarr', 'h5py', 'pynrrd',
                       'PyWavelets', 'SimpleITK', 'allensdk', 'dask', 'opencv-python', 'torch', 'torchvision', 'wandb',
-                      'patchify', 'natsort', 'albumentations', "ruamel.yaml==0.16.10"]
+                      'patchify', 'natsort', "ruamel.yaml==0.16.10"]
 )
