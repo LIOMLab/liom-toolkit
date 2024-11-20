@@ -11,11 +11,11 @@ from zarr.convenience import open
 
 from .dataset import OmeZarrDataset
 from .model import VsegModel
-from .utils import create_dir, numeric_filesort, patch, process_image, add_patch_to_empty_array
+from .utils import create_dir, numeric_filesort, process_image, add_patch_to_empty_array
 
 
 def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
-                dev: str = "cuda", patching: bool = True, norm_param: tuple = (10, 0.05)) -> np.ndarray:
+                dev: str = "cuda", norm_param: tuple = (10, 0.05)) -> np.ndarray:
     """
     Predict one image
 
@@ -33,24 +33,16 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
     :type norm: bool
     :param dev: The device to use for prediction
     :type dev: str
-    :param patching: Whether to use patching
-    :type patching: bool
     :param norm_param: The parameters for the normalization. (kernel_size, clip_limit)
     :type norm_param: tuple
     :return: The predicted image
     :rtype: np.ndarray
     """
-    if patching:
-        H = width
-        W = width
-        size = (H, W)
-        stride = stride
-    else:
-        image = imread(img_path)
-        H = image.shape[0]
-        W = image.shape[1]
-        size = (H, W)
-        stride = image.shape[0]
+    image = imread(img_path)
+    H = image.shape[0]
+    W = image.shape[1]
+    size = (H, W)
+    stride = image.shape[0]
 
     device = torch.device(dev)
 
@@ -68,31 +60,21 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
         shutil.rmtree(patches_images_dir)
     create_dir(f'{save_path}/patches/images/')
 
-    if patching:
-        shape, patch_shape, processed_image = patch(img_path,
-                                                    f'{save_path}/patches',
-                                                    norm,
-                                                    size,
-                                                    stride,
-                                                    augment=False,
-                                                    threshold=0,
-                                                    use_mask=False)
-    else:
-        # Only the clahe is done to the image
-        image = imread(img_path)
-        image = (image / image.max() * 255).astype(np.uint8)
-        # Apply Adaptive Histogram Equalization (AHE)
-        kernel_size = norm_param[0]
-        clip_limit = norm_param[1]
-        tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
-        ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-        processed_image = ahe.apply(image)
+    # Only the clahe is done to the image
+    image = imread(img_path)
+    image = (image / image.max() * 255).astype(np.uint8)
+    # Apply Adaptive Histogram Equalization (AHE)
+    kernel_size = norm_param[0]
+    clip_limit = norm_param[1]
+    tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
+    ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    processed_image = ahe.apply(image)
 
-        saved_image = gray2rgb(processed_image)
-        saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
-        img_name = f"{image_id}_0_0.png"
-        image_path = os.path.join(save_path, 'patches', 'images', img_name)
-        imsave(image_path, saved_image, check_contrast=False)
+    saved_image = gray2rgb(processed_image)
+    saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
+    img_name = f"{image_id}_0_0.png"
+    image_path = os.path.join(save_path, 'patches', 'images', img_name)
+    imsave(image_path, saved_image, check_contrast=False)
 
     """ Load dataset """
     test_x = numeric_filesort(f'{save_path}/patches', folder="images")

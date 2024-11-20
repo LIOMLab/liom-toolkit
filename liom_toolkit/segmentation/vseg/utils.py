@@ -4,18 +4,13 @@ from typing import Any
 
 import natsort
 import numpy as np
-import pandas as pd
 import torch
 from PIL import Image
-from albumentations import HorizontalFlip, VerticalFlip, Rotate
 from numpy import ndarray, dtype
 from patchify import patchify
-from skimage.color import gray2rgb
 from skimage.exposure import equalize_adapthist
-from skimage.io import imread, imsave
-from skimage.transform import resize
+from skimage.io import imread
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
-from tqdm.auto import tqdm
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -234,109 +229,6 @@ def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: 
         patch.reshape(patch.shape[0] * patch.shape[1], patch.shape[2], patch.shape[3]))
 
     return patches, image.shape, patch.shape, image_clahe
-
-
-def patch(image_path: str, save_path: str, norm: bool, size: tuple[int, int] = (256, 256), stride: int = 64,
-          augment: bool = True, threshold: int = 5, save_image: bool = True, use_mask: bool = True,
-          remove_background_tiles: bool = False) -> tuple[tuple[int, ...], tuple[int, ...], Any, Any] | tuple[
-    tuple[int, ...], tuple[int, ...], Any]:
-    """
-    Patch an image
-
-    :param image_path: The path to the image
-    :type image_path: str
-    :param save_path: The path to save the patches
-    :type save_path: str
-    :param norm: Normalize the image
-    :type norm: bool
-    :param size: The size of the patches
-    :type size: tuple[int, int]
-    :param stride: The stride of the patches
-    :type stride: int
-    :param augment: Augment the patches
-    :type augment: bool
-    :param threshold: The threshold for removing background tiles
-    :type threshold: int
-    :param save_image: Save the image
-    :type save_image: bool
-    :param use_mask: Use a mask
-    :type use_mask: bool
-    :param remove_background_tiles: Remove background tiles
-    :type remove_background_tiles: bool
-    :return: The shape of the image, the shape of the patches, and the image
-    :rtype: tuple[tuple[int, int], tuple[int, int], np.ndarray]
-    """
-    image_name = image_path.split('/')
-    image_name = image_name[len(image_name) - 1]
-    image_name = image_name.replace('.png', '')
-
-    img_train, shape, patch_shape, image = create_patches(image_path, size=size, stride=stride, norm=norm)
-
-    if use_mask:
-        mask_patch_path = image_path.replace('/image/', '/mask/')
-        mask_patch_path = mask_patch_path.replace('.png', '_mask.png')
-        mask_train, _, _, mask = create_patches(mask_patch_path, size=size, stride=stride, norm=False)
-
-    pixel_sums = []
-    name_idx = 0
-
-    for i in tqdm(range(0, len(img_train)), desc='Patching image'):
-        x = img_train[i]
-        if remove_background_tiles and (np.abs(np.round(x.max(), 5) - np.round(x.min(), 5)) <= 0.001):
-            continue
-
-        if use_mask:
-            y = mask_train[i]
-        pixel_sums.append(img_train[i].sum())
-        mean_pxl = img_train[i].sum() / (size[0] * size[1])
-        if mean_pxl >= threshold:
-            if augment:
-                aug = HorizontalFlip(p=1.0)
-                augmented = aug(image=x, mask=y)
-                x1 = augmented['image']
-                y1 = augmented['mask']
-                aug = VerticalFlip(p=1.0)
-                augmented = aug(image=x, mask=y)
-                x2 = augmented['image']
-                y2 = augmented['mask']
-                aug = Rotate(limit=45, p=1.0)
-                augmented = aug(image=x, mask=y)
-                x3 = augmented['image']
-                y3 = augmented['mask']
-                X = [x, x1, x2, x3]
-                Y = [y, y1, y2, y3]
-            else:
-                X = [x]
-                if use_mask:
-                    Y = [y]
-            index = 0
-            for i in X:
-                i = resize(i, size)
-                tmp_name = f"{image_name}_{name_idx}_{index}.png"
-                create_dir(os.path.join(save_path, 'images'))
-                image_path = os.path.join(save_path, 'images', tmp_name)
-                if save_image:
-                    i = gray2rgb(i, channel_axis=-1)
-                    im = (i * 255).astype(np.uint8)
-                    imsave(image_path, im, check_contrast=False)
-                index += 1
-            if use_mask:
-                for m in Y:
-                    tmp_name = f"{image_name}_{name_idx}_{index}.png"
-                    create_dir(os.path.join(save_path, 'masks'))
-                    mask_path = os.path.join(save_path, 'masks', tmp_name)
-                    if save_image:
-                        m = gray2rgb(m)
-                        imsave(mask_path, m, check_contrast=False)
-                    index += 1
-            name_idx += 1
-    output = pd.DataFrame(data=pixel_sums).T
-    output.to_csv(f'{save_path}/pixel_sums.csv')
-
-    if use_mask:
-        return shape, patch_shape, image, mask
-    else:
-        return shape, patch_shape, image
 
 
 def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
