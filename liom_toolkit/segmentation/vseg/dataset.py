@@ -128,8 +128,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             self.get_valid_indices()
 
     def __getitem__(self, idx):
-        patch_image = self.load_patch(self.data, idx, self.pre_process, normalise=self.normalise,
-                                      normalisation_value=self.max_value)
+        patch_image = super(OmeZarrLabelDataSet, self).__getitem__(idx)
         patch_label = self.load_patch(self.label_data, idx, False, normalise=self.normalise_label,
                                       normalisation_value=self.max_label_value)
         return patch_image, patch_label
