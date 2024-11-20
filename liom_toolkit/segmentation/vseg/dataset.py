@@ -32,9 +32,19 @@ class OmeZarrDataset(Dataset):
         Initialise the dataset. Creates pointers to the data but does not load anything yet.
 
         :param zarr_path: Path to the zarr file
+        :type zarr_path: str
         :param patch_size: Size of the patches to extract
+        :type patch_size: tuple
         :param device: Device to load the data on
+        :type device: str
         :param pre_process: Whether to apply pre-processing (CLAHE) to the data
+        :type pre_process: bool
+        :param normalise: Whether to normalise the data
+        :type normalise: bool
+        :param normalisation_value: The value to use for normalisation
+        :type normalisation_value: int | float
+        :param rotate_patches: Whether to rotate the patches. Performs 4 rotations, so the dataset size is multiplied by 4.
+        :type rotate_patches: bool
         """
         self.zarr_path = zarr_path
         self.patch_size = patch_size
