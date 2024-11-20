@@ -6,7 +6,7 @@ from skimage.io import imread
 
 from .cldice import cl_dice
 from .model import VsegModel
-from .predict_one import predict_one
+from .prediction import predict_one
 from .utils import calculate_metrics
 
 
