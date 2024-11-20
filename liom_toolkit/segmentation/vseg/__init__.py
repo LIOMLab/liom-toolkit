@@ -1,1 +1,1 @@
-from .predict_one import *
+from .prediction import predict_one, predict_volume

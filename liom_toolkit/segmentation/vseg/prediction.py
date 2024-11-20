@@ -1,9 +1,17 @@
+import os
 import shutil
 
 import cv2
+import numpy as np
+import torch
+from skimage.color import gray2rgb
+from skimage.io import imread, imsave
+from tqdm.auto import tqdm
+from zarr.convenience import open
 
+from .dataset import OmeZarrDataset
 from .model import VsegModel
-from .utils import *
+from .utils import create_dir, numeric_filesort, patch, process_image, add_patch_to_empty_array
 
 
 def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
@@ -99,13 +107,7 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
         image = imread(x, as_gray=True)
         image = process_image(image, device)
         image = image.to(device)
-        with torch.no_grad():
-            pred_y = model(image)
-            pred_y = pred_y.cpu()
-            pred_y = pred_y[0].numpy()
-            pred_y = np.squeeze(pred_y, axis=0)
-            pred_y = pred_y > 0.5
-            pred_y = np.array(pred_y, dtype=np.uint8)
+        pred_y = do_predict(model, image)
         if y1 % (n_patches_by_row) == 0 and y1 > 0:
             x1 += 1
             y1 = 0
@@ -129,3 +131,45 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 2
            inference, check_contrast=False)
 
     return inference
+
+
+def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str) -> None:
+    """
+    Predict the volume
+
+    :param model: The model to use for prediction
+    :type model: VsegModel
+    :param dataset: The dataset to use for prediction
+    :type dataset: OmeZarrDataset
+    :param zarr_location: The location of the zarr file
+    :type zarr_location: str
+    """
+    new_volume = open(zarr_location, mode='w', shape=dataset.data.shape, chunks=dataset.data.chunks, dtype=np.uint8)
+
+    for idx in tqdm(range(len(dataset))):
+        patch = dataset[idx]
+        pred_y = do_predict(model, patch)
+
+        z1, z2, y1, y2, x1, x2 = dataset.get_patch_coordinates(idx)
+        new_volume[z1:z2, y1:y2, x1:x2] = pred_y
+
+
+def do_predict(model: VsegModel, patch: torch.Tensor) -> np.ndarray:
+    """
+    Perform the prediction.
+    :param model: The model to use for prediction
+    :type model: VsegModel
+    :param patch: The patch to predict
+    :type patch: torch.Tensor
+
+    :return: The predicted patch
+    :rtype: np.ndarray
+    """
+    with torch.no_grad():
+        pred_y = model(patch)
+        pred_y = pred_y.cpu()
+        pred_y = pred_y[0].numpy()
+        pred_y = np.squeeze(pred_y, axis=0)
+        pred_y = pred_y > 0.5
+        pred_y = np.array(pred_y, dtype=np.uint8)
+    return pred_y
