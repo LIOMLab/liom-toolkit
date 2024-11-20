@@ -144,7 +144,7 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     :param zarr_location: The location of the zarr file
     :type zarr_location: str
     """
-    new_volume = open(zarr_location, mode='w', shape=dataset.data.shape, chunks=dataset.data.chunks, dtype=np.uint8)
+    new_volume = open(zarr_location, mode='w', shape=dataset.data.shape, chunks=dataset.data.chunksize, dtype=np.uint8)
 
     for idx in tqdm(range(len(dataset))):
         patch = dataset[idx]

@@ -15,7 +15,7 @@ class OmeZarrDataset(Dataset):
     zarr_path: str
     data: da.Array
     patch_size: tuple
-    device: str
+    device: torch.device
     pre_process: bool
     normalise: bool
     max_value: int
@@ -25,7 +25,7 @@ class OmeZarrDataset(Dataset):
     kernel_size: int = 10
     clip_limit: float = 0.05
 
-    def __init__(self, zarr_path: str, patch_size: tuple = (32, 32, 32), device='cuda',
+    def __init__(self, zarr_path: str, patch_size: tuple = (32, 32, 32), device: str | torch.device = 'cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535,
                  rotate_patches: bool = True, channel=0):
         """"
@@ -48,6 +48,8 @@ class OmeZarrDataset(Dataset):
         """
         self.zarr_path = zarr_path
         self.patch_size = patch_size
+        if type(device) == str:
+            device = torch.device(device)
         self.device = device
         self.pre_process = pre_process
         self.normalise = normalise
