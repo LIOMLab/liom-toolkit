@@ -147,6 +147,8 @@ def do_predict(model: VsegModel, patch: torch.Tensor) -> np.ndarray:
     :return: The predicted patch
     :rtype: np.ndarray
     """
+    if patch.ndim == 3:
+        patch = patch.unsqueeze(0)
     with torch.no_grad():
         pred_y = model(patch)
         pred_y = pred_y.cpu()
