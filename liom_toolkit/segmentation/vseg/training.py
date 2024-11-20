@@ -166,7 +166,8 @@ def mask_image(x, y_mask, pred_mask, i):
 
 def train_model(dataset_file: str, node_name: str, dev: device = torch.device("cuda"), output_train: str = "training",
                 learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62,
-                wandb_mode: str = "offline", filter_empty_patches: bool = True, wandb_project: str = "vseg", ) -> None:
+                wandb_mode: str = "offline", filter_empty_patches: bool = True, wandb_project: str = "vseg",
+                pin_memory: bool = True) -> None:
     """
     Train the vessel segmentation model
 
@@ -188,6 +189,10 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
     :type wandb_mode: str
     :param wandb_project: The project for wandb. See wandb of LIOM for more details.
     :type wandb_project: str
+    :param filter_empty_patches: Whether to filter empty patches
+    :type filter_empty_patches: bool
+    :param pin_memory: Whether to pin memory in the data loader. Speeds up for CUDA.
+    :type pin_memory: bool
     :return: None
     """
     # Setup training parameters and wandb run
@@ -221,8 +226,8 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
         test_dataset = Subset(full_dataset, test_valid_indices)
 
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
+    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
 
     # Setup check point dir
     best_epoch = -1
