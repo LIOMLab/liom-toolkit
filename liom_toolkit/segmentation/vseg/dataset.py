@@ -20,12 +20,14 @@ class OmeZarrDataset(Dataset):
     normalise: bool
     max_value: int
     grid_shape: tuple
+    rotate_patches: bool
     # CLAHE parameters
     kernel_size: int = 10
     clip_limit: float = 0.05
 
     def __init__(self, zarr_path: str, patch_size: tuple = (32, 32, 32), device='cuda',
-                 pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0):
+                 pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535,
+                 rotate_patches: bool = True, channel=0):
         """"
         Initialise the dataset. Creates pointers to the data but does not load anything yet.
 
@@ -40,6 +42,7 @@ class OmeZarrDataset(Dataset):
         self.pre_process = pre_process
         self.normalise = normalise
         self.max_value = normalisation_value
+        self.rotate_patches = rotate_patches
         self.data = da.from_zarr(self.zarr_path, component='0')
         if len(self.data.shape) == 4:
             self.data = self.data[channel]
@@ -50,8 +53,10 @@ class OmeZarrDataset(Dataset):
                 data_shape[2] // patch_size[2])
 
     def __len__(self) -> int:
-        # Each patch has 4 rotations
-        return self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2] * 4
+        length = self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2]
+        if self.rotate_patches:
+            length *= 4
+        return length
 
     def __getitem__(self, idx) -> (torch.Tensor, torch.Tensor):
         """
@@ -70,8 +75,9 @@ class OmeZarrDataset(Dataset):
     def load_patch(self, data, idx, pre_process=False, normalise: bool = True,
                    normalisation_value: int | float = 65535) -> torch.Tensor:
         # The index corresponds to the place in the grid, the rest is for the rotation
-        idx = idx // 4
-        rest = idx % 4
+        if self.rotate_patches:
+            idx = idx // 4
+            rest = idx % 4
 
         patch_idx = np.unravel_index(idx, self.grid_shape)
         patch_data = data[patch_idx[0] * self.patch_size[0]: (patch_idx[0] + 1) * self.patch_size[0],
@@ -81,7 +87,8 @@ class OmeZarrDataset(Dataset):
         patch_data = patch_data.compute()
 
         # Do rotation based on the rest
-        patch_data = np.rot90(patch_data, k=rest, axes=(-2, -1))
+        if self.rotate_patches:
+            patch_data = np.rot90(patch_data, k=rest, axes=(-2, -1))
 
         # Normalize the data
         if normalise:
