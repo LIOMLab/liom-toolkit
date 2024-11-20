@@ -82,6 +82,16 @@ class OmeZarrDataset(Dataset):
 
         return patch_image
 
+    def get_patch_coordinates(self, idx):
+        patch_idx = np.unravel_index(idx, self.grid_shape)
+        z1 = patch_idx[0] * self.patch_size[0]
+        z2 = (patch_idx[0] + 1) * self.patch_size[0]
+        y1 = patch_idx[1] * self.patch_size[1]
+        y2 = (patch_idx[1] + 1) * self.patch_size[1]
+        x1 = patch_idx[2] * self.patch_size[2]
+        x2 = (patch_idx[2] + 1) * self.patch_size[2]
+        return z1, z2, y1, y2, x1, x2
+
     def load_patch(self, data, idx, pre_process=False, normalise: bool = True,
                    normalisation_value: int | float = 65535) -> torch.Tensor:
         # The index corresponds to the place in the grid, the rest is for the rotation
@@ -89,10 +99,8 @@ class OmeZarrDataset(Dataset):
             idx = idx // 4
             rest = idx % 4
 
-        patch_idx = np.unravel_index(idx, self.grid_shape)
-        patch_data = data[patch_idx[0] * self.patch_size[0]: (patch_idx[0] + 1) * self.patch_size[0],
-                     patch_idx[1] * self.patch_size[1]: (patch_idx[1] + 1) * self.patch_size[1],
-                     patch_idx[2] * self.patch_size[2]: (patch_idx[2] + 1) * self.patch_size[2]]
+        z1, z2, y1, y2, x1, x2 = self.get_patch_coordinates(idx)
+        patch_data = data[z1:z2, y1:y2, x1:x2]
         # Get np array from Dask
         patch_data = patch_data.compute()
 
