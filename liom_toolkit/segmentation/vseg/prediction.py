@@ -133,6 +133,9 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         pred_y = do_predict(model, patch)
 
         z1, z2, y1, y2, x1, x2 = dataset.get_patch_coordinates(idx)
+        if pred_y.ndim == 2:
+            pred_y = np.expand_dims(pred_y, axis=0)
+
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y
 
 
