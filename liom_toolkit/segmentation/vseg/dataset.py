@@ -144,9 +144,9 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
 
     def __init__(self, zarr_path: str, label_node_name: str, patch_size: tuple = (32, 32, 32), device='cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0,
-                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True):
+                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True, rotate_patches=True):
         super(OmeZarrLabelDataSet, self).__init__(zarr_path, patch_size, device, pre_process, normalise,
-                                                  normalisation_value, channel)
+                                                  normalisation_value, rotate_patches, channel)
         self.label_data = da.from_zarr(self.zarr_path, component=f'labels/{label_node_name}/0')
         self.normalise_label = normalise_label
         self.max_label_value = max_label_value
@@ -173,10 +173,19 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
                 valid_indices.append(idx)
 
         valid_indices = np.array(valid_indices)
-        valid_indices *= 4
-        # Insert the rotations
-        valid_indices = np.concatenate([valid_indices, valid_indices + 1, valid_indices + 2, valid_indices + 3])
+
+        # Add 1% of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
+        all_indexes = range(len(self))
+        invalid_indexes = list(set(all_indexes) - set(valid_indices))
+        invalid_indexes = invalid_indexes[:len(invalid_indexes) // 100]
+        valid_indices = np.concatenate([valid_indices, invalid_indexes])
         valid_indices = np.sort(valid_indices)
+
+        if self.rotate_patches:
+            valid_indices *= 4
+            # Insert the rotations
+            valid_indices = np.concatenate([valid_indices, valid_indices + 1, valid_indices + 2, valid_indices + 3])
+            valid_indices = np.sort(valid_indices)
         self.valid_indices = valid_indices
 
     def check_patch(self, patch):

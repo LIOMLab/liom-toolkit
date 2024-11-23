@@ -14,8 +14,8 @@ from .model import VsegModel
 from .utils import create_dir, numeric_filesort, process_image, add_patch_to_empty_array
 
 
-def predict_one(model: VsegModel, img_path: str, save_path: str, stride: int = 256, width: int = 256, norm: bool = True,
-                dev: str = "cuda", norm_param: tuple = (10, 0.05)) -> np.ndarray:
+def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cuda",
+                norm_param: tuple = (10, 0.05)) -> np.ndarray:
     """
     Predict one image
 
@@ -128,11 +128,14 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     """
     new_volume = open(zarr_location, mode='w', shape=dataset.data.shape, chunks=dataset.data.chunksize, dtype=np.uint8)
 
-    for idx in tqdm(range(len(dataset))):
+    for idx in tqdm(range(len(dataset)), desc="Predicting", unit="patches"):
         patch = dataset[idx]
         pred_y = do_predict(model, patch)
 
         z1, z2, y1, y2, x1, x2 = dataset.get_patch_coordinates(idx)
+        if pred_y.ndim == 2:
+            pred_y = np.expand_dims(pred_y, axis=0)
+
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y
 
 
