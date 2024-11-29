@@ -141,15 +141,18 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
     normalise_label: bool
     max_label_value: int = 255
     valid_indices: np.array
+    percentage_empty: float = 0.01
 
     def __init__(self, zarr_path: str, label_node_name: str, patch_size: tuple = (32, 32, 32), device='cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0,
-                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True, rotate_patches=True):
+                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True, rotate_patches=True,
+                 empty_percentage:float=0.01):
         super(OmeZarrLabelDataSet, self).__init__(zarr_path, patch_size, device, pre_process, normalise,
                                                   normalisation_value, rotate_patches, channel)
         self.label_data = da.from_zarr(self.zarr_path, component=f'labels/{label_node_name}/0')
         self.normalise_label = normalise_label
         self.max_label_value = max_label_value
+        self.percentage_empty = empty_percentage
 
         if filter_empty:
             self.get_valid_indices()
@@ -174,10 +177,10 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
 
         valid_indices = np.array(valid_indices)
 
-        # Add 1% of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
+        # Add the precentage of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
         all_indexes = range(len(self))
         invalid_indexes = list(set(all_indexes) - set(valid_indices))
-        invalid_indexes = invalid_indexes[:len(invalid_indexes) // 100]
+        invalid_indexes = invalid_indexes[:int(len(invalid_indexes) * self.percentage_empty)]
         valid_indices = np.concatenate([valid_indices, invalid_indexes])
         valid_indices = np.sort(valid_indices)
 
