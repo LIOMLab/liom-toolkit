@@ -27,7 +27,7 @@ class OmeZarrDataset(Dataset):
 
     def __init__(self, zarr_path: str, patch_size: tuple = (32, 32, 32), device: str | torch.device = 'cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535,
-                 rotate_patches: bool = True, channel=0):
+                 rotate_patches: bool = True, channel=0, z_range: tuple = None):
         """"
         Initialise the dataset. Creates pointers to the data but does not load anything yet.
 
@@ -58,6 +58,11 @@ class OmeZarrDataset(Dataset):
         self.data = da.from_zarr(self.zarr_path, component='0')
         if len(self.data.shape) == 4:
             self.data = self.data[channel]
+
+        if z_range is not None:
+            # If a z_range is provided, slice the data accordingly
+            z_start, z_end = z_range
+            self.data = self.data[z_start:z_end]
 
         # Determine the number of patches that can be extracted from the data
         data_shape = self.data.shape
@@ -145,11 +150,17 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
 
     def __init__(self, zarr_path: str, label_node_name: str, patch_size: tuple = (32, 32, 32), device='cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0,
-                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True, rotate_patches=True,
-                 empty_percentage:float=0.01):
+                 z_range: tuple = None, normalise_label: bool = False, max_label_value: int = 255, filter_empty=True,
+                 rotate_patches=True, empty_percentage: float = 0.01):
         super(OmeZarrLabelDataSet, self).__init__(zarr_path, patch_size, device, pre_process, normalise,
-                                                  normalisation_value, rotate_patches, channel)
+                                                  normalisation_value, rotate_patches, channel, z_range)
         self.label_data = da.from_zarr(self.zarr_path, component=f'labels/{label_node_name}/0')
+        if len(self.label_data.shape) == 4:
+            self.label_data = self.label_data[channel]
+        if z_range is not None:
+            # If a z_range is provided, slice the label data accordingly
+            z_start, z_end = z_range
+            self.label_data = self.label_data[z_start:z_end]
         self.normalise_label = normalise_label
         self.max_label_value = max_label_value
         self.percentage_empty = empty_percentage
