@@ -1,8 +1,10 @@
+from multiprocessing import cpu_count
+
 import dask.array as da
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from tqdm.auto import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from .utils import apply_clahe
 
@@ -151,6 +153,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
     max_label_value: int = 255
     valid_indices: np.array
     percentage_empty: float = 0.01
+    filter_empty: bool = False
 
     def __init__(self, zarr_path: str, label_node_name: str, patch_size: tuple = (32, 32, 32), device='cuda',
                  pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0,
@@ -158,6 +161,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
                  rotate_patches=True, empty_percentage: float = 0.01):
         super(OmeZarrLabelDataSet, self).__init__(zarr_path, patch_size, device, pre_process, normalise,
                                                   normalisation_value, rotate_patches, channel, z_range)
+        self.filter_empty = filter_empty
         self.label_data = da.from_zarr(self.zarr_path, component=f'labels/{label_node_name}/0')
         if len(self.label_data.shape) == 4:
             self.label_data = self.label_data[channel]
@@ -172,6 +176,13 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         if filter_empty:
             self.get_valid_indices()
 
+    def __len__(self) -> int:
+        if hasattr(self, 'valid_indices') and self.filter_empty:
+            return len(self.valid_indices)
+        else:
+            # If not filtering empty patches, return the full length
+            return super(OmeZarrLabelDataSet, self).__len__()
+
     def __getitem__(self, idx):
         patch_image = super(OmeZarrLabelDataSet, self).__getitem__(idx)
         patch_label = self.load_patch(self.label_data, idx, False, normalise=self.normalise_label,
@@ -184,11 +195,16 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         """
         valid_indices = []
         dataset_length = len(self) // 4
-        for idx in tqdm(range(dataset_length), desc='Validating patches', leave=False, total=dataset_length,
-                        unit='patches'):
+
+        def process_patch(idx, indices):
             patch = self[idx * 4][1]
             if self.check_patch(patch):
-                valid_indices.append(idx)
+                indices.append(idx)
+
+        process_map(process_patch, range(dataset_length), valid_indices, unit="patches",
+                    desc="Validating patches", position=0, leave=True, max_workers=(cpu_count() - 2), chunksize=100)
+
+        # valid_indices = [i for i, is_valid in enumerate(results) if is_valid]
 
         valid_indices = np.array(valid_indices)
 
