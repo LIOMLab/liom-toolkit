@@ -89,6 +89,10 @@ class OmeZarrDataset(Dataset):
 
         return patch_image
 
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
     def get_patch_coordinates(self, idx):
         patch_idx = np.unravel_index(idx, self.grid_shape)
         z1 = patch_idx[0] * self.patch_size[0]
