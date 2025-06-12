@@ -13,7 +13,7 @@ from skimage.io import imsave
 from skimage.transform import resize
 from tqdm.auto import tqdm
 
-from liom_toolkit.segmentation import segment_3d_brain
+from liom_toolkit.segmentation import segment_3d
 from .utils import convert_to_png_for_saving
 
 
@@ -84,7 +84,7 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ArrayLike, scales: tuple = (6.5, 6
 
 
 def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
-                          resolution_level: int = 0) -> None:
+                          resolution_level: int = 0, fill_holes=True) -> None:
     """
     Create a mask for a zarr file and write it to disk inside the labels group.
 
@@ -96,8 +96,10 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     :type chunks: tuple
     :param resolution_level: The resolution level of the mask.
     :type resolution_level: int
+    :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
+    :type fill_holes: bool
     """
-    mask = create_mask_from_zarr(zarr_file, resolution_level)
+    mask = create_mask_from_zarr(zarr_file, resolution_level, fill_holes=fill_holes)
     mask = mask.astype("int8")
     mask_transposed = np.transpose(mask, (2, 1, 0))
     color_dict = generate_label_color_dict_mask()
@@ -105,7 +107,7 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
                        name="mask", resolution_level=resolution_level)
 
 
-def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarray:
+def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=True) -> np.ndarray:
     """
     Create a brain mask from a zarr file.
 
@@ -113,6 +115,8 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     :type zarr_file: str
     :param resolution_level: The resolution level of the mask.
     :type resolution_level: int
+    :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
+    :type fill_holes: bool
     :return: The mask
     :rtype: np.ndarray
     """
@@ -121,7 +125,7 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
     if len(image.shape) == 4:
         image = image[0, :, :, :]
     image = image.compute()
-    mask = segment_3d_brain(image)
+    mask = segment_3d(image, fill_holes=fill_holes)
     return mask
 
 

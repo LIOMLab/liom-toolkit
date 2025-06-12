@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 from liom_toolkit.utils import load_zarr, load_node_by_name, download_allen_template
 from liom_toolkit.utils.ants import load_ants_image_from_node
-from ..segmentation import segment_3d_brain
+from ..segmentation import segment_3d
 
 
 def create_template(images: list, masks: list, brain_names: list, template_volume: ANTsImage,
@@ -283,7 +283,7 @@ def build_template_for_resolution(output_file: str, zarr_files: list, brain_name
         template = apply_transforms(fixed=template_volume, moving=template,
                                     transformlist=template_transform["fwdtransforms"])
     # Mask template to remove noise
-    template_mask = segment_3d_brain(template)
+    template_mask = segment_3d(template)
     new_template = template * template_mask
 
     # Apply properties after multiplication
