@@ -72,7 +72,7 @@ all = [
 ]
 
 [project.scripts]
-train-vseg-swinunet = "liom_toolkit.scripts.train_model:main"
+train-vseg-swinunet = "liom_toolkit.scripts.liom_convert_hdf5_to_zarr:main"
 
 [project.urls]
 Homepage = "https://github.com/LIOMLab/liom-toolkit"
