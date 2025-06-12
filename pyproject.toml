@@ -30,13 +30,10 @@ dependencies = [
     'PyWavelets',
     'SimpleITK',
     'dask',
+    'distributed',
     'opencv-python',
-    'torch',
-    'torchvision',
-    'wandb',
     'patchify',
     'natsort',
-    "scikit-learn"
 ]
 
 classifiers = [
@@ -53,11 +50,25 @@ dev = [
     "sphinx-rtd-theme",
     "sphinxcontrib-apidoc"
 ]
+ai = [
+    "torch",
+    "torchvision",
+    "timm",
+    "einops",
+    "wandb",
+    "scikit-learn"
+]
 allensdk = [
     "allensdk",
 ]
 antspy = [
     'antspyx>=0.5.3',
+]
+
+all = [
+    "liom_toolkit[ai]",
+    "liom_toolkit[allensdk]",
+    "liom_toolkit[antspy]"
 ]
 
 [project.scripts]
