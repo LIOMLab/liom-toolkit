@@ -67,8 +67,8 @@ antspy = [
 
 all = [
     "liom_toolkit[ai]",
-    "liom_toolkit[allensdk]",
-    "liom_toolkit[antspy]"
+    "liom_toolkit[antspy]",
+     "liom_toolkit[allensdk]",
 ]
 
 [project.scripts]
