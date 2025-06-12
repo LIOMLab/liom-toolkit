@@ -74,6 +74,7 @@ all = [
 
 [project.scripts]
 liom-convert-hdf5-to-zarr = "liom_toolkit.scripts.liom_convert_hdf5_to_zarr:main"
+liom-create-mask = "liom_toolkit.scripts.liom_create_mask:main"
 
 [project.urls]
 Homepage = "https://github.com/LIOMLab/liom-toolkit"
