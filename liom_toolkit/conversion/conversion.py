@@ -13,7 +13,6 @@ from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image, ArrayLike
 from tqdm.auto import tqdm
 
-from liom_toolkit.registration import align_annotations_to_volume
 from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import load_zarr, save_atlas_to_zarr, \
     create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
@@ -219,6 +218,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     try:
         import ants
         from liom_toolkit.utils.ants import load_ants_image_from_node
+        from liom_toolkit.registration import align_annotations_to_volume
     except ImportError:
         raise ImportError("Please install ANTsPy to create the full zarr volume of the LIOM toolkit.")
     temp_dir = tempfile.TemporaryDirectory()

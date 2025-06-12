@@ -14,7 +14,6 @@ from skimage.transform import resize
 from tqdm.auto import tqdm
 
 from liom_toolkit.segmentation import segment_3d_brain
-from .allen_sdk import generate_label_color_dict_allen
 from .utils import convert_to_png_for_saving
 
 
@@ -78,6 +77,7 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ArrayLike, scales: tuple = (6.5, 6
     :param resolution_level: The resolution level of the atlas.
     :type resolution_level: int
     """
+    from .allen_sdk import generate_label_color_dict_allen
     color_dict = generate_label_color_dict_allen()
     save_label_to_zarr(label=atlas, zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
                        resolution_level=resolution_level, name="atlas")
