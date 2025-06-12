@@ -1,6 +1,6 @@
 # Liom Toolkit
 
-This package supports the research being done by the [Laboratoire d’Imagerie Optique et Moléculaire](https://liom.ca) at
+This package supports the research being done by the Laboratoire d’Imagerie Optique et Moléculaire at
 Polytechnique Montréal. It hosts a collection of scripts used to process and analyze data collected by the lab.
 
 [![Build and Publish Toolkit](https://github.com/LIOMLab/liom-toolkit/actions/workflows/main.yml/badge.svg)](https://github.com/LIOMLab/liom-toolkit/actions/workflows/main.yml) [![Documentation Status](https://readthedocs.org/projects/liom-toolkit/badge/?version=latest)](https://liom-toolkit.readthedocs.io/en/latest/?badge=latest)
@@ -17,32 +17,11 @@ Due to the complicated requirements, a detailed installation guide is provided b
 
 ## Usage
 
-Demonstrations of some of the functionalities of the package can be found in the notebooks in the LIOM Notebooks repository.
+Demonstrations of some of the functionalities of the package can be found in the notebooks in the LIOM Notebooks
+repository.
 The repository can be found here: [LIOM Notebooks](https://github.com/LIOMLab/liom-notebooks)
 
 ## Requirements
-
-The package requires the following packages to be installed and will attempt to install them using installation:
-
-- antspyx
-- tqdm
-- scikit-image
-- ome-zarr
-- nibabel
-- zarr
-- h5py
-- pynrrd
-- PyWavelets
-- SimpleITK
-- allensdk
-- dask
-- opencv-python
-- torch
-- torchvision
-- wandb
-- patchify
-- natsort
-- albumentations
 
 To create an anaconda environment with all the required packages, run the following commands:
 
