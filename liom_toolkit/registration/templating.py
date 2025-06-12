@@ -10,7 +10,8 @@ from ants.core import ants_image_io as iio
 from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import load_zarr, load_node_by_name, load_ants_image_from_node, download_allen_template
+from liom_toolkit.utils import load_zarr, load_node_by_name, download_allen_template
+from liom_toolkit.utils.ants import load_ants_image_from_node
 from ..segmentation import segment_3d_brain
 
 

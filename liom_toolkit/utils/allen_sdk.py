@@ -5,9 +5,17 @@ import ants
 import nrrd
 import numpy as np
 import pandas as pd
-from allensdk.core.reference_space import ReferenceSpace
-from allensdk.core.reference_space_cache import ReferenceSpaceCache
-from ants.core.ants_image import ANTsImage
+
+try:
+    from allensdk.core.reference_space import ReferenceSpace
+    from allensdk.core.reference_space_cache import ReferenceSpaceCache
+except ImportError:
+    raise ImportError("Please install the Allen SDK to use the Allen reference space functions of the LIOM toolkit.")
+
+try:
+    from ants.core.ants_image import ANTsImage
+except ImportError:
+    raise ImportError("Please install ANTsPy to use the Allen reference space functions of the LIOM toolkit.")
 
 
 def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTsImage:

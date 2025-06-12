@@ -1,11 +1,9 @@
 import os
 from typing import Callable, Union
 
-import ants
 import dask.array as da
 import numpy as np
 import zarr
-from ants.core.ants_image import ANTsImage
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
@@ -47,62 +45,6 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.array
     """
     volume = node.data[resolution_level]
     return volume
-
-
-def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int = 2,
-                         volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.])) -> ANTsImage:
-    """
-    Convert a dask array to an ANTs image.
-
-    :param dask_array: The dask array to convert.
-    :type dask_array: da.Array
-    :param node: The zarr node corresponding to the image.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :param volume_direction: The direction of the volume.
-    :type volume_direction: tuple
-    :return: The converted ANTs image.
-    :rtype: ANTsImage
-    """
-    # Compute dask array to get values
-    array = dask_array.compute()
-
-    # reverse the order of the axes
-    array = np.transpose(array, (2, 1, 0)).astype("uint32")
-    ants_image = ants.from_numpy(array)
-
-    # Set metadata
-    transform = load_zarr_transform_from_node(node, resolution_level=resolution_level)
-    if len(transform) == 4:
-        transform = transform[1:]
-
-    # Convert to mm
-    transform = [element / 1000 for element in transform]
-    ants_image.set_spacing(transform)
-    ants_image.set_direction(volume_direction)
-
-    return ants_image
-
-
-def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) -> ANTsImage:
-    """
-    Load an ANTs image from a zarr node.
-
-    :param node: The zarr node to load.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :param channel: The channel to load.
-    :type channel: int
-    :return: The loaded ANTs image.
-    :rtype: ANTsImage
-    """
-    image = load_zarr_image_from_node(node, resolution_level)
-    if len(image.shape) == 4:
-        image = image[channel, :, :, :]
-    ants_image = convert_dask_to_ants(image, node, resolution_level)
-    return ants_image
 
 
 def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict:
@@ -223,19 +165,6 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
     write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
                  coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
                  chunks=chunks, scaler=scaler, name=name, label_metadata=label_metadata)
-
-
-def set_physical_shape(image: ANTsImage) -> None:
-    """
-    Set the physical shape of an ANTs image by multiplying the shape with the spacing.
-
-    :param image: The image to set the physical shape for.
-    :type image: ANTsImage
-    """
-    dims = np.array(image.shape)
-    spacing = np.array(image.spacing)
-    physical_shape = tuple(dims * spacing)
-    image.physical_shape = physical_shape
 
 
 def generate_label_color_dict_mask() -> list[dict]:
