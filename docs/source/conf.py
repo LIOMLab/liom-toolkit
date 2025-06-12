@@ -14,6 +14,7 @@ author = 'Frans Irgolitsch'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
+    'sphinx.ext.autodoc',
     'sphinxcontrib.apidoc'
 ]
 

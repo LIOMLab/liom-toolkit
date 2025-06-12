@@ -1,7 +1,7 @@
-liom\_toolkit.registration.register module
+liom\_toolkit.conversion.conversion module
 ==========================================
 
-.. automodule:: liom_toolkit.registration.register
+.. automodule:: liom_toolkit.conversion.conversion
    :members:
    :show-inheritance:
    :undoc-members:

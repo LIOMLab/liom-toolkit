@@ -24,5 +24,5 @@ Module contents
 
 .. automodule:: liom_toolkit.segmentation
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
