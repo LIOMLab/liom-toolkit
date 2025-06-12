@@ -185,7 +185,7 @@ def generate_label_color_dict_mask() -> list[dict]:
         },
         {
             "label-value": 1,
-            "rgba": [255, 255, 255, 255]
+            "rgba": [250, 0, 0, 255]
         }
     ]
     return label_colors
