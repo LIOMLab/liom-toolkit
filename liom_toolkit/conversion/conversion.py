@@ -1,7 +1,6 @@
 import os
 import tempfile
 
-import ants
 import dask.array as da
 import h5py
 import nibabel as nib
@@ -229,6 +228,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     :param chunks: The chunk size to use for the volume.
     :type chunks: tuple
     """
+    import ants
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
     atlas_resolution = 25
