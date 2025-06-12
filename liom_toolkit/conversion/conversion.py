@@ -10,15 +10,13 @@ import zarr
 from natsort import natsorted
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
-from ome_zarr.scale import Scaler
 from ome_zarr.writer import write_image, ArrayLike
 from tqdm.auto import tqdm
 
 from liom_toolkit.registration import align_annotations_to_volume
-from liom_toolkit.utils.ants import load_ants_image_from_node
 from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import load_zarr, save_atlas_to_zarr, \
-    CustomScaler, create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
+    create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
     generate_label_color_dict_mask, load_node_by_name, load_zarr_image_from_node
 
 
@@ -88,21 +86,14 @@ def save_zarr(data: ArrayLike, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
-    if isinstance(data, da.Array):
-        scaler = Scaler()
-    else:
-        scaler = CustomScaler(order=1, anti_aliasing=True, downscale=2, method="nearest", input_layer=0)
-
     write_image(image=data, group=root, axes=generate_axes_dict(n_dims),
-                coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
-                storage_options=dict(chunks=chunks),
-                scaler=scaler)
+                coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+                storage_options=dict(chunks=chunks))
     print("Done!")
 
 
-def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True, remove_stripes: bool = False,
-                         scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
-                         base_key: str = "reconstructed_frame") -> None:
+def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True, scales: tuple = (6.5, 6.5, 6.5),
+                         chunks: tuple = (128, 128, 128)) -> None:
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
 
@@ -112,14 +103,10 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True
     :type zarr_file: str
     :param use_memmap: Whether to use a memmap or not.
     :type use_memmap: bool
-    :param remove_stripes: Whether to remove stripes from the data.
-    :type remove_stripes: bool
     :param scales: The resolution of the image, in z y x order.
     :type scales: tuple
     :param chunks: The chunk size to use.
     :type chunks: tuple
-    :param base_key: The base key of the HDF5 key list.
-    :type base_key: str
     """
 
     map_file = "temp.dat"
@@ -231,6 +218,7 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     """
     try:
         import ants
+        from liom_toolkit.utils.ants import load_ants_image_from_node
     except ImportError:
         raise ImportError("Please install ANTsPy to create the full zarr volume of the LIOM toolkit.")
     temp_dir = tempfile.TemporaryDirectory()

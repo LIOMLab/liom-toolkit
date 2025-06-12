@@ -7,7 +7,7 @@ import zarr
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
-from ome_zarr.scale import Scaler, ArrayLike
+from ome_zarr.scale import ArrayLike, Scaler
 from ome_zarr.writer import write_labels
 from skimage.io import imsave
 from skimage.transform import resize
@@ -127,7 +127,7 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0) -> np.ndarr
 
 def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict], name: str,
                        scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
-                       resolution_level: int = 0, ) -> None:
+                       resolution_level=0) -> None:
     """
     Save a mask to a zarr file inside the labels group.
 
@@ -141,10 +141,10 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
     :type scales: tuple
     :param chunks: The chunks to use for the mask.
     :type chunks: tuple
-    :param resolution_level: The resolution level of the mask.
-    :type resolution_level: int
     :param name: The name of the mask.
     :type name: str
+    :param resolution_level: The resolution level of the label.
+    :type resolution_level: int
     """
     n_dims = len(label.shape)
     file = parse_url(zarr_file, mode="w").store
@@ -156,15 +156,15 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
                       }
                       }
 
-    if isinstance(label, da.Array):
-        scaler = Scaler()
+    if resolution_level != 0:
+        scaler = CustomScaler(input_layer=resolution_level, max_layer=5, downscale=2, method="nearest")
     else:
-        scaler = CustomScaler(order=0, anti_aliasing=False, downscale=2, method="nearest",
-                              input_layer=resolution_level, original_image=zarr_file)
+        scaler = Scaler(max_layer=5, downscale=2, method="nearest")
 
     write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
-                 coordinate_transformations=create_transformation_dict(scales, 5, n_dims),
-                 chunks=chunks, scaler=scaler, name=name, label_metadata=label_metadata)
+                 coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+                 name=name, label_metadata=label_metadata, storage_options=dict(chunks=chunks),
+                 scaler=scaler)
 
 
 def generate_label_color_dict_mask() -> list[dict]:
@@ -185,6 +185,111 @@ def generate_label_color_dict_mask() -> list[dict]:
         }
     ]
     return label_colors
+
+
+def create_transformation_dict(n_levels, voxel_size, n_dims=3) -> list[list[dict]]:
+    """
+    Create a dictionary with the transformation information for
+    images up to 4 dimensions.
+
+    :type n_levels: int
+    :param n_levels: The number of levels in the pyramid.
+    :type voxel_size: tuple
+    :param voxel_size: The voxel size of the dataset.
+    :type n_dims: int
+    :param n_dims: The number of dimensions of the dataset.
+    :return coord_transforms: List of coordinate transformations
+    :rtype coord_transforms: list[list[dict]]
+    """
+
+    def _get_scale(level, ndims):
+        scale_def = [1.0,
+                     (voxel_size[0] * 2.0 ** level),
+                     (voxel_size[1] * 2.0 ** level),
+                     (voxel_size[2] * 2.0 ** level)]
+        offset = len(scale_def) - ndims
+        return scale_def[offset:]
+
+    coord_transforms = []
+    for i in range(n_levels):
+        transform_dict = [{
+            "type": "scale",
+            "scale": _get_scale(i, n_dims)
+        }]
+        coord_transforms.append(transform_dict)
+    return coord_transforms
+
+
+def generate_axes_dict(dimensions: int) -> list:
+    """
+    Generate the axes dictionary for the zarr file.
+
+    :param dimensions: The number of dimensions in the image.
+    :type dimensions: int
+
+    :return: The axes dictionary.
+    :rtype: list
+    """
+    axes = [
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"}
+    ]
+    if dimensions == 4:
+        axes.insert(0, {"name": "c", "type": "channel"})
+    return axes
+
+
+def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
+    """
+    Load a node by name from a zarr file. Returns None if the node is not found.
+
+    :param nodes: The nodes to search through.
+    :type nodes: list[Node]
+    :param name: The name of the node to load.
+    :type name: str
+    :return: The loaded node.
+    :rtype: Node | None
+    """
+    for node in nodes:
+        # Check for empy dict
+        if node.metadata == {}:
+            continue
+
+        if node.metadata["name"] == name:
+            return node
+    return None
+
+
+def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
+    """
+    Extract a zarr file to a directory of PNG images.
+
+    :param zarr_file: The zarr file to extract.
+    :type zarr_file: str
+    :param target_dir: The directory to save the PNG images to.
+    :type target_dir: str
+    :param channel: The channel to extract.
+    :type channel: int
+    :return: None
+    """
+    node = load_zarr(zarr_file)[0]
+    volume = node.data[0]
+
+    if len(volume.shape) == 4:
+        volume = volume[channel]
+
+    # Create if not exists, empty if exists
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+    else:
+        for file in os.listdir(target_dir):
+            os.remove(os.path.join(target_dir, file))
+
+    for z in tqdm(range(volume.shape[0])):
+        image = volume[z, :, :]
+        image = convert_to_png_for_saving(image)
+        imsave(f"{target_dir}/{str(z)}.png", image, check_contrast=False)
 
 
 class CustomScaler(Scaler):
@@ -369,104 +474,3 @@ class CustomScaler(Scaler):
                     new_stack[:] = out
         image = new_stack
         return image
-
-
-def create_transformation_dict(scales: tuple, levels: int, dimensions: int) -> list:
-    """
-    Create a dictionary with the transformation information for 3D images.
-
-    :param scales: The scale of the image, in z y x order.
-    :type scales: tuple
-    :param levels: The number of levels in the pyramid.
-    :type levels: int
-    :param dimensions: The number of dimensions in the image.
-    :type dimensions: int
-    :return: The transformation dictionary.
-    :rtype: list
-    """
-    coord_transforms = []
-    for i in range(levels):
-        if dimensions == 4:
-            transform_dict = [{
-                "type": "scale",
-                "scale": [1, scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-            }]
-        else:
-            transform_dict = [{
-                "type": "scale",
-                "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-            }]
-        coord_transforms.append(transform_dict)
-    return coord_transforms
-
-
-def generate_axes_dict(dimensions: int) -> list:
-    """
-    Generate the axes dictionary for the zarr file.
-
-    :param dimensions: The number of dimensions in the image.
-    :type dimensions: int
-
-    :return: The axes dictionary.
-    :rtype: list
-    """
-    axes = [
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"}
-    ]
-    if dimensions == 4:
-        axes.insert(0, {"name": "c", "type": "channel"})
-    return axes
-
-
-def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
-    """
-    Load a node by name from a zarr file. Returns None if the node is not found.
-
-    :param nodes: The nodes to search through.
-    :type nodes: list[Node]
-    :param name: The name of the node to load.
-    :type name: str
-    :return: The loaded node.
-    :rtype: Node | None
-    """
-    for node in nodes:
-        # Check for empy dict
-        if node.metadata == {}:
-            continue
-
-        if node.metadata["name"] == name:
-            return node
-    return None
-
-
-def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
-    """
-    Extract a zarr file to a directory of PNG images.
-
-    :param zarr_file: The zarr file to extract.
-    :type zarr_file: str
-    :param target_dir: The directory to save the PNG images to.
-    :type target_dir: str
-    :param channel: The channel to extract.
-    :type channel: int
-    :return: None
-    """
-    node = load_zarr(zarr_file)[0]
-    volume = node.data[0]
-
-    if len(volume.shape) == 4:
-        volume = volume[channel]
-
-    # Create if not exists, empty if exists
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
-    else:
-        for file in os.listdir(target_dir):
-            os.remove(os.path.join(target_dir, file))
-
-    for z in tqdm(range(volume.shape[0])):
-        image = volume[z, :, :]
-        image = convert_to_png_for_saving(image)
-        imsave(f"{target_dir}/{str(z)}.png", image, check_contrast=False)
