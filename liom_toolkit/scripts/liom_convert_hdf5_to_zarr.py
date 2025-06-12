@@ -19,6 +19,8 @@ def _build_argument_parser():
                    help="Scales (voxel size) for the Zarr dataset (default=%(default)s)")
     p.add_argument("--chunks", type=int, nargs=3, default=(128, 128, 128),
                    help="Chunk size for the Zarr dataset (default=%(default)s)")
+    p.add_argument("--dask_scheduler", type=str, default=None,
+                   help="Network address of the dask scheduler to use for parallel processing. If not provided, the default local scheduler will be used.)")
 
     return p
 
@@ -29,6 +31,11 @@ def main():
     """
     parser = _build_argument_parser()
     args = parser.parse_args()
+
+    if args.dask_scheduler:
+        from liom_toolkit.utils import dask_client_manager
+        # Initialize Dask client if a scheduler address is provided
+        dask_client_manager.set_client(args.dask_scheduler)
 
     # Convert the HDF5 file to Zarr format
     convert_hdf5_to_zarr(
