@@ -7,7 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'LIOM Toolkit'
-copyright = '2024, Frans Irgolitsch'
+copyright = '2025, LIOM Toolkit Developers'
 author = 'Frans Irgolitsch'
 
 # -- General configuration ---------------------------------------------------
