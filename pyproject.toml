@@ -1,3 +1,69 @@
 [build-system]
-requires = ["setuptools>=67.0.0", "wheel", "setuptools_scm"]
+requires = ["setuptools >= 77.0.3"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["liom_toolkit"]
+
+[project]
+name = "liom-toolkit"
+readme = "README.md"
+version = "2025.06.12"
+license = "GPL-3.0-or-later"
+requires-python = ">= 3.11"
+authors = [
+    { name = "Frederic Lesage", email = "frederic.lesage@polymtl.ca" },
+    { name = "Frans Irgolitsch", email = "frans.irgolitsch@polymtl.ca" }
+]
+description = "LIOM Toolkit is a Python package for processing and analyzing microscopy data, providing tools for image segmentation, registration, and analysis."
+keywords = ["bioinformatics", "neuroinformatics", "lightsheet", "microscopy", "liom", "segmentation", "registration", "image processing",
+    "deep learning"]
+
+dependencies = [
+    'tqdm',
+    'scikit-image',
+    'ome-zarr>=0.9.0',
+    'nibabel',
+    'zarr',
+    'h5py',
+    'pynrrd',
+    'PyWavelets',
+    'SimpleITK',
+    'dask',
+    'opencv-python',
+    'torch',
+    'torchvision',
+    'wandb',
+    'patchify',
+    'natsort',
+    "scikit-learn"
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3.11"
+]
+
+[project.optional-dependencies]
+dev = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinxcontrib-apidoc"
+]
+allensdk = [
+    "allensdk",
+]
+antspy = [
+    'antspyx>=0.5.3',
+]
+
+[project.scripts]
+train-vseg-swinunet = "liom_toolkit.scripts.train_model:main"
+
+[project.urls]
+Homepage = "https://github.com/LIOMLab/liom-toolkit"
+Documentation = "https://liom-toolkit.readthedocs.io/"
+Repository = "https://github.com/LIOMLab/liom-toolkit"
