@@ -30,6 +30,7 @@ dependencies = [
     'PyWavelets',
     'SimpleITK',
     'dask',
+    "bokeh>=3.1.0", # Bokeh is used for the dask dashboard
     'distributed',
     'opencv-python',
     'patchify',
