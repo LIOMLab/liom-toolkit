@@ -2,9 +2,6 @@
 requires = ["setuptools >= 77.0.3"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["liom_toolkit"]
-
 [project]
 name = "liom-toolkit"
 readme = "README.md"
@@ -69,7 +66,7 @@ antspy = [
 all = [
     "liom_toolkit[ai]",
     "liom_toolkit[antspy]",
-     "liom_toolkit[allensdk]",
+    "liom_toolkit[allensdk]",
 ]
 
 [project.scripts]
