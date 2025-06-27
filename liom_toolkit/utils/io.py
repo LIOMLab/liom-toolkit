@@ -161,9 +161,9 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
                       }
 
     if resolution_level != 0:
-        scaler = CustomScaler(input_layer=resolution_level, max_layer=5, downscale=2, method="nearest")
+        scaler = CustomScaler(input_layer=resolution_level, max_layer=4, downscale=2, method="nearest")
     else:
-        scaler = Scaler(max_layer=5, downscale=2, method="nearest")
+        scaler = Scaler(max_layer=4, downscale=2, method="nearest")
 
     write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
                  coordinate_transformations=create_transformation_dict(5, scales, n_dims),
