@@ -25,6 +25,7 @@ def segment_3d(volume: np.ndarray, k: int = 5, use_log: bool = True,
     :return: The segmented mask
     :rtype: np.ndarray
     """
+    print("Segmenting 3D volume...")
     vol_p = np.copy(volume)
     if use_log:
         vol_p[volume > 0] = np.log(vol_p[volume > 0])
@@ -33,6 +34,7 @@ def segment_3d(volume: np.ndarray, k: int = 5, use_log: bool = True,
     img = sitk.GetImageFromArray(vol_p)
     img = sitk.Median(img, [k, k, k])
 
+    print("Thresholding image...")
     # Segmenting using an Otsu threshold
     if threshold_method == "otsu":
         marker_img = ~sitk.OtsuThreshold(img)
@@ -41,17 +43,23 @@ def segment_3d(volume: np.ndarray, k: int = 5, use_log: bool = True,
     else:
         marker_img = ~sitk.OtsuThreshold(img)
 
+    print("Applying watershed operations...")
     # Using a watershed algorithm to optimize the mask
     ws = sitk.MorphologicalWatershedFromMarkers(img, marker_img)
 
+    print("Separating foreground and background...")
     # Separating into foreground / background
     seg = sitk.ConnectedComponent(ws != ws[0, 0, 0])
 
+    mask = sitk.GetArrayFromImage(seg)
+
     # Filling holes and returning the mask
     if fill_holes:
+        print("Filling holes...")
         # Fill holes in the mask
-        mask = fill_holes_2d_3d(sitk.GetArrayFromImage(seg))
+        mask = fill_holes_2d_3d(mask)
 
+    print("Removing small structures...")
     # Remove small objects
     mask = remove_small_structures(vol_p, mask)
 
