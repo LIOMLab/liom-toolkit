@@ -101,9 +101,8 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     """
     mask = create_mask_from_zarr(zarr_file, resolution_level, fill_holes=fill_holes)
     mask = mask.astype("int8")
-    mask_transposed = np.transpose(mask, (2, 1, 0))
     color_dict = generate_label_color_dict_mask()
-    save_label_to_zarr(mask_transposed, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
+    save_label_to_zarr(mask, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
                        name="mask", resolution_level=resolution_level)
 
 
@@ -126,6 +125,9 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=
         image = image[0, :, :, :]
     image = image.compute()
     mask = segment_3d(image, fill_holes=fill_holes)
+    # Compare first dimension to see if transpose is needed
+    if mask.shape[0] != image.shape[0]:
+        mask = np.transpose(mask, (2, 1, 0))
     return mask
 
 
@@ -186,6 +188,10 @@ def generate_label_color_dict_mask() -> list[dict]:
         {
             "label-value": 1,
             "rgba": [250, 0, 0, 255]
+        },
+        {
+            "label-value": None,
+            "rgba": [255, 255, 255, 255]
         }
     ]
     return label_colors
