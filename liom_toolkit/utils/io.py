@@ -369,7 +369,12 @@ class CustomScaler(Scaler):
         :rtype: np.ndarray
         """
         if isinstance(plane, da.Array):
-            plane = plane.compute()
+
+            def _resize(
+                    image: ArrayLike, output_shape: tuple, **kwargs
+            ) -> ArrayLike:
+                return dask_resize(image, output_shape, **kwargs)
+
         else:
             _resize = resize
 

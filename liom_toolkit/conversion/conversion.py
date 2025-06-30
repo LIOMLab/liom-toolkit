@@ -113,6 +113,9 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True
     map_file = "temp.dat"
     data = load_hdf5(hdf5_file)
 
+    # Convert to numpy for now to fix 3D downsampling issues
+    data = data.compute()
+
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
     if use_memmap:
         os.remove(map_file)
