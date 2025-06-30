@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import load_zarr, save_atlas_to_zarr, \
     create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
-    generate_label_color_dict_mask, load_node_by_name, load_zarr_image_from_node
+    generate_label_color_dict_mask, load_node_by_name, load_zarr_image_from_node, CustomScaler
 
 
 def load_hdf5(hdf5_file: str) -> da.Array:
@@ -85,9 +85,11 @@ def save_zarr(data: ArrayLike, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
+    scaler = CustomScaler(input_layer=0)
+
     write_image(image=data, group=root, axes=generate_axes_dict(n_dims),
                 coordinate_transformations=create_transformation_dict(5, scales, n_dims),
-                storage_options=dict(chunks=chunks))
+                storage_options=dict(chunks=chunks), scaler=scaler)
     print("Done!")
 
 
