@@ -45,14 +45,6 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "sphinx",
-    "sphinx-rtd-theme",
-    "sphinxcontrib-apidoc",
-    "pytest",
-    "pytest-cov",
-    "pytest-xdist",
-]
 ai = [
     "torch",
     "torchvision",
@@ -72,6 +64,23 @@ all = [
     "liom_toolkit[ai]",
     "liom_toolkit[antspy]",
     "liom_toolkit[allensdk]",
+]
+
+[dependency-groups]
+dev = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinxcontrib-apidoc",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "hypothesis",
+    "ruff>=0.16.4",
+    "ty>=0.0.74",
+    "types-tqdm",
+    "types-opencv-python>=1.0.11",
+    "scipy-stubs",
+    "pandas-stubs",
 ]
 
 [project.scripts]
