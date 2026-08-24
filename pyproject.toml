@@ -150,6 +150,27 @@ convention = "numpy"
 [tool.ruff.format]
 # defaults — line-length 100 inherited from [tool.ruff]
 
+[tool.ty.rules]
+# ty has no `strict = true` flag; setting every rule to "error" is the
+# documented equivalent of strict mode.
+all = "error"
+
+[tool.ty.environment]
+python-version = "3.12"   # match ruff target-version (>=3.12 floor)
+
+# Optional deps (ants, allensdk, torch) ship no inline types and no stubs are
+# installed in the base environment. These overrides silence
+# `unresolved-import` for the modules that guard those imports with
+# try/except ImportError at runtime. Baseline-only in this phase — NOT
+# CI-gated (gating deferred to the lint/typing full-adoption phase).
+[[tool.ty.overrides]]
+include = ["liom_toolkit/registration/**", "liom_toolkit/utils/ants.py", "liom_toolkit/utils/allen_sdk.py"]
+rules = { unresolved-import = "ignore" }
+
+[[tool.ty.overrides]]
+include = ["liom_toolkit/segmentation/vseg/**"]
+rules = { unresolved-import = "ignore" }
+
 [tool.setuptools.package-data]
 liom_toolkit = ["py.typed"]
 
