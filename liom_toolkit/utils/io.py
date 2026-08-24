@@ -455,7 +455,7 @@ class CustomScaler(Scaler):
         :param func: The function to apply to the image.
         :type func: Callable[[np.ndarray, int, int], np.ndarray]
         :return: The transformed image.
-        :rtype: list[Union[ndarray, ndarray, None]]
+        :rtype: list[ndarray | ndarray | None]
         """
         aa = self.anti_aliasing
         start_scale = self.input_layer
