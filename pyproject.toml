@@ -117,6 +117,39 @@ markers = [
 # observed during a test run.
 filterwarnings = []
 
+[tool.ruff]
+target-version = "py312"   # NOT py314 — load-bearing for 3.12 forward-ref support (from __future__ import annotations stays)
+line-length = 100
+extend-exclude = []
+
+# Phase-1 strategy: enable the AUTO-FIXABLE rule subset now; the full
+# expansive set (ANN, ARG, PL, S, N, D, etc.) is suppressed and ratcheted
+# into the lint full-adoption phase (LINT-01). The Phase-1 select list
+# bounds what the one-time `ruff check --fix --unsafe-fixes` rewrite can
+# touch. CI runs `ruff check` + `ruff format --check` read-only.
+[tool.ruff.lint]
+# Phase-1 auto-fixable subset: E, F, W, I, UP, B, SIM, C4, RUF.
+# UP037 (useless future import) does NOT fire under target-version = "py312",
+# so `from __future__ import annotations` is preserved (load-bearing on 3.12).
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+# Formatter-conflicting rules MUST be ignored when using `ruff format`.
+ignore = ["COM812", "ISC001"]
+
+[tool.ruff.lint.per-file-ignores]
+# Forward-looking: tests legitimately use `assert` (S101). S101 is not in the
+# Phase-1 select list above, so production assert usage is not flagged this
+# phase. When S101 is enabled in the lint full-adoption phase, tests stay
+# exempt via this entry.
+"tests/**" = [
+    "S101",   # assert is the idiomatic pytest assertion primitive
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+# defaults — line-length 100 inherited from [tool.ruff]
+
 [tool.setuptools.package-data]
 liom_toolkit = ["py.typed"]
 
