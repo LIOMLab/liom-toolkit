@@ -6,6 +6,60 @@ They are shipped in Phase 1 so later phases can consume them without
 redefinition.
 """
 
+import sys
+import types
+
+# The package's barrel ``__init__.py`` files create an import chain that
+# pulls in optional deps and broken imports even when importing a core-only
+# module such as ``utils.utils``. Specifically:
+#
+#   utils.__init__ → utils.io → segmentation.__init__
+#     → segmentation.volume_segmentation (bare ``import ants``)
+#     → segmentation.vseg               (torch, sklearn, removed zarr.convenience)
+#
+# Until the lazy-import migration lands and dependency adaptations are applied,
+# pre-populate ``sys.modules`` with lightweight stand-ins for the two
+# problematic segmentation submodules so the barrel import chain succeeds on
+# the base install. The canary only exercises ``fix_even`` (core deps: os,
+# numpy) — it never calls into ``volume_segmentation`` or ``vseg``.
+#
+# Tests that actually exercise an optional dep should gate with
+# ``pytest.importorskip("ants")`` / ``"torch"`` and remove the corresponding
+# sys.modules entry inside the test body so the real import is attempted.
+
+_VOL_SEG_NAMES = [
+    "liom_toolkit.segmentation.volume_segmentation",
+    "liom_toolkit.segmentation.vseg",
+    "liom_toolkit.segmentation.vseg.prediction",
+    "liom_toolkit.segmentation.vseg.dataset",
+    "liom_toolkit.segmentation.vseg.model",
+    "liom_toolkit.segmentation.vseg.utils",
+    "liom_toolkit.segmentation.vseg.loss",
+    "liom_toolkit.segmentation.vseg.validation",
+    "liom_toolkit.segmentation.vseg.cldice",
+]
+
+for _name in _VOL_SEG_NAMES:
+    if _name not in sys.modules:
+        _mock = types.ModuleType(_name)
+        # Expose no-op callables so star-imports in segmentation.__init__
+        # and vseg.__init__ pick up the expected names without error.
+        _mock.__all__ = []
+        sys.modules[_name] = _mock
+
+# Provide the names that the barrel ``__init__.py`` files expect to
+# star-import, so ``from .volume_segmentation import *`` and
+# ``from .vseg import *`` succeed. ``__all__`` must list them explicitly,
+# otherwise the star-import picks up nothing.
+_vol_seg = sys.modules["liom_toolkit.segmentation.volume_segmentation"]
+_vol_seg.segment_3d = lambda *a, **k: None
+_vol_seg.__all__ = ["segment_3d"]
+
+_vseg = sys.modules["liom_toolkit.segmentation.vseg"]
+_vseg.predict_one = lambda *a, **k: None
+_vseg.predict_volume = lambda *a, **k: None
+_vseg.__all__ = ["predict_one", "predict_volume"]
+
 import numpy as np
 import pytest
 
