@@ -145,3 +145,29 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# === OpenGSD (gsd-core) — keep ALL GSD-produced files out of git ===
+.cursor/
+.windsurf/
+.windsurf/gsd-local-patches/
+.windsurf/gsd-pristine/
+.devin/
+.planning/
+.planning/tmp/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+graphify-out/
+handoffs/
+memories/
+context/
+specs/
+.gsd/
+.gsd-id
+.gsd-worktrees/
+.gsd-profile
+.agents/
+.bg-shell/
+skills-lock.json
+.gsd-graph/
+.mcp.json
