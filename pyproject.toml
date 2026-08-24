@@ -108,3 +108,6 @@ markers = [
 # observed during a test run.
 filterwarnings = []
 
+[tool.setuptools.package-data]
+liom_toolkit = ["py.typed"]
+
