@@ -1,3 +1,4 @@
+from __future__ import annotations
 import SimpleITK as sitk
 import ants
 import numpy as np

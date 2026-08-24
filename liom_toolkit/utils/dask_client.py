@@ -1,3 +1,4 @@
+from __future__ import annotations
 import multiprocessing
 
 from dask.distributed import LocalCluster, Client

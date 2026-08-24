@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import annotations
 import argparse
 
 from liom_toolkit.utils import create_and_write_mask

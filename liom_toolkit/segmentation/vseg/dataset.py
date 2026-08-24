@@ -1,3 +1,4 @@
+from __future__ import annotations
 from multiprocessing import cpu_count
 
 import dask.array as da

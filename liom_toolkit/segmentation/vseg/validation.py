@@ -1,3 +1,4 @@
+from __future__ import annotations
 import csv
 
 import matplotlib.pyplot as plt
