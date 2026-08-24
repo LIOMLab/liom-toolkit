@@ -7,7 +7,8 @@ name = "liom-toolkit"
 readme = "README.md"
 version = "2025.06.12"
 license = "GPL-3.0-or-later"
-requires-python = ">= 3.11"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
 authors = [
     { name = "Frederic Lesage", email = "frederic.lesage@polymtl.ca" },
     { name = "Frans Irgolitsch", email = "frans.irgolitsch@polymtl.ca" }
@@ -39,7 +40,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Image Processing",
-    "Programming Language :: Python :: 3.11"
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.optional-dependencies]
