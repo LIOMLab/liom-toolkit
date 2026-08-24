@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import os
-from typing import Callable, Union
+from collections.abc import Callable
 
 import dask.array as da
 import numpy as np
@@ -15,6 +16,7 @@ from skimage.transform import resize
 from tqdm.auto import tqdm
 
 from liom_toolkit.segmentation import segment_3d
+
 from .utils import convert_to_png_for_saving
 
 
@@ -58,12 +60,17 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
     :return: The coordinate transform matching the resolution level.
     :rtype: ANTsImage
     """
-    transform = node.metadata["coordinateTransformations"][resolution_level][0]['scale']
+    transform = node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
     return transform
 
 
-def save_atlas_to_zarr(zarr_file: str, atlas: ArrayLike, scales: tuple = (6.5, 6.5, 6.5),
-                       chunks: tuple = (128, 128, 128), resolution_level: int = 0) -> None:
+def save_atlas_to_zarr(
+    zarr_file: str,
+    atlas: ArrayLike,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+    resolution_level: int = 0,
+) -> None:
     """
     Save an atlas to a zarr file inside the labels group.
 
@@ -79,13 +86,26 @@ def save_atlas_to_zarr(zarr_file: str, atlas: ArrayLike, scales: tuple = (6.5, 6
     :type resolution_level: int
     """
     from .allen_sdk import generate_label_color_dict_allen
+
     color_dict = generate_label_color_dict_allen()
-    save_label_to_zarr(label=atlas, zarr_file=zarr_file, color_dict=color_dict, scales=scales, chunks=chunks,
-                       resolution_level=resolution_level, name="atlas")
+    save_label_to_zarr(
+        label=atlas,
+        zarr_file=zarr_file,
+        color_dict=color_dict,
+        scales=scales,
+        chunks=chunks,
+        resolution_level=resolution_level,
+        name="atlas",
+    )
 
 
-def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
-                          resolution_level: int = 0, fill_holes=True) -> None:
+def create_and_write_mask(
+    zarr_file: str,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+    resolution_level: int = 0,
+    fill_holes=True,
+) -> None:
     """
     Create a mask for a zarr file and write it to disk inside the labels group.
 
@@ -103,8 +123,15 @@ def create_and_write_mask(zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunk
     mask = create_mask_from_zarr(zarr_file, resolution_level, fill_holes=fill_holes)
     mask = mask.astype("int8")
     color_dict = generate_label_color_dict_mask()
-    save_label_to_zarr(mask, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
-                       name="mask", resolution_level=resolution_level)
+    save_label_to_zarr(
+        mask,
+        zarr_file,
+        scales=scales,
+        chunks=chunks,
+        color_dict=color_dict,
+        name="mask",
+        resolution_level=resolution_level,
+    )
 
 
 def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=True) -> np.ndarray:
@@ -132,9 +159,15 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=
     return mask
 
 
-def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict], name: str,
-                       scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128),
-                       resolution_level=0) -> None:
+def save_label_to_zarr(
+    label: ArrayLike,
+    zarr_file: str,
+    color_dict: list[dict],
+    name: str,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+    resolution_level=0,
+) -> None:
     """
     Save a mask to a zarr file inside the labels group.
 
@@ -157,18 +190,20 @@ def save_label_to_zarr(label: ArrayLike, zarr_file: str, color_dict: list[dict],
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
 
-    label_metadata = {"colors": color_dict,
-                      "source": {
-                          "image": "../../"
-                      }
-                      }
+    label_metadata = {"colors": color_dict, "source": {"image": "../../"}}
 
     scaler = CustomScaler(input_layer=resolution_level)
 
-    write_labels(labels=label, group=root, axes=generate_axes_dict(n_dims),
-                 coordinate_transformations=create_transformation_dict(5, scales, n_dims),
-                 name=name, label_metadata=label_metadata, storage_options=dict(chunks=chunks),
-                 scaler=scaler)
+    write_labels(
+        labels=label,
+        group=root,
+        axes=generate_axes_dict(n_dims),
+        coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+        name=name,
+        label_metadata=label_metadata,
+        storage_options={"chunks": chunks},
+        scaler=scaler,
+    )
 
 
 def generate_label_color_dict_mask() -> list[dict]:
@@ -179,18 +214,9 @@ def generate_label_color_dict_mask() -> list[dict]:
     :rtype: list[dict]
     """
     label_colors = [
-        {
-            "label-value": 0,
-            "rgba": [0, 0, 0, 0]
-        },
-        {
-            "label-value": 1,
-            "rgba": [250, 0, 0, 255]
-        },
-        {
-            "label-value": None,
-            "rgba": [255, 255, 255, 255]
-        }
+        {"label-value": 0, "rgba": [0, 0, 0, 0]},
+        {"label-value": 1, "rgba": [250, 0, 0, 255]},
+        {"label-value": None, "rgba": [255, 255, 255, 255]},
     ]
     return label_colors
 
@@ -211,19 +237,18 @@ def create_transformation_dict(n_levels, voxel_size, n_dims=3) -> list[list[dict
     """
 
     def _get_scale(level, ndims):
-        scale_def = [1.0,
-                     (voxel_size[0] * 2.0 ** level),
-                     (voxel_size[1] * 2.0 ** level),
-                     (voxel_size[2] * 2.0 ** level)]
+        scale_def = [
+            1.0,
+            (voxel_size[0] * 2.0**level),
+            (voxel_size[1] * 2.0**level),
+            (voxel_size[2] * 2.0**level),
+        ]
         offset = len(scale_def) - ndims
         return scale_def[offset:]
 
     coord_transforms = []
     for i in range(n_levels):
-        transform_dict = [{
-            "type": "scale",
-            "scale": _get_scale(i, n_dims)
-        }]
+        transform_dict = [{"type": "scale", "scale": _get_scale(i, n_dims)}]
         coord_transforms.append(transform_dict)
     return coord_transforms
 
@@ -241,7 +266,7 @@ def generate_axes_dict(dimensions: int) -> list:
     axes = [
         {"name": "z", "type": "space", "unit": "micrometer"},
         {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"}
+        {"name": "x", "type": "space", "unit": "micrometer"},
     ]
     if dimensions == 4:
         axes.insert(0, {"name": "c", "type": "channel"})
@@ -297,7 +322,7 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
     for z in tqdm(range(volume.shape[0])):
         image = volume[z, :, :]
         image = convert_to_png_for_saving(image)
-        imsave(f"{target_dir}/{str(z)}.png", image, check_contrast=False)
+        imsave(f"{target_dir}/{z!s}.png", image, check_contrast=False)
 
 
 class CustomScaler(Scaler):
@@ -319,6 +344,7 @@ class CustomScaler(Scaler):
     :param original_image: The original image to use for the transformation.
     :type original_image: str | None
     """
+
     order: int
     anti_aliasing: bool
     input_layer: int
@@ -328,8 +354,16 @@ class CustomScaler(Scaler):
     original_image: str | None
     current_scale: int = None
 
-    def __init__(self, order: int = 1, anti_aliasing: bool = True, downscale: int = 2, method: str = "nearest",
-                 input_layer: int = 0, max_layer: int = 4, original_image: str | None = None):
+    def __init__(
+        self,
+        order: int = 1,
+        anti_aliasing: bool = True,
+        downscale: int = 2,
+        method: str = "nearest",
+        input_layer: int = 0,
+        max_layer: int = 4,
+        original_image: str | None = None,
+    ):
         super().__init__(downscale=downscale, method=method, max_layer=max_layer)
         self.order = order
         self.anti_aliasing = anti_aliasing
@@ -350,7 +384,7 @@ class CustomScaler(Scaler):
         base_layer = self.input_layer
 
         self.to_up_scale = scales[:base_layer]
-        self.to_down_scale = scales[base_layer + 1:]
+        self.to_down_scale = scales[base_layer + 1 :]
 
         if len(self.to_up_scale) == 0:
             self.do_upscale = False
@@ -371,17 +405,18 @@ class CustomScaler(Scaler):
         """
         if isinstance(plane, da.Array):
 
-            def _resize(
-                    image: ArrayLike, output_shape: tuple, **kwargs
-            ) -> ArrayLike:
+            def _resize(image: ArrayLike, output_shape: tuple, **kwargs) -> ArrayLike:
                 return dask_resize(image, output_shape, **kwargs)
 
         else:
             _resize = resize
 
         if self.do_upscale:
-            shape = plane.shape[0] * self.downscale, plane.shape[1] * self.downscale, plane.shape[
-                2] * self.downscale
+            shape = (
+                plane.shape[0] * self.downscale,
+                plane.shape[1] * self.downscale,
+                plane.shape[2] * self.downscale,
+            )
             if self.original_image is not None:
                 nodes = load_zarr(self.original_image)
                 image_node = nodes[0]
@@ -394,8 +429,11 @@ class CustomScaler(Scaler):
                     shape = shape[1:]
             output_shape = shape
         else:
-            output_shape = plane.shape[0] // self.downscale, plane.shape[1] // self.downscale, plane.shape[
-                2] // self.downscale
+            output_shape = (
+                plane.shape[0] // self.downscale,
+                plane.shape[1] // self.downscale,
+                plane.shape[2] // self.downscale,
+            )
 
         return _resize(
             plane,
@@ -406,10 +444,10 @@ class CustomScaler(Scaler):
         ).astype(plane.dtype)
 
     def _by_plane(
-            self,
-            base: np.ndarray,
-            func: Callable[[np.ndarray, int, int], np.ndarray],
-    ) -> list[Union[np.ndarray, np.ndarray, None]]:
+        self,
+        base: np.ndarray,
+        func: Callable[[np.ndarray, int, int], np.ndarray],
+    ) -> list[np.ndarray | np.ndarray | None]:
         """Loop over 3 of the 5 dimensions and apply the func transform.
 
         :param base: The base image to transform.
@@ -447,7 +485,7 @@ class CustomScaler(Scaler):
 
     def _scale_by_plane(self, base, stack_to_scale, func):
         shape_5d = (*(1,) * (5 - stack_to_scale.ndim), *stack_to_scale.shape)
-        T, C, Z, Y, X = shape_5d
+        T, C, _Z, Y, X = shape_5d
 
         # If our data is already 2D, simply resize and add to pyramid
         if stack_to_scale.ndim == 2:
@@ -456,12 +494,9 @@ class CustomScaler(Scaler):
 
         # stack_dims is any dims over 3D
         new_stack = None
-        for t in range(T):
+        for _t in range(T):
             for c in range(C):
-                if C > 1:
-                    plane = stack_to_scale[c]
-                else:
-                    plane = stack_to_scale[:]
+                plane = stack_to_scale[c] if C > 1 else stack_to_scale[:]
                 out = func(plane, Y, X)
                 # first iteration of loop creates the new nd stack
                 if new_stack is None:

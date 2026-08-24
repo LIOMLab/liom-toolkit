@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +11,7 @@ class DiceLoss(nn.Module):
     """
 
     def __init__(self):
-        super(DiceLoss, self).__init__()
+        super().__init__()
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, smooth: int = 1) -> torch.Tensor:
         """
@@ -42,7 +43,7 @@ class DiceBCELoss(nn.Module):
     """
 
     def __init__(self):
-        super(DiceBCELoss, self).__init__()
+        super().__init__()
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, smooth: int = 1) -> torch.Tensor:
         """
@@ -61,7 +62,7 @@ class DiceBCELoss(nn.Module):
         inputs = inputs.view(-1)
         targets = targets.view(-1)
         intersection = (inputs * targets).sum()
-        dice_loss = 1 - (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
+        dice_loss = 1 - (2.0 * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        BCE = F.binary_cross_entropy(inputs, targets, reduction="mean")
         Dice_BCE = BCE + dice_loss
         return Dice_BCE

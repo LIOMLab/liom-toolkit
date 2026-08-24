@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 import os
 
 import numpy as np
 from scipy.ndimage import median_filter
-from skimage import restoration, filters, morphology
+from skimage import filters, morphology, restoration
 from skimage.filters import frangi, thresholding
 from skimage.io import imsave
-from skimage.measure import regionprops, label
-from skimage.morphology import disk, binary_erosion
+from skimage.measure import label, regionprops
+from skimage.morphology import binary_erosion, disk
 from skimage.util import img_as_ubyte
 
 
@@ -23,10 +24,7 @@ def subtract_background(img: np.ndarray, radius: int = 70) -> np.ndarray:
     :rtype: np.ndarray
     """
     normalized_radius = radius // 255
-    kernel = restoration.ellipsoid_kernel(
-        (radius * 2, radius * 2),
-        normalized_radius * 2
-    )
+    kernel = restoration.ellipsoid_kernel((radius * 2, radius * 2), normalized_radius * 2)
     rolling_ball = restoration.rolling_ball(img, radius=radius, kernel=kernel)
     return img - rolling_ball
 
@@ -44,7 +42,7 @@ def frangi_filter(img: np.ndarray, sigma_range: tuple, black_ridges: bool = Fals
     :return: The filtered image
     :rtype: np.ndarray
     """
-    return frangi(img, sigmas=[x for x in range(*sigma_range)], black_ridges=black_ridges)
+    return frangi(img, sigmas=list(range(*sigma_range)), black_ridges=black_ridges)
 
 
 def li_threshold_image(img: np.ndarray) -> np.ndarray:
@@ -138,9 +136,15 @@ def erode_mask(mask: np.ndarray, disk_size: int = 30) -> np.ndarray:
     return binary_erosion(mask, disk(disk_size))
 
 
-def segment_2d_image(output_dir: str, image: np.ndarray, name: str, frangi_sigma_range: tuple = (2, 16, 2),
-                     frangi_black_ridges: bool = False, local_threshold: bool = False,
-                     local_threshold_size: int = 15) -> None:
+def segment_2d_image(
+    output_dir: str,
+    image: np.ndarray,
+    name: str,
+    frangi_sigma_range: tuple = (2, 16, 2),
+    frangi_black_ridges: bool = False,
+    local_threshold: bool = False,
+    local_threshold_size: int = 15,
+) -> None:
     """
     Segment 2D images. Finished files are not returned due to memory concerns, but are saved to disk.
 
@@ -159,7 +163,7 @@ def segment_2d_image(output_dir: str, image: np.ndarray, name: str, frangi_sigma
     :param local_threshold_size: The size of the local thresholding window, must be odd
     :type local_threshold_size: int
     """
-    assert local_threshold_size % 2 == 1, 'Local thresholding window size must be odd'
+    assert local_threshold_size % 2 == 1, "Local thresholding window size must be odd"
 
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
@@ -183,7 +187,7 @@ def segment_2d_image(output_dir: str, image: np.ndarray, name: str, frangi_sigma
     vessel_mask = cleaned * mask
 
     # Save image
-    imsave(output_dir + name + '_mask.tif', img_as_ubyte(mask), check_contrast=False)
-    imsave(output_dir + name + '_vessel_mask.tif', img_as_ubyte(vessel_mask), check_contrast=False)
+    imsave(output_dir + name + "_mask.tif", img_as_ubyte(mask), check_contrast=False)
+    imsave(output_dir + name + "_vessel_mask.tif", img_as_ubyte(vessel_mask), check_contrast=False)
     # Clean memory
     del image, mask, frangi, vessel_mask_raw, vessel_mask, cleaned

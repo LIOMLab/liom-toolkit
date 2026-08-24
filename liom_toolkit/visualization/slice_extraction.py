@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import numpy as np
 from ome_zarr.reader import Node
 from skimage.io import imsave
@@ -6,7 +7,9 @@ from skimage.io import imsave
 from liom_toolkit.utils import convert_to_png_for_saving
 
 
-def extract_single_slice_from_zarr(node: Node, z: int, channel: int = 0, resolution_level: int = 0) -> np.ndarray:
+def extract_single_slice_from_zarr(
+    node: Node, z: int, channel: int = 0, resolution_level: int = 0
+) -> np.ndarray:
     """
     Extracts a single slice from a 3D volume
 
@@ -30,8 +33,9 @@ def extract_single_slice_from_zarr(node: Node, z: int, channel: int = 0, resolut
     return image
 
 
-def extract_and_save_slice_form_zarr(node: Node, z: int, data_dir: str, channel: int = 0,
-                                     resolution_level: int = 0, name: str = "S1"):
+def extract_and_save_slice_form_zarr(
+    node: Node, z: int, data_dir: str, channel: int = 0, resolution_level: int = 0, name: str = "S1"
+):
     """
     Extracts a single slice from a 3D volume and saves it to disk
 
@@ -56,8 +60,9 @@ def extract_and_save_slice_form_zarr(node: Node, z: int, data_dir: str, channel:
     return image
 
 
-def extract_slices_form_zarr(node: Node, start_z: int, num_slices: int, channel=0,
-                             resolution_level=0) -> np.ndarray:
+def extract_slices_form_zarr(
+    node: Node, start_z: int, num_slices: int, channel=0, resolution_level=0
+) -> np.ndarray:
     """
     Extracts slices from a 3D volume
 
@@ -78,7 +83,9 @@ def extract_slices_form_zarr(node: Node, start_z: int, num_slices: int, channel=
     if volume.ndim == 4:
         volume = volume[channel]
 
-    image_zs = np.linspace(start_z - num_slices / 2, start_z + num_slices / 2, num_slices + 1, dtype=int)
+    image_zs = np.linspace(
+        start_z - num_slices / 2, start_z + num_slices / 2, num_slices + 1, dtype=int
+    )
     full_volume = np.zeros((len(image_zs), volume.shape[1], volume.shape[2]), dtype=np.uint32)
 
     for i, z in enumerate(image_zs):
@@ -90,9 +97,16 @@ def extract_slices_form_zarr(node: Node, start_z: int, num_slices: int, channel=
     return full_volume
 
 
-def extract_and_save_slices_form_zarr(node: Node, start_z: int, num_slices: int, data_dir: str, channel: int = 0,
-                                      resolution_level: int = 0, name: str = "S1",
-                                      save_mip: bool = False) -> np.ndarray:
+def extract_and_save_slices_form_zarr(
+    node: Node,
+    start_z: int,
+    num_slices: int,
+    data_dir: str,
+    channel: int = 0,
+    resolution_level: int = 0,
+    name: str = "S1",
+    save_mip: bool = False,
+) -> np.ndarray:
     """
     Extracts slices from a 3D volume and saves them to disk
 
@@ -115,14 +129,21 @@ def extract_and_save_slices_form_zarr(node: Node, start_z: int, num_slices: int,
     :return: 3D volume with the extracted slices
     :rtype: np.ndarray
     """
-    volume = extract_slices_form_zarr(node, start_z, num_slices, channel=channel,
-                                      resolution_level=resolution_level)
+    volume = extract_slices_form_zarr(
+        node, start_z, num_slices, channel=channel, resolution_level=resolution_level
+    )
 
-    imsave(f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}.tif", volume)
+    imsave(
+        f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}.tif",
+        volume,
+    )
     if save_mip:
         mip = np.max(volume, axis=0)
         mip = convert_to_png_for_saving(mip)
-        imsave(f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}_mip.png", mip)
+        imsave(
+            f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}_mip.png",
+            mip,
+        )
 
     return volume
 
@@ -138,14 +159,14 @@ def colour_image(slice_image: np.ndarray, colour_dict: list):
     :return: The coloured image
     :rtype: np.ndarray
     """
-    slice_png = np.zeros_like(slice_image, dtype='uint8')
+    slice_png = np.zeros_like(slice_image, dtype="uint8")
 
     # Add 3rd dimension of size 3 to png
     slice_png = np.repeat(slice_png[:, :, np.newaxis], 3, axis=2)
 
     # Apply colour dict to image
     for i in range(len(colour_dict)):
-        x, y = np.where(slice_image == colour_dict[i]['label-value'])
-        slice_png[x, y, :] = colour_dict[i]['rgba'][0:3]
+        x, y = np.where(slice_image == colour_dict[i]["label-value"])
+        slice_png[x, y, :] = colour_dict[i]["rgba"][0:3]
 
     return slice_png

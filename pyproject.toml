@@ -133,7 +133,23 @@ extend-exclude = []
 # so `from __future__ import annotations` is preserved (load-bearing on 3.12).
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 # Formatter-conflicting rules MUST be ignored when using `ruff format`.
-ignore = ["COM812", "ISC001"]
+# Ratchet: the remaining ignores below suppress non-auto-fixable violations
+# inside the Phase-1 select set. They are NOT permanent — each is tracked as
+# ratchet debt and picked up by a later phase:
+#   E501, B008, E721 ............ Phase 7 / LINT-01 (manual line breaks,
+#                                 default-arg refactors, type-comparison fix)
+#   B904 ....................... Phase 6 / BUG-01 (raise ... from err / None
+#                                 when the assert->raise + exception-chain
+#                                 work touches each raise site)
+# See .planning/STATE.md "Open Gaps to Address" for the tracked debt list.
+ignore = [
+    "COM812",  # formatter conflict
+    "ISC001",  # formatter conflict
+    "E501",    # ratchet: Phase 7 / LINT-01 — long string/signature lines format can't break
+    "B904",    # ratchet: Phase 6 / BUG-01 — raise-without-from (semantic, tied to assert->raise work)
+    "B008",    # ratchet: Phase 7 / LINT-01 — torch.device in default args (semantic refactor)
+    "E721",    # ratchet: Phase 7 / LINT-01 — type comparison (semantic)
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Forward-looking: tests legitimately use `assert` (S101). S101 is not in the
@@ -142,6 +158,17 @@ ignore = ["COM812", "ISC001"]
 # exempt via this entry.
 "tests/**" = [
     "S101",   # assert is the idiomatic pytest assertion primitive
+]
+# Ratchet: package __init__.py files use `from .module import *` barrel
+# re-exports (established pattern, AGENTS.md §7) and import optional deps
+# (ants, torch) solely to check availability before re-raising ImportError
+# with a user-facing message. Both trip F403/F401 but are intentional.
+# Revisit in Phase 7 / LINT-01: replace barrel exports with explicit __all__,
+# and in Phase 4 / DEP-02,03: convert availability checks to
+# importlib.util.find_spec. See .planning/STATE.md "Open Gaps to Address".
+"**/__init__.py" = [
+    "F403",   # `from .module import *` barrel re-export — established pattern
+    "F401",   # unused import: re-export surface OR optional-dep availability check
 ]
 
 [tool.ruff.lint.pydocstyle]

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 import shutil
 
@@ -12,11 +13,16 @@ from zarr.convenience import open
 
 from .dataset import OmeZarrDataset
 from .model import VsegModel
-from .utils import create_dir, numeric_filesort, process_image, add_patch_to_empty_array
+from .utils import add_patch_to_empty_array, create_dir, numeric_filesort, process_image
 
 
-def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cuda",
-                norm_param: tuple = (10, 0.05)) -> np.ndarray:
+def predict_one(
+    model: VsegModel,
+    img_path: str,
+    save_path: str,
+    dev: str = "cuda",
+    norm_param: tuple = (10, 0.05),
+) -> np.ndarray:
     """
     Predict one image
 
@@ -47,19 +53,19 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cud
 
     device = torch.device(dev)
 
-    image_name = img_path.split('/')
+    image_name = img_path.split("/")
     image_name = image_name[len(image_name) - 1]
-    image_id = image_name.replace('.png', '')
+    image_id = image_name.replace(".png", "")
 
     overlap = W - stride
 
-    create_dir(f'{save_path}')
-    create_dir(f'{save_path}/patches')
+    create_dir(f"{save_path}")
+    create_dir(f"{save_path}/patches")
     # Remove images if exists
-    patches_images_dir = f'{save_path}/patches/images/'
+    patches_images_dir = f"{save_path}/patches/images/"
     if os.path.exists(patches_images_dir):
         shutil.rmtree(patches_images_dir)
-    create_dir(f'{save_path}/patches/images/')
+    create_dir(f"{save_path}/patches/images/")
 
     # Only the clahe is done to the image
     image = imread(img_path)
@@ -74,11 +80,11 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cud
     saved_image = gray2rgb(processed_image)
     saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
     img_name = f"{image_id}_0_0.png"
-    image_path = os.path.join(save_path, 'patches', 'images', img_name)
+    image_path = os.path.join(save_path, "patches", "images", img_name)
     imsave(image_path, saved_image, check_contrast=False)
 
     """ Load dataset """
-    test_x = numeric_filesort(f'{save_path}/patches', folder="images")
+    test_x = numeric_filesort(f"{save_path}/patches", folder="images")
 
     n_patches_by_row = (processed_image.shape[1] - W) / stride + 1
 
@@ -95,12 +101,7 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cud
             x1 += 1
             y1 = 0
 
-        inference = add_patch_to_empty_array(inference,
-                                             pred_y,
-                                             [x1, y1],
-                                             stride,
-                                             overlap,
-                                             size)
+        inference = add_patch_to_empty_array(inference, pred_y, [x1, y1], stride, overlap, size)
 
         y1 += 1
 
@@ -110,8 +111,7 @@ def predict_one(model: VsegModel, img_path: str, save_path: str, dev: str = "cud
     inference = inference.astype(np.uint8) * 255
 
     save_inf = f"{save_path}/{image_id}_segmented.png"
-    imsave(save_inf,
-           inference, check_contrast=False)
+    imsave(save_inf, inference, check_contrast=False)
 
     return inference
 
@@ -127,7 +127,13 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     :param zarr_location: The location of the zarr file
     :type zarr_location: str
     """
-    new_volume = open(zarr_location, mode='w', shape=dataset.data.shape, chunks=dataset.data.chunksize, dtype=np.uint8)
+    new_volume = open(
+        zarr_location,
+        mode="w",
+        shape=dataset.data.shape,
+        chunks=dataset.data.chunksize,
+        dtype=np.uint8,
+    )
 
     for idx in tqdm(range(len(dataset)), desc="Predicting", unit="patches"):
         patch = dataset[idx]

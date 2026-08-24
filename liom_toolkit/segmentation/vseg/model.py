@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import wandb
@@ -99,9 +100,12 @@ class VsegModel(nn.Module):
     U-Net model for vessel segmentation
     """
 
-    def __init__(self, pretrained: bool = False,
-                 pre_trained_project: str = 'liom-lab/model-registry/Vessel Segmentation:latest',
-                 device: torch.device = torch.device('cpu')):
+    def __init__(
+        self,
+        pretrained: bool = False,
+        pre_trained_project: str = "liom-lab/model-registry/Vessel Segmentation:latest",
+        device: torch.device = torch.device("cpu"),
+    ):
         super().__init__()
 
         """ Encoder """
@@ -125,7 +129,7 @@ class VsegModel(nn.Module):
 
         if pretrained:
             run = wandb.init()
-            artifact = run.use_artifact(pre_trained_project, type='model')
+            artifact = run.use_artifact(pre_trained_project, type="model")
             artifact_dir = artifact.download()
             run.finish()
 

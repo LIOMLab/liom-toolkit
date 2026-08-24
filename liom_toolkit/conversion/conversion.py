@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 import tempfile
 
@@ -11,13 +12,22 @@ import zarr
 from natsort import natsorted
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
-from ome_zarr.writer import write_image, ArrayLike
+from ome_zarr.writer import ArrayLike, write_image
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
-from liom_toolkit.utils.io import load_zarr, save_atlas_to_zarr, \
-    create_transformation_dict, generate_axes_dict, create_mask_from_zarr, save_label_to_zarr, \
-    generate_label_color_dict_mask, load_node_by_name, load_zarr_image_from_node, CustomScaler
+from liom_toolkit.utils.io import (
+    CustomScaler,
+    create_mask_from_zarr,
+    create_transformation_dict,
+    generate_axes_dict,
+    generate_label_color_dict_mask,
+    load_node_by_name,
+    load_zarr,
+    load_zarr_image_from_node,
+    save_atlas_to_zarr,
+    save_label_to_zarr,
+)
 
 
 def load_hdf5(hdf5_file: str) -> da.Array:
@@ -65,8 +75,12 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
     print("Done!")
 
 
-def save_zarr(data: ArrayLike, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
-              chunks: tuple = (128, 128, 128)) -> None:
+def save_zarr(
+    data: ArrayLike,
+    zarr_file: str,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+) -> None:
     """
     Save a numpy array to a zarr file.
 
@@ -88,14 +102,24 @@ def save_zarr(data: ArrayLike, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
 
     scaler = CustomScaler(input_layer=0)
 
-    write_image(image=data, group=root, axes=generate_axes_dict(n_dims),
-                coordinate_transformations=create_transformation_dict(5, scales, n_dims),
-                storage_options=dict(chunks=chunks), scaler=scaler)
+    write_image(
+        image=data,
+        group=root,
+        axes=generate_axes_dict(n_dims),
+        coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+        storage_options={"chunks": chunks},
+        scaler=scaler,
+    )
     print("Done!")
 
 
-def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True, scales: tuple = (6.5, 6.5, 6.5),
-                         chunks: tuple = (128, 128, 128)) -> None:
+def convert_hdf5_to_zarr(
+    hdf5_file: str,
+    zarr_file: str,
+    use_memmap: bool = True,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+) -> None:
     """
     Convert a HDF5 file from the lightsheet microscope to a zarr file.
 
@@ -122,8 +146,13 @@ def convert_hdf5_to_zarr(hdf5_file: str, zarr_file: str, use_memmap: bool = True
         os.remove(map_file)
 
 
-def convert_nifti_to_zarr(nifti_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
-                          chucks: tuple = (128, 128, 128), transpose: bool = False) -> None:
+def convert_nifti_to_zarr(
+    nifti_file: str,
+    zarr_file: str,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chucks: tuple = (128, 128, 128),
+    transpose: bool = False,
+) -> None:
     """
     Convert a NIFTI file to a zarr file.
 
@@ -146,8 +175,9 @@ def convert_nifti_to_zarr(nifti_file: str, zarr_file: str, scales: tuple = (6.5,
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
-def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5),
-                         chucks: tuple = (128, 128, 128)) -> None:
+def convert_nrrd_to_zarr(
+    nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chucks: tuple = (128, 128, 128)
+) -> None:
     """
     Convert a NRRD file to a zarr file.
 
@@ -161,12 +191,17 @@ def convert_nrrd_to_zarr(nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6
     :type chucks: tuple
     """
     print("Loading...")
-    data, header = nrrd.read(nrrd_file)
+    data, _header = nrrd.read(nrrd_file)
     save_zarr(data, zarr_file, scales=scales, chunks=chucks)
 
 
-def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file: str,
-                             scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)) -> None:
+def create_multichannel_zarr(
+    auto_fluo_file: str,
+    vascular_file: str,
+    zarr_file: str,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+) -> None:
     """
     Create a multichannel zarr file from the auto-fluorescence and vascular data.
 
@@ -197,9 +232,16 @@ def create_multichannel_zarr(auto_fluo_file: str, vascular_file: str, zarr_file:
     del auto_fluo, vascular, volume
 
 
-def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: str, template_path: str,
-                            atlas_path: str, use_custom_atlas=True, scales: tuple = (6.5, 6.5, 6.5),
-                            chunks: tuple = (128, 128, 128)) -> None:
+def create_full_zarr_volume(
+    auto_fluo_file: str,
+    vascular_file: str,
+    zarr_file: str,
+    template_path: str,
+    atlas_path: str,
+    use_custom_atlas=True,
+    scales: tuple = (6.5, 6.5, 6.5),
+    chunks: tuple = (128, 128, 128),
+) -> None:
     """
     Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
     auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
@@ -223,13 +265,15 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     """
     try:
         import ants
-        from liom_toolkit.utils.ants import load_ants_image_from_node
+
         from liom_toolkit.registration import align_annotations_to_volume
+        from liom_toolkit.utils.ants import load_ants_image_from_node
     except ImportError:
-        raise ImportError("Please install ANTsPy to create the full zarr volume of the LIOM toolkit.")
+        raise ImportError(
+            "Please install ANTsPy to create the full zarr volume of the LIOM toolkit."
+        )
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
-    atlas_resolution = 25
 
     pbar = tqdm(total=5, desc="Creating zarr volume")
     pbar.set_postfix({"step": "Creating multichannel zarr"})
@@ -263,8 +307,15 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     else:
         base_atlas = ants.image_read(atlas_path)
 
-    atlas = align_annotations_to_volume(target_volume=target_image, mask=mask, template=template, atlas=base_atlas,
-                                        resolution=25, keep_intermediary=False, data_dir=temp_dir.name)
+    atlas = align_annotations_to_volume(
+        target_volume=target_image,
+        mask=mask,
+        template=template,
+        atlas=base_atlas,
+        resolution=25,
+        keep_intermediary=False,
+        data_dir=temp_dir.name,
+    )
 
     # Reorient the atlas to the same orientation as the target image
     atlas = ants.reorient_image2(atlas, target_image.orientation)
@@ -277,7 +328,9 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     atlas_resized = da.transpose(atlas, (2, 1, 0))
     atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
-    save_atlas_to_zarr(zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=resolution_level)
+    save_atlas_to_zarr(
+        zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=resolution_level
+    )
     temp_dir.cleanup()
     pbar.update(1)
 
@@ -293,8 +346,15 @@ def create_full_zarr_volume(auto_fluo_file: str, vascular_file: str, zarr_file: 
     # Save to zarr
     atlas = atlas.astype("int8")
     color_dict = generate_label_color_dict_mask()
-    save_label_to_zarr(atlas, zarr_file, scales=scales, chunks=chunks, color_dict=color_dict,
-                       name="mask", resolution_level=resolution_level)
+    save_label_to_zarr(
+        atlas,
+        zarr_file,
+        scales=scales,
+        chunks=chunks,
+        color_dict=color_dict,
+        name="mask",
+        resolution_level=resolution_level,
+    )
     pbar.update(1)
 
     pbar.set_postfix({"step": "Done"})

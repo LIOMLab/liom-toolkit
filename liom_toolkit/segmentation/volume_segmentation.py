@@ -1,14 +1,19 @@
 from __future__ import annotations
-import SimpleITK as sitk
-import ants
+
 import numpy as np
+import SimpleITK as sitk
 from scipy.ndimage import binary_fill_holes
 
 from liom_toolkit.segmentation import remove_small_structures
 
 
-def segment_3d(volume: np.ndarray, k: int = 5, use_log: bool = True,
-               threshold_method: str = "otsu", fill_holes=True) -> np.ndarray:
+def segment_3d(
+    volume: np.ndarray,
+    k: int = 5,
+    use_log: bool = True,
+    threshold_method: str = "otsu",
+    fill_holes=True,
+) -> np.ndarray:
     """
     Segment a 3D brain volume using a watershed algorithm.
     Source: https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py

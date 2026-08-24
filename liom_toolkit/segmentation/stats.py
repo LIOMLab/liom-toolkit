@@ -1,12 +1,13 @@
 from __future__ import annotations
+
 import math
 import os
 import tempfile
 
-import PIL.Image
 import dask.array as da
 import numpy as np
 import pandas as pd
+import PIL.Image
 import scipy.ndimage as ndi
 from dask.distributed import Future
 from scipy.ndimage import distance_transform_edt
@@ -26,8 +27,15 @@ from liom_toolkit.utils.dask_client import dask_client_manager
 PIL.Image.MAX_IMAGE_PIXELS = None
 
 
-def compute_slice_metrics(output_dir: str, image: np.ndarray, mask: np.ndarray, vessel_mask: np.ndarray,
-                          region_map: np.ndarray, vessel_exclude: np.ndarray, voxel_size: float = 0.65) -> None:
+def compute_slice_metrics(
+    output_dir: str,
+    image: np.ndarray,
+    mask: np.ndarray,
+    vessel_mask: np.ndarray,
+    region_map: np.ndarray,
+    vessel_exclude: np.ndarray,
+    voxel_size: float = 0.65,
+) -> None:
     """
     Compute the metrics for a brain slice. Save the results to disk.
 
@@ -50,8 +58,17 @@ def compute_slice_metrics(output_dir: str, image: np.ndarray, mask: np.ndarray, 
     # Setup output
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    df = pd.DataFrame(columns=['image', 'region', 'vessel area (um2)', 'tissue area (um2)', 'vessel density (um2/um2)',
-                               'branching points', 'mean diameter (um)'])
+    df = pd.DataFrame(
+        columns=[
+            "image",
+            "region",
+            "vessel area (um2)",
+            "tissue area (um2)",
+            "vessel density (um2/um2)",
+            "branching points",
+            "mean diameter (um)",
+        ]
+    )
 
     # Get the different brain regions
     regions, region_count = label(region_map, return_num=True)
@@ -61,49 +78,74 @@ def compute_slice_metrics(output_dir: str, image: np.ndarray, mask: np.ndarray, 
     full_vessel_mask = full_vessel_mask * vessel_exclude
 
     # Compute metrics per region
-    for i in tqdm(range(0, region_count), desc="Computing metrics per region for " + image, leave=False):
+    for i in tqdm(
+        range(0, region_count), desc="Computing metrics per region for " + image, leave=False
+    ):
         region = get_vessel_region(regions, i, full_vessel_mask)
 
         # Calculate vessel density
-        vessel_area, total_area, density = calculate_regional_density(region, i, props_list, output_dir, voxel_size)
+        vessel_area, total_area, density = calculate_regional_density(
+            region, i, props_list, output_dir, voxel_size
+        )
 
         # Count branching points
-        branching_points_count, skeleton, branching_points = get_branching_point_count(region, output_dir, filename=str(
-            i) + '_skeleton.tif')
-        draw_branch_point_circles(skeleton, branching_points, output_dir, filename=str(i) + '_skeleton_circled.png')
+        branching_points_count, skeleton, branching_points = get_branching_point_count(
+            region, output_dir, filename=str(i) + "_skeleton.tif"
+        )
+        draw_branch_point_circles(
+            skeleton, branching_points, output_dir, filename=str(i) + "_skeleton_circled.png"
+        )
 
         # Calculate average diameter
         mean_diameter = compute_average_diameter(region, skeleton, voxel_size)
 
         # Save data
-        entry = pd.DataFrame.from_dict({'image': [image], 'region': [i], 'vessel area (um2)': [vessel_area],
-                                        'tissue area (um2)': [total_area], 'vessel density (um2/um2)': [density],
-                                        'branching points': [branching_points_count],
-                                        'mean diameter (um)': [mean_diameter]})
+        entry = pd.DataFrame.from_dict(
+            {
+                "image": [image],
+                "region": [i],
+                "vessel area (um2)": [vessel_area],
+                "tissue area (um2)": [total_area],
+                "vessel density (um2/um2)": [density],
+                "branching points": [branching_points_count],
+                "mean diameter (um)": [mean_diameter],
+            }
+        )
         df = pd.concat([df, entry])
 
     # Compute metrics for the whole slice
     tissue_area, vessel_area, vessel_density = calculate_density(vessel_mask, mask, voxel_size)
-    branching_points_count, skeleton, branching_points = get_branching_point_count(vessel_mask, output_dir)
+    branching_points_count, skeleton, branching_points = get_branching_point_count(
+        vessel_mask, output_dir
+    )
     draw_branch_point_circles(skeleton, branching_points, output_dir)
     mean_diameter = compute_average_diameter(vessel_mask, skeleton, voxel_size)
 
     # Save intermediate results
-    imsave(output_dir + 'regions.png', img_as_ubyte(regions), check_contrast=False)
-    imsave(output_dir + 'vessel_exclude.png', img_as_ubyte(vessel_exclude), check_contrast=False)
-    imsave(output_dir + '_complete_mask.png', img_as_ubyte(mask), check_contrast=False)
-    imsave(output_dir + 'vessels.png', img_as_ubyte(vessel_mask), check_contrast=False)
+    imsave(output_dir + "regions.png", img_as_ubyte(regions), check_contrast=False)
+    imsave(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude), check_contrast=False)
+    imsave(output_dir + "_complete_mask.png", img_as_ubyte(mask), check_contrast=False)
+    imsave(output_dir + "vessels.png", img_as_ubyte(vessel_mask), check_contrast=False)
 
     # Save data
-    entry = pd.DataFrame.from_dict({'image': [image], 'region': 'total', 'vessel area (um2)': [vessel_area],
-                                    'tissue area (um2)': [tissue_area], 'vessel density (um2/um2)': [vessel_density],
-                                    'branching points': [branching_points_count],
-                                    'mean diameter (um)': [mean_diameter]})
+    entry = pd.DataFrame.from_dict(
+        {
+            "image": [image],
+            "region": "total",
+            "vessel area (um2)": [vessel_area],
+            "tissue area (um2)": [tissue_area],
+            "vessel density (um2/um2)": [vessel_density],
+            "branching points": [branching_points_count],
+            "mean diameter (um)": [mean_diameter],
+        }
+    )
     df = pd.concat([df, entry])
-    df.to_excel(output_dir + 'regions.xlsx', index=False)
+    df.to_excel(output_dir + "regions.xlsx", index=False)
 
 
-def get_vessel_region(regions: np.ndarray, region_index: int, vessel_mask: np.ndarray) -> np.ndarray:
+def get_vessel_region(
+    regions: np.ndarray, region_index: int, vessel_mask: np.ndarray
+) -> np.ndarray:
     """
     Get the vessels in a region.
 
@@ -121,8 +163,13 @@ def get_vessel_region(regions: np.ndarray, region_index: int, vessel_mask: np.nd
     return region
 
 
-def calculate_regional_density(region: np.ndarray, region_index: int, props_list: list[RegionProperties],
-                               output_dir: str, voxel_size: float = 0.65) -> tuple[float, float, float]:
+def calculate_regional_density(
+    region: np.ndarray,
+    region_index: int,
+    props_list: list[RegionProperties],
+    output_dir: str,
+    voxel_size: float = 0.65,
+) -> tuple[float, float, float]:
     """
     Calculates the density of vessels in a region
 
@@ -141,13 +188,14 @@ def calculate_regional_density(region: np.ndarray, region_index: int, props_list
     """
     vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
-    imsave(output_dir + str(region_index) + '.tif', img_as_ubyte(region), check_contrast=False)
+    imsave(output_dir + str(region_index) + ".tif", img_as_ubyte(region), check_contrast=False)
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
 
-def calculate_density(vessel_mask: np.ndarray, mask: np.ndarray, voxel_size: float = 0.65) -> tuple[
-    float, float, float]:
+def calculate_density(
+    vessel_mask: np.ndarray, mask: np.ndarray, voxel_size: float = 0.65
+) -> tuple[float, float, float]:
     """
     Calculates the areas of the tissue and vessel to compute the density of vessels in a mask.
 
@@ -166,8 +214,9 @@ def calculate_density(vessel_mask: np.ndarray, mask: np.ndarray, voxel_size: flo
     return tissue_area, vessel_area, vessel_density
 
 
-def get_branching_point_count(vessel_mask: np.ndarray, output_dir: str, filename: str = 'skeleton.tif') -> tuple[
-    int, np.ndarray, np.ndarray]:
+def get_branching_point_count(
+    vessel_mask: np.ndarray, output_dir: str, filename: str = "skeleton.tif"
+) -> tuple[int, np.ndarray, np.ndarray]:
     """
     Get the number of branching points in a vessel mask.
 
@@ -199,7 +248,7 @@ def get_branching_points(skeleton: np.ndarray) -> np.ndarray:
     :rtype: np.ndarray
     """
     # Setup structural elements for detecting branching points
-    selems = list()
+    selems = []
     selems.append(np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]))
     selems.append(np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]))
     selems.append(np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]))
@@ -214,8 +263,12 @@ def get_branching_points(skeleton: np.ndarray) -> np.ndarray:
     return branches
 
 
-def draw_branch_point_circles(skeleton: np.ndarray, branching_points: np.ndarray, output_dir: str,
-                              filename: str = 'skeleton_circled.png') -> None:
+def draw_branch_point_circles(
+    skeleton: np.ndarray,
+    branching_points: np.ndarray,
+    output_dir: str,
+    filename: str = "skeleton_circled.png",
+) -> None:
     """
     Draw circles around the branching points in a skeleton
 
@@ -233,15 +286,16 @@ def draw_branch_point_circles(skeleton: np.ndarray, branching_points: np.ndarray
     circled_skeleton = gray2rgb(img_as_ubyte(skeleton))
     points_to_draw = np.argwhere(branching_points)
     for point in points_to_draw:
-        circy, circx = circle_perimeter(point[0], point[1], 7,
-                                        shape=skeleton.shape)
+        circy, circx = circle_perimeter(point[0], point[1], 7, shape=skeleton.shape)
         circled_skeleton[circy, circx] = (220, 20, 20)
 
     imsave(output_dir + filename, circled_skeleton, check_contrast=False)
     del circled_skeleton
 
 
-def compute_average_diameter(mask: np.ndarray, skeleton: np.ndarray, voxel_size: float = 0.65) -> float:
+def compute_average_diameter(
+    mask: np.ndarray, skeleton: np.ndarray, voxel_size: float = 0.65
+) -> float:
     """
     Compute the average diameter of the vessels in a mask
 
@@ -282,19 +336,20 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     x_start = 0
     y_start = 0
     for _ in range(0, int(image.shape[0] / square_size)):
-        for j in range(0, int(image.shape[1] / square_size)):
-            heatmap[x_start:x_start + square_size, y_start:y_start + square_size] = image[x_start:x_start + square_size,
-                                                                                    y_start:y_start + square_size].sum()
+        for _j in range(0, int(image.shape[1] / square_size)):
+            heatmap[x_start : x_start + square_size, y_start : y_start + square_size] = image[
+                x_start : x_start + square_size, y_start : y_start + square_size
+            ].sum()
             y_start += square_size
         x_start += square_size
         y_start = 0
 
     # Set final square to max value to ensure same scaling across heatmaps
-    heatmap[-1, -1] = (square_size ** 2)
+    heatmap[-1, -1] = square_size**2
     heatmap = img_as_uint(heatmap)
     heatmap = heatmap.astype(float)
-    heatmap = heatmap / (square_size ** 2)
-    imsave(output_dir + 'heatmap.tif', heatmap, check_contrast=False)
+    heatmap = heatmap / (square_size**2)
+    imsave(output_dir + "heatmap.tif", heatmap, check_contrast=False)
 
 
 def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
@@ -321,10 +376,12 @@ def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
 
     # Get the itk ids for the region
     region = structure_tree.get_structures_by_name([region])
-    region_id = region[0]['id']
+    region_id = region[0]["id"]
     region_sub = structure_tree.descendant_ids([region_id])
-    region_sub_acronyms = [region['acronym'] for region in structure_tree.get_structures_by_id(region_sub[0])]
-    itk_ids = labels.loc[labels['LABEL'].isin(region_sub_acronyms)]['IDX'].values.tolist()
+    region_sub_acronyms = [
+        region["acronym"] for region in structure_tree.get_structures_by_id(region_sub[0])
+    ]
+    itk_ids = labels.loc[labels["LABEL"].isin(region_sub_acronyms)]["IDX"].values.tolist()
 
     if data_dir == "":
         temp_dir.cleanup()

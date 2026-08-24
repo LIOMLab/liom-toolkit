@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 
 import numpy as np
@@ -23,8 +24,8 @@ def clean_dir(directory: str) -> None:
     :param directory: The directory to clean.
     :type directory: str
     """
-    if os.path.exists(directory + '.DS_Store'):
-        os.remove(directory + '.DS_Store')
+    if os.path.exists(directory + ".DS_Store"):
+        os.remove(directory + ".DS_Store")
 
 
 def convert_to_png_for_saving(img: np.ndarray) -> np.ndarray:
@@ -36,7 +37,6 @@ def convert_to_png_for_saving(img: np.ndarray) -> np.ndarray:
     :return: The converted image
     :rtype: np.ndarray
     """
-    normalized_image = (img - np.min(img)) * (
-            255.0 / (np.max(img) - np.min(img)))
-    normalized_image = normalized_image.astype('uint8')
+    normalized_image = (img - np.min(img)) * (255.0 / (np.max(img) - np.min(img)))
+    normalized_image = normalized_image.astype("uint8")
     return normalized_image

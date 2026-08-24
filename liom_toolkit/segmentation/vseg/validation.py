@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import csv
 
 import matplotlib.pyplot as plt
@@ -11,7 +12,9 @@ from .prediction import predict_one
 from .utils import calculate_metrics
 
 
-def show_diff(mask: np.ndarray, prediction: np.ndarray, output_path: str, id: str, acq: str) -> None:
+def show_diff(
+    mask: np.ndarray, prediction: np.ndarray, output_path: str, id: str, acq: str
+) -> None:
     """
     Show the difference between the mask and the prediction.
     - Black: TN
@@ -42,7 +45,9 @@ def show_diff(mask: np.ndarray, prediction: np.ndarray, output_path: str, id: st
     plt.imsave(f"{output_path}/{acq}_{id}_comparison.png", rgb)
 
 
-def validate_model(model: VsegModel, img_list: list[np.ndarray], save_path: str, device: str) -> None:
+def validate_model(
+    model: VsegModel, img_list: list[np.ndarray], save_path: str, device: str
+) -> None:
     """
     Validate a model on a list of images.
 
@@ -64,25 +69,30 @@ def validate_model(model: VsegModel, img_list: list[np.ndarray], save_path: str,
     ids = []
 
     for images in img_list:
-        image_name = images.split('/')
+        image_name = images.split("/")
         image_id = image_name[len(image_name) - 1]
-        image_id = image_id.replace('.png', '')
+        image_id = image_id.replace(".png", "")
         ids.append(image_id)
         acquisition = image_name[len(image_name) - 2]
 
-        inference = predict_one(model=model, img_path=images, save_path=save_path, norm=True, dev=device,
-                                patching=False)
+        inference = predict_one(
+            model=model, img_path=images, save_path=save_path, norm=True, dev=device, patching=False
+        )
 
-        mask_path = images.replace('.png', '_mask.png')
+        mask_path = images.replace(".png", "_mask.png")
         mask = imread(mask_path)
 
         # comparison image
         mask = (mask / mask.max()).astype(np.uint8)
         inference = (inference / inference.max()).astype(np.uint8)
-        show_diff(mask=mask, prediction=inference, output_path=save_path, id=image_id, acq=acquisition)
+        show_diff(
+            mask=mask, prediction=inference, output_path=save_path, id=image_id, acq=acquisition
+        )
 
         # metrics
-        [score_f1, score_recall, score_acc, score_jaccard, score_precision] = calculate_metrics(mask, inference)
+        [score_f1, score_recall, score_acc, score_jaccard, _score_precision] = calculate_metrics(
+            mask, inference
+        )
         f1.append(score_f1)
         recall.append(score_recall)
         accuracy.append(score_acc)
@@ -97,12 +107,12 @@ def validate_model(model: VsegModel, img_list: list[np.ndarray], save_path: str,
     jaccard_mean = sum(jaccard) / len(jaccard)
     cldice_mean = sum(cldice) / len(cldice)
 
-    headings = ["Metrics"] + ids + ["mean"]
-    accuracy_list = ["accuracy"] + accuracy + [accuracy_mean]
-    f1_list = ["f1"] + f1 + [f1_mean]
-    recall_list = ["recall"] + recall + [recall_mean]
-    jaccard_list = ["jaccard"] + jaccard + [jaccard_mean]
-    cldice_list = ["clDice"] + cldice + [cldice_mean]
+    headings = ["Metrics", *ids, "mean"]
+    accuracy_list = ["accuracy", *accuracy, accuracy_mean]
+    f1_list = ["f1", *f1, f1_mean]
+    recall_list = ["recall", *recall, recall_mean]
+    jaccard_list = ["jaccard", *jaccard, jaccard_mean]
+    cldice_list = ["clDice", *cldice, cldice_mean]
 
     with open(f"{save_path}/validationmetrics.csv", mode="w") as f:
         csvwriter = csv.writer(f)

@@ -1,19 +1,26 @@
 from __future__ import annotations
+
 import dask.array as da
 import numpy as np
 from ants import ANTsImage
 from ome_zarr.reader import Node
 
-from .io import load_zarr_transform_from_node, load_zarr_image_from_node
+from .io import load_zarr_image_from_node, load_zarr_transform_from_node
 
 try:
     import ants
 except ImportError:
-    raise ImportError("Please install ANTsPy to use the ants utility functions of the LIOM toolkit.")
+    raise ImportError(
+        "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
+    )
 
 
-def convert_dask_to_ants(dask_array: da.Array, node: Node, resolution_level: int = 2,
-                         volume_direction: tuple = ([1., 0., 0.], [0., 0., -1.], [0., -1., 0.])) -> ANTsImage:
+def convert_dask_to_ants(
+    dask_array: da.Array,
+    node: Node,
+    resolution_level: int = 2,
+    volume_direction: tuple = ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]),
+) -> ANTsImage:
     """
     Convert a dask array to an ANTs image.
 

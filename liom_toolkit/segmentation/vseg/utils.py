@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 from glob import glob
 from typing import Any
@@ -6,9 +7,9 @@ from typing import Any
 import natsort
 import numpy as np
 import torch
-from PIL import Image
-from numpy import ndarray, dtype
+from numpy import dtype, ndarray
 from patchify import patchify
+from PIL import Image
 from skimage.exposure import equalize_adapthist
 from skimage.io import imread
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
@@ -77,7 +78,7 @@ def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
 
 # Sort a list of filenames by numerical order
 # This is used to order the patches as they are names 0_0_png, 1_0_png 2_0_png ... (instead of 0, 1, 10, 11 ...)
-def numeric_filesort(path: str, folder: str = "images", extension: str = 'png') -> list[str]:
+def numeric_filesort(path: str, folder: str = "images", extension: str = "png") -> list[str]:
     """
     Sort a list of filenames by numerical order
 
@@ -90,15 +91,21 @@ def numeric_filesort(path: str, folder: str = "images", extension: str = 'png') 
     :return: The sorted list of filenames
     :rtype: list[str]
     """
-    test = sorted(glob(f'{path}/{folder}/*{extension}'))
+    test = sorted(glob(f"{path}/{folder}/*{extension}"))
     test = natsort.natsorted(test, reverse=False)
 
     return test
 
 
 # Add a inferred patch to empty array
-def add_patch_to_empty_array(inference: np.ndarray, pred_y: np.ndarray, coords: tuple[int, int], stride: int,
-                             overlap: int, size: tuple[int, int]) -> np.ndarray:
+def add_patch_to_empty_array(
+    inference: np.ndarray,
+    pred_y: np.ndarray,
+    coords: tuple[int, int],
+    stride: int,
+    overlap: int,
+    size: tuple[int, int],
+) -> np.ndarray:
     """
     Add a inferred patch to empty array
 
@@ -122,10 +129,9 @@ def add_patch_to_empty_array(inference: np.ndarray, pred_y: np.ndarray, coords: 
 
     patch_x1 = coords[0] * stride
     patch_y1 = coords[1] * stride
-    inference[patch_x1:(patch_x1 + H), patch_y1:(patch_y1 + W)] += pred_y
+    inference[patch_x1 : (patch_x1 + H), patch_y1 : (patch_y1 + W)] += pred_y
 
     if (coords[1] > 0 or coords[0] > 0) and overlap > 0:
-
         x1 = patch_x1
         y1 = patch_y1
 
@@ -146,7 +152,6 @@ def add_patch_to_empty_array(inference: np.ndarray, pred_y: np.ndarray, coords: 
 
             # If this is between the first and last columns
             else:
-
                 # This yields 2 rectangles:
                 # rec1
                 x1a = x1
@@ -159,12 +164,12 @@ def add_patch_to_empty_array(inference: np.ndarray, pred_y: np.ndarray, coords: 
                 x2b = x1 + overlap
                 y1b = y1 + overlap + 1
                 y2b = y1 + W
-                to_add = [(x1a, x2a, y1a, y2a),
-                          (x1b, x2b, y1b, y2b)]
+                to_add = [(x1a, x2a, y1a, y2a), (x1b, x2b, y1b, y2b)]
 
         for rectangle in to_add:
-            inference[rectangle[0]:rectangle[1], rectangle[2]:rectangle[3]] = inference[rectangle[0]:rectangle[1],
-                                                                              rectangle[2]:rectangle[3]] / 2
+            inference[rectangle[0] : rectangle[1], rectangle[2] : rectangle[3]] = (
+                inference[rectangle[0] : rectangle[1], rectangle[2] : rectangle[3]] / 2
+            )
 
     return inference
 
@@ -190,13 +195,19 @@ def crop_image(image: np.ndarray, size: tuple[int, int], stride: int) -> np.ndar
     to_remove_left_y = np.floor(to_remove_y / 2).astype(int)
     to_remove_right_y = np.ceil(to_remove_y / 2).astype(int)
 
-    return (image[to_remove_left_y:image.shape[0] - to_remove_right_y,
-            to_remove_left_x:image.shape[1] - to_remove_right_x])
+    return image[
+        to_remove_left_y : image.shape[0] - to_remove_right_y,
+        to_remove_left_x : image.shape[1] - to_remove_right_x,
+    ]
 
 
-def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: int = 64, norm: bool = False,
-                   norm_params: tuple = (10, 0.05)) -> tuple[
-    list[Any], tuple[int, ...], tuple[int, ...], ndarray[Any, dtype[Any]] | Any]:
+def create_patches(
+    image_path: str,
+    size: tuple[int, int] = (256, 256),
+    stride: int = 64,
+    norm: bool = False,
+    norm_params: tuple = (10, 0.05),
+) -> tuple[list[Any], tuple[int, ...], tuple[int, ...], ndarray[Any, dtype[Any]] | Any]:
     """
     Create patches from an image
 
@@ -219,19 +230,17 @@ def create_patches(image_path: str, size: tuple[int, int] = (256, 256), stride: 
     image = crop_image(image, size, stride)
     image = (image / image.max() * 255).astype(np.uint8)
 
-    if norm:
-        image_clahe = apply_clahe(image, norm_params[0], norm_params[1])
-    else:
-        image_clahe = image
+    image_clahe = apply_clahe(image, norm_params[0], norm_params[1]) if norm else image
 
     patch = patchify(image_clahe, size, stride)
 
-    patches.extend(
-        patch.reshape(patch.shape[0] * patch.shape[1], patch.shape[2], patch.shape[3]))
+    patches.extend(patch.reshape(patch.shape[0] * patch.shape[1], patch.shape[2], patch.shape[3]))
 
     return patches, image.shape, patch.shape, image_clahe
 
 
 def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
-    ahe_result = equalize_adapthist(image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256)
+    ahe_result = equalize_adapthist(
+        image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256
+    )
     return ahe_result
