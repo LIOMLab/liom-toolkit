@@ -48,6 +48,7 @@ dev = [
     "sphinx-rtd-theme",
     "sphinxcontrib-apidoc",
     "pytest",
+    "pytest-cov",
     "pytest-xdist",
 ]
 ai = [

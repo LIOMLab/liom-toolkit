@@ -1,0 +1,35 @@
+"""Shared pytest fixtures for the liom-toolkit test suite.
+
+Fixtures are generated programmatically (no binary fixtures committed) and
+match the synthetic-volume patterns documented in the codebase testing map.
+They are shipped in Phase 1 so later phases can consume them without
+redefinition.
+"""
+
+import numpy as np
+import pytest
+
+
+@pytest.fixture
+def synthetic_volume() -> np.ndarray:
+    """A 64x64x64 uint16 volume with a bright sphere.
+
+    A bright sphere (radius**2 <= 100, centered at (32, 32, 32), value 1000)
+    on a dark (0) background. Used by segmentation / mask tests.
+    """
+    vol = np.zeros((64, 64, 64), dtype=np.uint16)
+    zz, yy, xx = np.ogrid[:64, :64, :64]
+    vol[(zz - 32) ** 2 + (yy - 32) ** 2 + (xx - 32) ** 2 <= 100] = 1000
+    return vol
+
+
+@pytest.fixture
+def bimodal_2d() -> np.ndarray:
+    """A 128x128 uint8 image with a bright square on a dark background.
+
+    A bright square (value 200) at [32:96, 32:96] on a dark (0) background.
+    Used by 2D segmentation / threshold tests.
+    """
+    img = np.zeros((128, 128), dtype=np.uint8)
+    img[32:96, 32:96] = 200
+    return img
