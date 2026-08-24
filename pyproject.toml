@@ -46,7 +46,9 @@ classifiers = [
 dev = [
     "sphinx",
     "sphinx-rtd-theme",
-    "sphinxcontrib-apidoc"
+    "sphinxcontrib-apidoc",
+    "pytest",
+    "pytest-xdist",
 ]
 ai = [
     "torch",
@@ -77,3 +79,4 @@ liom-create-mask = "liom_toolkit.scripts.liom_create_mask:main"
 Homepage = "https://github.com/LIOMLab/liom-toolkit"
 Documentation = "https://liom-toolkit.readthedocs.io/"
 Repository = "https://github.com/LIOMLab/liom-toolkit"
+
