@@ -120,7 +120,10 @@ filterwarnings = []
 [tool.ruff]
 target-version = "py312"   # NOT py314 — load-bearing for 3.12 forward-ref support (from __future__ import annotations stays)
 line-length = 100
-extend-exclude = []
+# Sphinx conf.py manipulates sys.path before imports (E402) and uses its own
+# formatting conventions; it is build tooling, not package code, so exclude it
+# from ruff lint/format. CI runs `ruff check` / `ruff format --check` on `.`.
+extend-exclude = ["docs"]
 
 # Phase-1 strategy: enable the AUTO-FIXABLE rule subset now; the full
 # expansive set (ANN, ARG, PL, S, N, D, etc.) is suppressed and ratcheted

@@ -9,6 +9,9 @@ redefinition.
 import sys
 import types
 
+import numpy as np
+import pytest
+
 # The package's barrel ``__init__.py`` files create an import chain that
 # pulls in optional deps and broken imports even when importing a core-only
 # module such as ``utils.utils``. Specifically:
@@ -59,9 +62,6 @@ _vseg = sys.modules["liom_toolkit.segmentation.vseg"]
 _vseg.predict_one = lambda *a, **k: None
 _vseg.predict_volume = lambda *a, **k: None
 _vseg.__all__ = ["predict_one", "predict_volume"]
-
-import numpy as np
-import pytest
 
 
 @pytest.fixture
