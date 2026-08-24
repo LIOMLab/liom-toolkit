@@ -80,3 +80,28 @@ Homepage = "https://github.com/LIOMLab/liom-toolkit"
 Documentation = "https://liom-toolkit.readthedocs.io/"
 Repository = "https://github.com/LIOMLab/liom-toolkit"
 
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "-n", "auto",
+    "--dist=loadscope",
+    "--strict-markers",
+    "--cov=liom_toolkit",
+    "--cov-report=term-missing",
+    # Coverage gate is intentionally absent in Phase 1; ratchet to 60% once
+    # the full test suite (TEST-01) lands in Phase 2.
+]
+markers = [
+    "ai: requires the ai extra (torch) - skip with -m 'not ai'",
+    "antspy: requires the antspy extra (antspyx) - 3.12-only, skip with -m 'not antspy'",
+    "allensdk: requires the allensdk extra - skip with -m 'not allensdk'",
+    "slow: slow test, auto-deselected from fast iteration by convention",
+]
+# No blanket deprecation-warning filter: real third-party deprecations must
+# surface so upcoming breaking dependency changes are visible. Add targeted
+# filters (by message/module) here only when a specific noisy warning is
+# observed during a test run.
+filterwarnings = []
+
