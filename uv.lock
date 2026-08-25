@@ -1533,7 +1533,7 @@ requires-dist = [
     { name = "liom-toolkit", extras = ["antspy"], marker = "extra == 'all'" },
     { name = "natsort" },
     { name = "nibabel" },
-    { name = "ome-zarr", specifier = ">=0.9.0" },
+    { name = "ome-zarr", specifier = ">=0.18.0" },
     { name = "opencv-python" },
     { name = "patchify" },
     { name = "pynrrd" },
@@ -1546,7 +1546,7 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'ai'" },
     { name = "tqdm" },
     { name = "wandb", marker = "extra == 'ai'" },
-    { name = "zarr" },
+    { name = "zarr", specifier = ">=3.0" },
 ]
 provides-extras = ["ai", "allensdk", "antspy", "all"]
 
