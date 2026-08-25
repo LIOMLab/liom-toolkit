@@ -1536,7 +1536,7 @@ requires-dist = [
     { name = "patchify" },
     { name = "pynrrd" },
     { name = "pywavelets" },
-    { name = "scikit-image" },
+    { name = "scikit-image", specifier = ">=0.26" },
     { name = "scikit-learn", marker = "extra == 'ai'" },
     { name = "simpleitk" },
     { name = "timm", marker = "extra == 'ai'" },
