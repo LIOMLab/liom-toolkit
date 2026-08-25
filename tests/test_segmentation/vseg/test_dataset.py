@@ -8,10 +8,11 @@ rotation bug and the assertions in ``test_ome_zarr_dataset_rotation_characteriza
 must be UPDATED then (not xfailed now — the test passes today because it
 asserts the buggy behavior).
 
-All tests gate on ``pytest.importorskip("torch")`` because
-``dataset.py`` module-top imports ``torch`` and ``OmeZarrDataset`` returns
-``torch.Tensor`` from ``load_patch``. They run for real on the 3.12-full CI
-leg and cleanly skip on the 3.14-core leg.
+All tests gate on ``pytest.importorskip("torch")`` and
+``pytest.importorskip("sklearn")`` because ``dataset.py`` module-top imports
+``torch`` and ``from .utils import apply_clahe`` (``vseg/utils.py`` has a
+module-top ``from sklearn.metrics import ...``). They run for real on the
+3.12-full CI leg and cleanly skip on the 3.14-core leg.
 
 The tiny zarr fixture is written via ``liom_toolkit.conversion.conversion.save_zarr``
 (the same function Plan 03's IO round-trip tests exercise) into ``tmp_path``;
@@ -45,6 +46,7 @@ def test_ome_zarr_dataset_len_and_grid_shape(tmp_path):
     """OmeZarrDataset with patch_size=(8,8,8) on a 16³ volume has grid_shape
     (2,2,2) and __len__ == 8 * 4 == 32 (rotate_patches=True multiplies by 4)."""
     pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
     # Remove the conftest sys.modules mock so the real dataset.py is imported
     # via the mocked vseg package's __path__ (see conftest.py comment).
     sys.modules.pop("liom_toolkit.segmentation.vseg.dataset", None)
@@ -67,6 +69,7 @@ def test_ome_zarr_dataset_len_and_grid_shape(tmp_path):
 def test_ome_zarr_dataset_get_patch_coordinates(tmp_path):
     """get_patch_coordinates(0) returns the first grid cell bounds."""
     pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
     sys.modules.pop("liom_toolkit.segmentation.vseg.dataset", None)
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
 
@@ -102,6 +105,7 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
     Phase 6/8 fixes this — update the assertions then, do not xfail.
     """
     pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
     sys.modules.pop("liom_toolkit.segmentation.vseg.dataset", None)
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
 
