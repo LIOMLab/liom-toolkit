@@ -60,13 +60,13 @@ class TestHexToRgb:
     def test_six_char_string(self):
         from liom_toolkit.utils.allen_sdk import _hex_to_rgb
 
-        # "019393" -> 0x01=1, 0x93=147, 0x93=153
-        assert _hex_to_rgb("019393") == [1, 147, 153]
+        # "019393" -> 0x01=1, 0x93=147, 0x93=147
+        assert _hex_to_rgb("019393") == [1, 147, 147]
 
     def test_leading_hash_stripped(self):
         from liom_toolkit.utils.allen_sdk import _hex_to_rgb
 
-        assert _hex_to_rgb("#019393") == [1, 147, 153]
+        assert _hex_to_rgb("#019393") == [1, 147, 147]
 
     def test_short_string_padded_to_six(self):
         from liom_toolkit.utils.allen_sdk import _hex_to_rgb
@@ -103,7 +103,7 @@ class TestFlattenStructureTree:
         from liom_toolkit.utils.allen_sdk import _flatten_structure_tree
 
         flat = _flatten_structure_tree(_sample_structure_tree())
-        assert flat[0]["rgb_triplet"] == [1, 147, 153]
+        assert flat[0]["rgb_triplet"] == [1, 147, 147]
         assert flat[1]["rgb_triplet"] == [255, 0, 0]
 
     def test_preserves_original_node_fields(self):
@@ -191,11 +191,11 @@ class TestBuildStructureMetadata:
 
         flat = _flatten_structure_tree(_sample_structure_tree())
         df = _build_structure_metadata(flat)
-        # Row 0: root (id=997, rgb=[1,147,153], acronym="root")
+        # Row 0: root (id=997, rgb=[1,147,147], acronym="root")
         assert df.loc[0, "IDX"] == 997
         assert df.loc[0, "-R-"] == 1
         assert df.loc[0, "-G-"] == 147
-        assert df.loc[0, "-B-"] == 153
+        assert df.loc[0, "-B-"] == 147
         assert df.loc[0, "-A-"] == 1.0
         assert df.loc[0, "VIS"] == 1
         assert df.loc[0, "MSH"] == 1
@@ -216,7 +216,11 @@ class TestBuildStructureMetadata:
         assert str(df["-A-"].dtype) == "float64"
         assert str(df["VIS"].dtype) == "int64"
         assert str(df["MSH"].dtype) == "int64"
-        assert df["LABEL"].dtype == object
+        # LABEL is a string column — pandas <3.0 infers `object`, pandas 3.0+
+        # infers `StringDtype`. The allensdk fixture (generated on 3.12 with
+        # older pandas) will have `object`; the byte-exact regression test
+        # (Task 3) is the final arbiter. Accept either here.
+        assert df["LABEL"].dtype == object or "str" in str(df["LABEL"].dtype).lower()
 
     def test_row_order_matches_flatten_order(self):
         from liom_toolkit.utils.allen_sdk import _build_structure_metadata, _flatten_structure_tree
