@@ -5,10 +5,13 @@ functions). It is a gated one-time dev script that generates the committed
 allensdk snapshot fixture (``labels.parquet`` + ``annotation_25um.npz``) used
 by ``tests/test_utils/test_allen_sdk.py::test_export_itksnap_labels_25um_matches_allensdk_fixture``.
 
-Run manually on Python 3.12 with allensdk installed:
+Run manually on Python 3.11 with allensdk 2.16.x installed. allensdk does NOT
+install on Python 3.12+ — its numpy 1.23.5 pin relies on ``numpy.distutils``,
+which was removed in Python 3.12. Use a throwaway 3.11 venv:
 
-    uv sync --extra allensdk --python 3.12
-    uv run python tests/test_utils/fixtures/allen_itksnap_25um/regenerate.py
+    python3.11 -m venv /tmp/allensdk-test
+    /tmp/allensdk-test/bin/pip install allensdk==2.16.2 nrrd pandas pyarrow
+    /tmp/allensdk-test/bin/python tests/test_utils/fixtures/allen_itksnap_25um/regenerate.py
 
 This downloads the 25µm annotation NRRD + structure-tree JSON via allensdk's
 ``ReferenceSpaceCache`` (the exact code path being replaced), calls
@@ -20,7 +23,10 @@ compares it against the rewritten ``liom_toolkit.utils.allen_sdk`` output.
 The script also saves the raw ``structure_tree.json`` and ``annotation_25.nrrd``
 to the fixture directory so the regression test can replay the rewrite without
 network (it points ``construct_reference_space`` at the fixture dir, which has
-the cached files).
+the cached files). The cached ``structure_tree.json`` is allensdk's
+post-``clean_structures`` flat list (each node has ``rgb_triplet`` as ints,
+not ``color_hex_triplet``) — the rewrite's read path handles this format
+directly.
 """
 
 from __future__ import annotations
