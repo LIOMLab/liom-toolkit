@@ -6,10 +6,10 @@ import shutil
 import cv2
 import numpy as np
 import torch
+import zarr
 from skimage.color import gray2rgb
 from skimage.io import imread, imsave
 from tqdm.auto import tqdm
-from zarr.convenience import open
 
 from .dataset import OmeZarrDataset
 from .model import VsegModel
@@ -127,7 +127,7 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     :param zarr_location: The location of the zarr file
     :type zarr_location: str
     """
-    new_volume = open(
+    new_volume = zarr.open(
         zarr_location,
         mode="w",
         shape=dataset.data.shape,

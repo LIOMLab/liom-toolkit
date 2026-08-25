@@ -8,7 +8,7 @@ from skimage import filters, morphology, restoration
 from skimage.filters import frangi, thresholding
 from skimage.io import imsave
 from skimage.measure import label, regionprops
-from skimage.morphology import binary_erosion, disk
+from skimage.morphology import disk, erosion
 from skimage.util import img_as_ubyte
 
 
@@ -133,7 +133,7 @@ def erode_mask(mask: np.ndarray, disk_size: int = 30) -> np.ndarray:
     :return: The eroded mask
     :rtype: np.ndarray
     """
-    return binary_erosion(mask, disk(disk_size))
+    return erosion(mask, disk(disk_size))
 
 
 def segment_2d_image(
@@ -181,7 +181,7 @@ def segment_2d_image(
         vessel_mask_raw = li_threshold_image(frangi)
 
     # Cleanup small structures
-    cleaned = morphology.remove_small_objects(vessel_mask_raw, min_size=200)
+    cleaned = morphology.remove_small_objects(vessel_mask_raw, max_size=200)
 
     # Apply mask
     vessel_mask = cleaned * mask

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from skimage.morphology import skeletonize, skeletonize_3d
+from skimage.morphology import skeletonize
 
 
 def cl_score(image: np.ndarray, skeleton: np.ndarray) -> float:
@@ -33,6 +33,6 @@ def cl_dice(image_predicted: np.ndarray, image_truth: np.ndarray) -> float:
         tprec = cl_score(image_predicted, skeletonize(image_truth))
         tsens = cl_score(image_truth, skeletonize(image_predicted))
     elif len(image_predicted.shape) == 3:
-        tprec = cl_score(image_predicted, skeletonize_3d(image_truth))
-        tsens = cl_score(image_truth, skeletonize_3d(image_predicted))
+        tprec = cl_score(image_predicted, skeletonize(image_truth))
+        tsens = cl_score(image_truth, skeletonize(image_predicted))
     return 2 * tprec * tsens / (tprec + tsens)
