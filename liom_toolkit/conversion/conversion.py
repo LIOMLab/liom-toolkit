@@ -12,14 +12,13 @@ import zarr
 from natsort import natsorted
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
-from ome_zarr.writer import ArrayLike, write_image
+from ome_zarr.writer import ArrayLike, Methods, write_image
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import (
-    CustomScaler,
+    build_scale_factors,
     create_mask_from_zarr,
-    create_transformation_dict,
     generate_axes_dict,
     generate_label_color_dict_mask,
     load_node_by_name,
@@ -27,6 +26,7 @@ from liom_toolkit.utils.io import (
     load_zarr_image_from_node,
     save_atlas_to_zarr,
     save_label_to_zarr,
+    validate_n_levels,
 )
 
 
@@ -80,6 +80,7 @@ def save_zarr(
     zarr_file: str,
     scales: tuple = (6.5, 6.5, 6.5),
     chunks: tuple = (128, 128, 128),
+    unit: str = "micrometer",
 ) -> None:
     """
     Save a numpy array to a zarr file.
@@ -92,23 +93,36 @@ def save_zarr(
     :type scales: tuple
     :param chunks: The chunk size to use.
     :type chunks: tuple
+    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
+        in. Defaults to ``"micrometer"`` to preserve existing callers.
+    :type unit: str
     """
+    if unit not in {"micrometer", "millimeter", "meter", "nanometer"}:
+        raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
+
     n_dims = len(data.shape)
+    axes = generate_axes_dict(n_dims)
 
     print("Saving...")
     os.mkdir(zarr_file)
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
-    scaler = CustomScaler(input_layer=0)
+    n_levels = validate_n_levels(4, data.shape, axes)
+    scale_factors = build_scale_factors(n_levels, axes)
+    scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
+    axes_units = {ax: unit for ax in axes if ax != "c"}
 
     write_image(
         image=data,
         group=root,
-        axes=generate_axes_dict(n_dims),
-        coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+        axes=axes,
+        scale_factors=scale_factors,
+        method=Methods.RESIZE,
+        scale=scale,
+        axes_units=axes_units,
         storage_options={"chunks": chunks},
-        scaler=scaler,
+        scaler=None,
     )
     print("Done!")
 
