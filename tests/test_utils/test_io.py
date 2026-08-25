@@ -176,6 +176,30 @@ def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
         assert scale_entry["scale"][1] == expected_yx[i - 1]
         assert scale_entry["scale"][2] == expected_yx[i - 1]
 
+    # NEAREST/no-interpolation guard (T-3-data-integrity): every downsampled
+    # pyramid level of the label node must preserve the original integer label
+    # value set. ``save_label_to_zarr`` writes with ``method=Methods.NEAREST``
+    # so downsampled levels are nearest-neighbor resampled — a regression to a
+    # linear/averaging method would silently produce fractional/interpolated
+    # values at levels 1..N (the silent-wrong-data failure mode AGENTS.md §2
+    # warns against). Use ``issubset({0, 1})`` (not equality) so the bright
+    # block is allowed to downsample away at the coarsest levels while still
+    # forbidding any fractional value. The dtype must remain integer at every
+    # level — a float dtype would indicate averaging interpolation.
+    original_values = {0, 1}
+    for level in range(len(mask_node.data)):
+        arr = np.asarray(mask_node.data[level])
+        assert np.issubdtype(arr.dtype, np.integer), (
+            f"label level {level} dtype {arr.dtype} is not integer — "
+            "NEAREST resampling must preserve integer label dtype"
+        )
+        unique = set(int(v) for v in np.unique(arr))
+        assert unique.issubset(original_values), (
+            f"label level {level} unique values {unique} are not a subset of "
+            f"the original label value set {original_values} — "
+            "NEAREST resampling must not interpolate fractional label values"
+        )
+
 
 def test_generate_label_color_dict_mask_structure():
     """The mask color dict has 3 entries with label-values {0, 1, None}.
