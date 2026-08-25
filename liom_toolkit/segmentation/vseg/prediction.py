@@ -4,11 +4,11 @@ import os
 import shutil
 
 import cv2
+import imageio.v3 as iio
 import numpy as np
 import torch
 import zarr
-from skimage.color import gray2rgb
-from skimage.io import imread, imsave
+from skimage.color import gray2rgb, rgb2gray
 from tqdm.auto import tqdm
 
 from .dataset import OmeZarrDataset
@@ -45,7 +45,7 @@ def predict_one(
     :return: The predicted image
     :rtype: np.ndarray
     """
-    image = imread(img_path)
+    image = iio.imread(img_path)
     H = image.shape[0]
     W = image.shape[1]
     size = (H, W)
@@ -68,7 +68,7 @@ def predict_one(
     create_dir(f"{save_path}/patches/images/")
 
     # Only the clahe is done to the image
-    image = imread(img_path)
+    image = iio.imread(img_path)
     image = (image / image.max() * 255).astype(np.uint8)
     # Apply Adaptive Histogram Equalization (AHE)
     kernel_size = norm_param[0]
@@ -81,7 +81,7 @@ def predict_one(
     saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
     img_name = f"{image_id}_0_0.png"
     image_path = os.path.join(save_path, "patches", "images", img_name)
-    imsave(image_path, saved_image, check_contrast=False)
+    iio.imwrite(image_path, saved_image)
 
     """ Load dataset """
     test_x = numeric_filesort(f"{save_path}/patches", folder="images")
@@ -93,7 +93,9 @@ def predict_one(
     inference = np.zeros(processed_image.shape)
 
     for x in test_x:
-        image = imread(x, as_gray=True)
+        image = iio.imread(x)
+        if image.ndim == 3:
+            image = rgb2gray(image)
         image = process_image(image, device)
         image = image.to(device)
         pred_y = do_predict(model, image)
@@ -111,7 +113,7 @@ def predict_one(
     inference = inference.astype(np.uint8) * 255
 
     save_inf = f"{save_path}/{image_id}_segmented.png"
-    imsave(save_inf, inference, check_contrast=False)
+    iio.imwrite(save_inf, inference)
 
     return inference
 

@@ -30,7 +30,7 @@ def clean_dir(directory: str) -> None:
 
 def convert_to_png_for_saving(img: np.ndarray) -> np.ndarray:
     """
-    Convert the array to be suitable for PNG saving with skimage.io.imsave.
+    Convert the array to be suitable for PNG saving with imageio.v3.imwrite.
 
     :param img: The image to convert
     :type img: np.ndarray

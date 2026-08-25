@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import os
 
+import imageio.v3 as iio
 import numpy as np
 from scipy.ndimage import median_filter
 from skimage import filters, morphology, restoration
 from skimage.filters import frangi, thresholding
-from skimage.io import imsave
 from skimage.measure import label, regionprops
 from skimage.morphology import disk, erosion
 from skimage.util import img_as_ubyte
@@ -187,7 +187,7 @@ def segment_2d_image(
     vessel_mask = cleaned * mask
 
     # Save image
-    imsave(output_dir + name + "_mask.tif", img_as_ubyte(mask), check_contrast=False)
-    imsave(output_dir + name + "_vessel_mask.tif", img_as_ubyte(vessel_mask), check_contrast=False)
+    iio.imwrite(output_dir + name + "_mask.tif", img_as_ubyte(mask))
+    iio.imwrite(output_dir + name + "_vessel_mask.tif", img_as_ubyte(vessel_mask))
     # Clean memory
     del image, mask, frangi, vessel_mask_raw, vessel_mask, cleaned

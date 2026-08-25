@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pickle
+
 import torch
 import torch.nn as nn
 import wandb
@@ -133,7 +135,15 @@ class VsegModel(nn.Module):
             artifact_dir = artifact.download()
             run.finish()
 
-            state = torch.load(artifact_dir + "/checkpoint.latest.pth", map_location=device)
+            checkpoint_path = artifact_dir + "/checkpoint.latest.pth"
+            # PyTorch 2.6+ defaults to weights_only=True, which restricts
+            # unpickling to tensors/ints/floats. Try the safe default first;
+            # fall back to weights_only=False only for the trusted internal
+            # liom-lab/model-registry W&B artifact (not user-supplied input).
+            try:
+                state = torch.load(checkpoint_path, map_location=device, weights_only=True)
+            except pickle.UnpicklingError:
+                state = torch.load(checkpoint_path, map_location=device, weights_only=False)
             self.load_state_dict(state)
             self.to(device)
 
