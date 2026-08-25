@@ -177,6 +177,11 @@ def test_convert_hdf5_use_memmap_true_raises(tmp_path, monkeypatch):
     """
     # Same 4D-rechunk workaround as the round-trip test.
     monkeypatch.setattr(conv, "load_hdf5", _patched_load_hdf5)
+    # chdir into tmp_path so the relative "temp.dat" in os.remove resolves into
+    # the clean temp directory — without this, a stray temp.dat in the pytest
+    # CWD would be deleted and the test would XPASS (a hard failure under
+    # strict=True) instead of characterizing the FileNotFoundError bug.
+    monkeypatch.chdir(tmp_path)
 
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
     arr[4:12, 4:12, 4:12] = 1000
