@@ -1,23 +1,37 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 
 import dask.array as da
+import imageio.v3 as iio
 import numpy as np
 import zarr
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
-from ome_zarr.scale import ArrayLike, Scaler
-from ome_zarr.writer import write_labels
-from skimage.io import imsave
-from skimage.transform import resize
+from ome_zarr.scale import ArrayLike
+from ome_zarr.writer import Methods, write_labels
 from tqdm.auto import tqdm
 
 from liom_toolkit.segmentation import segment_3d
 
 from .utils import convert_to_png_for_saving
+
+# NGFF UDUNITS-2 length units accepted by the writer's ``unit`` parameter.
+# Validating ``unit`` here (with ``raise ValueError``, never ``assert`` —
+# ``assert`` is stripped under ``python -O``) prevents a mislabeled physical
+# scale from being silently written to disk.
+_NGFF_LENGTH_UNITS = {"micrometer", "millimeter", "meter", "nanometer"}
+
+# Axes that are actually downsampled by the pyramid. LSFM volumes are
+# anisotropic (Z is typically thicker than Y/X), so by default only Y and X
+# are downsampled and Z stays at the base resolution. ``validate_n_levels``
+# and ``build_scale_factors`` key off this set.
+_DOWNSAMPLE_AXES = frozenset({"y", "x"})
+
+# Default number of downsample levels requested before ``validate_n_levels``
+# clamps the count to what the downsampled axes can actually support.
+_DEFAULT_N_LEVELS = 4
 
 
 def load_zarr(zarr_file: str) -> list[Node]:
@@ -70,6 +84,7 @@ def save_atlas_to_zarr(
     scales: tuple = (6.5, 6.5, 6.5),
     chunks: tuple = (128, 128, 128),
     resolution_level: int = 0,
+    unit: str = "micrometer",
 ) -> None:
     """
     Save an atlas to a zarr file inside the labels group.
@@ -82,8 +97,13 @@ def save_atlas_to_zarr(
     :type scales: tuple
     :param chunks: The chunks to use for the atlas.
     :type chunks: tuple
-    :param resolution_level: The resolution level of the atlas.
+    :param resolution_level: The resolution level of the *input* atlas (the
+        writer upscales it to the main image's full-res shape before
+        ``write_labels`` downsamples).
     :type resolution_level: int
+    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
+        in. Defaults to ``"micrometer"`` to preserve existing callers.
+    :type unit: str
     """
     from .allen_sdk import generate_label_color_dict_allen
 
@@ -95,6 +115,7 @@ def save_atlas_to_zarr(
         scales=scales,
         chunks=chunks,
         resolution_level=resolution_level,
+        unit=unit,
         name="atlas",
     )
 
@@ -166,7 +187,8 @@ def save_label_to_zarr(
     name: str,
     scales: tuple = (6.5, 6.5, 6.5),
     chunks: tuple = (128, 128, 128),
-    resolution_level=0,
+    resolution_level: int = 0,
+    unit: str = "micrometer",
 ) -> None:
     """
     Save a mask to a zarr file inside the labels group.
@@ -183,26 +205,56 @@ def save_label_to_zarr(
     :type chunks: tuple
     :param name: The name of the mask.
     :type name: str
-    :param resolution_level: The resolution level of the label.
+    :param resolution_level: The resolution level of the *input* label. When
+        greater than 0 the writer upscales the label to the main image's
+        full-res (level-0) shape — read from the same ``zarr_file`` — using
+        nearest-neighbor resize (``order=0``) so integer label values are
+        never interpolated. ``write_labels`` then downsamples with
+        ``method=Methods.NEAREST``.
     :type resolution_level: int
+    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
+        in. Defaults to ``"micrometer"`` to preserve existing callers.
+    :type unit: str
     """
+    if unit not in _NGFF_LENGTH_UNITS:
+        raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
+
     n_dims = len(label.shape)
+    axes = generate_axes_dict(n_dims)
+
+    # D-06/D-07: when a low-res label is passed, upscale it to the main
+    # image's level-0 shape (read from the same zarr_file the label is
+    # being written into) using nearest-neighbor resize so integer label
+    # values are preserved.
+    if resolution_level > 0:
+        nodes = load_zarr(zarr_file)
+        target_shape = nodes[0].data[0].shape
+        if len(target_shape) == 4:
+            target_shape = target_shape[1:]
+        label = dask_resize(label, target_shape, order=0, preserve_range=True, anti_aliasing=False)
+
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
 
     label_metadata = {"colors": color_dict, "source": {"image": "../../"}}
 
-    scaler = CustomScaler(input_layer=resolution_level)
+    n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axes)
+    scale_factors = build_scale_factors(n_levels, axes)
+    scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
+    axes_units = {ax: unit for ax in axes if ax != "c"}
 
     write_labels(
         labels=label,
         group=root,
-        axes=generate_axes_dict(n_dims),
-        coordinate_transformations=create_transformation_dict(5, scales, n_dims),
+        axes=axes,
         name=name,
+        scale_factors=scale_factors,
+        method=Methods.NEAREST,
+        scale=scale,
+        axes_units=axes_units,
         label_metadata=label_metadata,
         storage_options={"chunks": chunks},
-        scaler=scaler,
+        scaler=None,
     )
 
 
@@ -221,55 +273,72 @@ def generate_label_color_dict_mask() -> list[dict]:
     return label_colors
 
 
-def create_transformation_dict(n_levels, voxel_size, n_dims=3) -> list[list[dict]]:
+def validate_n_levels(n_levels: int, shape: tuple[int, ...], axes: list[str]) -> int:
     """
-    Create a dictionary with the transformation information for
-    images up to 4 dimensions.
+    Clamp ``n_levels`` so no downsampled axis shape would fall below 1 pixel.
 
+    Only the axes that are actually downsampled (those in
+    :data:`_DOWNSAMPLE_AXES`) bind the level count: an anisotropic LSFM
+    volume where Z stays at base resolution must not be limited by the Z
+    shape. The clamp is ``min(int(log2(s)) for s in binding_shape if s >= 2)``
+    (or ``0`` when no axis is downsampled), which guarantees by construction
+    that the deepest downsampled-axis shape stays >= 1 pixel.
+
+    :param n_levels: The requested number of downsample levels.
     :type n_levels: int
-    :param n_levels: The number of levels in the pyramid.
-    :type voxel_size: tuple
-    :param voxel_size: The voxel size of the dataset.
-    :type n_dims: int
-    :param n_dims: The number of dimensions of the dataset.
-    :return coord_transforms: List of coordinate transformations
-    :rtype coord_transforms: list[list[dict]]
+    :param shape: The shape of the level-0 array.
+    :type shape: tuple[int, ...]
+    :param axes: The axis names matching ``shape`` (e.g. ``["z","y","x"]``).
+    :type axes: list[str]
+    :return: The clamped number of downsample levels (<= ``n_levels``).
+    :rtype: int
     """
-
-    def _get_scale(level, ndims):
-        scale_def = [
-            1.0,
-            (voxel_size[0] * 2.0**level),
-            (voxel_size[1] * 2.0**level),
-            (voxel_size[2] * 2.0**level),
-        ]
-        offset = len(scale_def) - ndims
-        return scale_def[offset:]
-
-    coord_transforms = []
-    for i in range(n_levels):
-        transform_dict = [{"type": "scale", "scale": _get_scale(i, n_dims)}]
-        coord_transforms.append(transform_dict)
-    return coord_transforms
+    binding_shape = [shape[i] for i, ax in enumerate(axes) if ax in _DOWNSAMPLE_AXES]
+    if not binding_shape:
+        return 0
+    max_levels = min(int(np.log2(s)) for s in binding_shape if s >= 2)
+    return min(n_levels, max_levels)
 
 
-def generate_axes_dict(dimensions: int) -> list:
+def build_scale_factors(n_levels: int, axes: list[str]) -> list[dict[str, int]]:
     """
-    Generate the axes dictionary for the zarr file.
+    Build the cumulative dict-form ``scale_factors`` list for ``write_image`` /
+    ``write_labels``.
+
+    Each level ``i`` entry is the cumulative downsample factor *relative to the
+    base* (NOT relative to the previous level): level 0 of the pyramid is the
+    base, level 1 is ``2**1``× downsampled, level 2 is ``2**2``×, etc. ome-zarr's
+    ``_build_pyramid`` interprets each dict entry this way; passing a repeated
+    list (``[{y:2,x:2}] * n``) would clamp the pyramid at ×2 — see RESEARCH
+    Pitfall 1. Axes not in :data:`_DOWNSAMPLE_AXES` (e.g. ``"z"``, ``"c"``)
+    get factor 1 (no downsampling).
+
+    :param n_levels: The number of downsample levels (excluding the base).
+    :type n_levels: int
+    :param axes: The axis names (e.g. ``["z","y","x"]``).
+    :type axes: list[str]
+    :return: A list of ``n_levels`` per-axis factor dicts.
+    :rtype: list[dict[str, int]]
+    """
+    return [
+        {ax: (2 ** (i + 1) if ax in _DOWNSAMPLE_AXES else 1) for ax in axes}
+        for i in range(n_levels)
+    ]
+
+
+def generate_axes_dict(dimensions: int) -> list[str]:
+    """
+    Generate the axes list for the zarr file as plain NGFF v0.5 axis strings.
 
     :param dimensions: The number of dimensions in the image.
     :type dimensions: int
-
-    :return: The axes dictionary.
-    :rtype: list
+    :return: The axis name list (``["z","y","x"]`` or
+        ``["c","z","y","x"]`` for 4D).
+    :rtype: list[str]
     """
-    axes = [
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"},
-    ]
+    axes = ["z", "y", "x"]
     if dimensions == 4:
-        axes.insert(0, {"name": "c", "type": "channel"})
+        axes.insert(0, "c")
     return axes
 
 
@@ -322,198 +391,4 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
     for z in tqdm(range(volume.shape[0])):
         image = volume[z, :, :]
         image = convert_to_png_for_saving(image)
-        imsave(f"{target_dir}/{z!s}.png", image, check_contrast=False)
-
-
-class CustomScaler(Scaler):
-    """
-    A custom scaler that can down-sample 3D images for OME-Zarr Conversion.
-
-    :param order: The order of the transformation.
-    :type order: int
-    :param anti_aliasing: Whether to use anti-aliasing
-    :type anti_aliasing: bool
-    :param downscale: The amount to downscale by
-    :type downscale: int
-    :param method: The method to use for downscaling. **Disclaimer:** Only "nearest" is supported.
-    :type method: str
-    :param input_layer: The input layer to use for the transformation.
-    :type input_layer: int
-    :param max_layer: The maximum layer to use for the transformation.
-    :type max_layer: int
-    :param original_image: The original image to use for the transformation.
-    :type original_image: str | None
-    """
-
-    order: int
-    anti_aliasing: bool
-    input_layer: int
-    to_down_scale: np.ndarray
-    to_up_scale: np.ndarray
-    do_upscale: bool = True
-    original_image: str | None
-    current_scale: int = None
-
-    def __init__(
-        self,
-        order: int = 1,
-        anti_aliasing: bool = True,
-        downscale: int = 2,
-        method: str = "nearest",
-        input_layer: int = 0,
-        max_layer: int = 4,
-        original_image: str | None = None,
-    ):
-        super().__init__(downscale=downscale, method=method, max_layer=max_layer)
-        self.order = order
-        self.anti_aliasing = anti_aliasing
-        self.input_layer = input_layer
-        self.original_image = original_image
-
-    def nearest(self, base: np.ndarray) -> list[np.ndarray]:
-        """
-        Down-sample using :func:`skimage.transform.resize`.
-
-        :param base: The base image to down-sample.
-        :type base: np.ndarray
-        :return: The down-sampled image.
-        :rtype: list[np.ndarray]
-        """
-        # Determine the levels to scale and in which direction
-        scales = np.linspace(0, self.max_layer, self.max_layer + 1, dtype=int)
-        base_layer = self.input_layer
-
-        self.to_up_scale = scales[:base_layer]
-        self.to_down_scale = scales[base_layer + 1 :]
-
-        if len(self.to_up_scale) == 0:
-            self.do_upscale = False
-
-        return self._by_plane(base, self.__nearest)
-
-    def __nearest(self, plane: ArrayLike, size_y: int, size_x: int) -> np.ndarray:
-        """Apply the 2-dimensional transformation.
-
-        :param plane: The plane to transform.
-        :type plane: ArrayLike
-        :param size_y: The size of the y dimension.
-        :type size_y: int
-        :param size_x: The size of the x dimension.
-        :type size_x: int
-        :return: The transformed plane.
-        :rtype: np.ndarray
-        """
-        if isinstance(plane, da.Array):
-
-            def _resize(image: ArrayLike, output_shape: tuple, **kwargs) -> ArrayLike:
-                return dask_resize(image, output_shape, **kwargs)
-
-        else:
-            _resize = resize
-
-        if self.do_upscale:
-            shape = (
-                plane.shape[0] * self.downscale,
-                plane.shape[1] * self.downscale,
-                plane.shape[2] * self.downscale,
-            )
-            if self.original_image is not None:
-                nodes = load_zarr(self.original_image)
-                image_node = nodes[0]
-                image = image_node.data[self.current_scale]
-                shape = image.shape
-                del image
-                del image_node
-                del nodes
-                if len(shape) == 4:
-                    shape = shape[1:]
-            output_shape = shape
-        else:
-            output_shape = (
-                plane.shape[0] // self.downscale,
-                plane.shape[1] // self.downscale,
-                plane.shape[2] // self.downscale,
-            )
-
-        return _resize(
-            plane,
-            output_shape=output_shape,
-            order=self.order,
-            preserve_range=True,
-            anti_aliasing=self.anti_aliasing,
-        ).astype(plane.dtype)
-
-    def _by_plane(
-        self,
-        base: np.ndarray,
-        func: Callable[[np.ndarray, int, int], np.ndarray],
-    ) -> list[np.ndarray | np.ndarray | None]:
-        """Loop over 3 of the 5 dimensions and apply the func transform.
-
-        :param base: The base image to transform.
-        :type base: np.ndarray
-        :param func: The function to apply to the image.
-        :type func: Callable[[np.ndarray, int, int], np.ndarray]
-        :return: The transformed image.
-        :rtype: list[ndarray | ndarray | None]
-        """
-        aa = self.anti_aliasing
-        start_scale = self.input_layer
-        rv = [None] * (self.max_layer + 1)
-        rv[start_scale] = base
-
-        # Do up-scaling first
-        self.anti_aliasing = False
-        self.do_upscale = True
-        scales = self.to_up_scale
-        if scales.size > 0:
-            for scale in np.flip(scales):
-                self.current_scale = scale
-                stack_to_scale = rv[scale + 1]
-                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
-
-        # Do down-scaling
-        self.anti_aliasing = aa
-        self.do_upscale = False
-        scales = self.to_down_scale
-        if scales.size > 0:
-            for scale in scales:
-                stack_to_scale = rv[scale - 1]
-                rv[scale] = self._scale_by_plane(base, stack_to_scale, func)
-
-        return rv
-
-    def _scale_by_plane(self, base, stack_to_scale, func):
-        shape_5d = (*(1,) * (5 - stack_to_scale.ndim), *stack_to_scale.shape)
-        T, C, _Z, Y, X = shape_5d
-
-        # If our data is already 2D, simply resize and add to pyramid
-        if stack_to_scale.ndim == 2:
-            image = func(stack_to_scale, Y, X)
-            return image
-
-        # stack_dims is any dims over 3D
-        new_stack = None
-        for _t in range(T):
-            for c in range(C):
-                plane = stack_to_scale[c] if C > 1 else stack_to_scale[:]
-                out = func(plane, Y, X)
-                # first iteration of loop creates the new nd stack
-                if new_stack is None:
-                    if C > 1:
-                        new_stack = np.zeros(
-                            (C, out.shape[0], out.shape[1], out.shape[2]),
-                            dtype=base.dtype,
-                        )
-                    else:
-                        new_stack = np.zeros(
-                            (out.shape[0], out.shape[1], out.shape[2]),
-                            dtype=base.dtype,
-                        )
-                # insert resized plane into the stack at correct indices
-                if C > 1:
-                    new_stack[c] = out
-                else:
-                    new_stack[:] = out
-        image = new_stack
-        return image
+        iio.imwrite(f"{target_dir}/{z!s}.png", image)
