@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import h5py
 import dask.array as da
+import nibabel as nib
+import nrrd
 import numpy as np
 import pytest
 from natsort import natsorted
@@ -192,3 +194,80 @@ def test_convert_hdf5_use_memmap_true_raises(tmp_path, monkeypatch):
             scales=(6.5, 6.5, 6.5),
             chunks=(16, 16, 16),
         )
+
+
+def test_convert_nifti_to_zarr_round_trip(tmp_path):
+    """convert_nifti_to_zarr round-trips a real NIfTI via nib.load.
+
+    No Dask client is involved — ``convert_nifti_to_zarr`` uses
+    ``da.from_array(nib.load(...).get_fdata())`` directly. Note the production
+    signature typo ``chucks=`` (not ``chunks=``) is matched verbatim.
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    npath = str(tmp_path / "synth.nii.gz")
+    nib.save(nib.Nifti1Image(arr, affine=np.eye(4)), npath)
+
+    zpath = str(tmp_path / "nifti.zarr")
+    convert_nifti_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chucks=(16, 16, 16))
+
+    nodes = load_zarr(zpath)
+    assert np.array_equal(np.asarray(nodes[0].data[0]), arr)
+    assert len(nodes[0].data) == 5
+    # NOTE: nibabel.get_fdata() returns float64, so the level-0 dtype is
+    # float64 (not uint16). This test asserts data-value equality only and
+    # intentionally does NOT assert dtype == np.uint16 for the NIfTI path.
+
+
+def test_convert_nrrd_to_zarr_round_trip(tmp_path):
+    """convert_nrrd_to_zarr round-trips a real NRRD via nrrd.read.
+
+    NRRD preserves the uint16 dtype (unlike NIfTI's float64 get_fdata), so
+    both data equality AND dtype are asserted. Note the production signature
+    typo ``chucks=`` is matched verbatim.
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    npath = str(tmp_path / "synth.nrrd")
+    nrrd.write(npath, arr)
+
+    zpath = str(tmp_path / "nrrd.zarr")
+    convert_nrrd_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chucks=(16, 16, 16))
+
+    nodes = load_zarr(zpath)
+    assert np.array_equal(np.asarray(nodes[0].data[0]), arr)
+    assert nodes[0].data[0].dtype == np.uint16
+    assert len(nodes[0].data) == 5
+
+
+@pytest.mark.parametrize(
+    "overwrite",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.xfail(
+                strict=True,
+                raises=FileExistsError,
+                reason="MP-8/BUG-01: save_zarr os.mkdir overwrite race",
+            ),
+        ),
+    ],
+)
+def test_save_zarr_overwrite(tmp_path, overwrite):
+    """save_zarr fresh-directory path passes; overwrite path raises FileExistsError.
+
+    ``save_zarr`` uses ``os.mkdir(zarr_file)`` (conversion.py:99) which raises
+    ``FileExistsError`` if the directory already exists — there is no
+    overwrite handling. The ``overwrite=False`` branch is a real passing test
+    of the fresh-directory path; the ``overwrite=True`` branch (a second call
+    into the same existing directory) is characterized via param-level strict
+    xfail so the Phase-6 fix (replacing ``os.mkdir`` with overwrite-aware
+    creation) forces marker-removal.
+    """
+    data = np.zeros((16, 16, 16), dtype=np.uint16)
+    zpath = str(tmp_path / "vol.zarr")
+    save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+    if overwrite:
+        # Second call into the existing directory -> os.mkdir FileExistsError.
+        save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
