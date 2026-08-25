@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import csv
 
+import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.io import imread
 
 from .cldice import cl_dice
 from .model import VsegModel
@@ -80,7 +80,7 @@ def validate_model(
         )
 
         mask_path = images.replace(".png", "_mask.png")
-        mask = imread(mask_path)
+        mask = iio.imread(mask_path)
 
         # comparison image
         mask = (mask / mask.max()).astype(np.uint8)

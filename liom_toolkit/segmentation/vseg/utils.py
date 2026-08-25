@@ -4,14 +4,15 @@ import os
 from glob import glob
 from typing import Any
 
+import imageio.v3 as iio
 import natsort
 import numpy as np
 import torch
 from numpy import dtype, ndarray
 from patchify import patchify
 from PIL import Image
+from skimage.color import rgb2gray
 from skimage.exposure import equalize_adapthist
-from skimage.io import imread
 from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
 
 Image.MAX_IMAGE_PIXELS = None
@@ -226,7 +227,9 @@ def create_patches(
     """
     patches = []
 
-    image = imread(image_path, as_gray=True)
+    image = iio.imread(image_path)
+    if image.ndim == 3:
+        image = rgb2gray(image)
     image = crop_image(image, size, stride)
     image = (image / image.max() * 255).astype(np.uint8)
 

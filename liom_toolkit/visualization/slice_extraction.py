@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
+import imageio.v3 as iio
 from ome_zarr.reader import Node
-from skimage.io import imsave
 
 from liom_toolkit.utils import convert_to_png_for_saving
 
@@ -56,7 +56,7 @@ def extract_and_save_slice_form_zarr(
     """
     image = extract_single_slice_from_zarr(node, z, channel, resolution_level)
     image = convert_to_png_for_saving(image)
-    imsave(f"{data_dir}/{name}_C={channel}_Z={z}.png", image)
+    iio.imwrite(f"{data_dir}/{name}_C={channel}_Z={z}.png", image)
     return image
 
 
@@ -133,14 +133,14 @@ def extract_and_save_slices_form_zarr(
         node, start_z, num_slices, channel=channel, resolution_level=resolution_level
     )
 
-    imsave(
+    iio.imwrite(
         f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}.tif",
         volume,
     )
     if save_mip:
         mip = np.max(volume, axis=0)
         mip = convert_to_png_for_saving(mip)
-        imsave(
+        iio.imwrite(
             f"{data_dir}/{name}_C={channel}_Z={start_z - num_slices // 2}-{start_z + num_slices // 2}_mip.png",
             mip,
         )

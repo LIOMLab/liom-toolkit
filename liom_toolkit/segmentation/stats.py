@@ -5,6 +5,7 @@ import os
 import tempfile
 
 import dask.array as da
+import imageio.v3 as iio
 import numpy as np
 import pandas as pd
 import PIL.Image
@@ -14,7 +15,6 @@ from scipy.ndimage import distance_transform_edt
 from skimage import measure
 from skimage.color import gray2rgb
 from skimage.draw import circle_perimeter
-from skimage.io import imsave
 from skimage.measure import label
 from skimage.measure._regionprops import RegionProperties
 from skimage.morphology import skeletonize
@@ -122,10 +122,10 @@ def compute_slice_metrics(
     mean_diameter = compute_average_diameter(vessel_mask, skeleton, voxel_size)
 
     # Save intermediate results
-    imsave(output_dir + "regions.png", img_as_ubyte(regions), check_contrast=False)
-    imsave(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude), check_contrast=False)
-    imsave(output_dir + "_complete_mask.png", img_as_ubyte(mask), check_contrast=False)
-    imsave(output_dir + "vessels.png", img_as_ubyte(vessel_mask), check_contrast=False)
+    iio.imwrite(output_dir + "regions.png", img_as_ubyte(regions))
+    iio.imwrite(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude))
+    iio.imwrite(output_dir + "_complete_mask.png", img_as_ubyte(mask))
+    iio.imwrite(output_dir + "vessels.png", img_as_ubyte(vessel_mask))
 
     # Save data
     entry = pd.DataFrame.from_dict(
@@ -188,7 +188,7 @@ def calculate_regional_density(
     """
     vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
-    imsave(output_dir + str(region_index) + ".tif", img_as_ubyte(region), check_contrast=False)
+    iio.imwrite(output_dir + str(region_index) + ".tif", img_as_ubyte(region))
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
@@ -233,7 +233,7 @@ def get_branching_point_count(
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
     points_count = branching_points.sum()
-    imsave(output_dir + filename, img_as_ubyte(skeleton), check_contrast=False)
+    iio.imwrite(output_dir + filename, img_as_ubyte(skeleton))
     return points_count, skeleton, branching_points
 
 
@@ -289,7 +289,7 @@ def draw_branch_point_circles(
         circy, circx = circle_perimeter(point[0], point[1], 7, shape=skeleton.shape)
         circled_skeleton[circy, circx] = (220, 20, 20)
 
-    imsave(output_dir + filename, circled_skeleton, check_contrast=False)
+    iio.imwrite(output_dir + filename, circled_skeleton)
     del circled_skeleton
 
 
@@ -349,7 +349,7 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     heatmap = img_as_uint(heatmap)
     heatmap = heatmap.astype(float)
     heatmap = heatmap / (square_size**2)
-    imsave(output_dir + "heatmap.tif", heatmap, check_contrast=False)
+    iio.imwrite(output_dir + "heatmap.tif", heatmap)
 
 
 def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
