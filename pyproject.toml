@@ -26,6 +26,8 @@ dependencies = [
     'zarr>=3.0',
     'h5py',
     'pynrrd',
+    'pandas',
+    'requests',
     'PyWavelets',
     'SimpleITK',
     'dask',
