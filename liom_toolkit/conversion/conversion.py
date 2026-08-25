@@ -32,27 +32,41 @@ from liom_toolkit.utils.io import (
 
 def load_hdf5(hdf5_file: str) -> da.Array:
     """
-    Load the data from a HDF5 file. If use_mem_map is True, the data will be saved to a memmap file to save memory.
+    Load the data from a HDF5 file into a Dask array.
+
+    Each dataset is eagerly materialized to a numpy array inside the
+    context-managed ``with h5py.File(...)`` block (so the OS file descriptor
+    is released even if a read raises), then wrapped in a Dask array via
+    ``da.from_array``. The raw ``h5py.Dataset`` object is never passed to the
+    Dask workers — only the in-memory numpy copy is — which keeps the read
+    safe for process-based Dask clusters (an ``h5py.Dataset`` is not reliably
+    picklable across processes).
 
     :param hdf5_file: The HDF5 file to load.
     :type hdf5_file: str
-    :return: The data from the HDF5 file.
+    :return: The stacked channel data from the HDF5 file.
     :rtype: da.Array
     """
     client = dask_client_manager.get_client()
 
-    f = h5py.File(hdf5_file, "r")
-    keys = natsorted(list(f.keys()))
-    paths = [f"/{key}" for key in keys]
-    data_list = [client.submit(da.from_array, (f[path])) for path in paths]
-    loaded_data = [client.gather(data) for data in data_list]
-    data = da.stack(loaded_data, axis=0)
-    data = da.rechunk(data, chunks=(128, 128, 128))
-    data = client.persist(data)
+    with h5py.File(hdf5_file, "r") as f:
+        keys = natsorted(list(f.keys()))
+        paths = [f"/{key}" for key in keys]
+        # Eagerly materialize each dataset to a numpy array while the file is
+        # open, then submit the numpy array (not the h5py.Dataset) to the
+        # Dask worker wrapped in da.from_array.
+        data_list = [client.submit(da.from_array, np.array(f[path])) for path in paths]
+        loaded_data = [client.gather(d) for d in data_list]
 
-    # Clean up
-    del data_list
-    del loaded_data
+    # File is now closed; build the stacked 4D volume from the in-memory
+    # arrays. Each entry of loaded_data is already a dask array (the worker
+    # wrapped the numpy copy in da.from_array inside the submit call above).
+    data = da.stack(loaded_data, axis=0)
+    # da.stack(..., axis=0) always produces 4D data; pick 4D chunks in that
+    # case so the rechunk does not raise on shape/chunk dimension mismatch.
+    chunks = (1, 128, 128, 128) if data.ndim == 4 else (128, 128, 128)
+    data = da.rechunk(data, chunks=chunks)
+    data = client.persist(data)
 
     return data
 
