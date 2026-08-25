@@ -33,7 +33,9 @@ def _sample_structure_tree() -> list[dict]:
 
     Mirrors the Allen ``structure_graph_download/1.json`` shape: each node has
     ``id``, ``acronym``, ``name``, ``color_hex_triplet``, ``structure_id_path``
-    and a ``children`` array of descendant nodes.
+    and a ``children`` array of descendant nodes. This is the *download* format;
+    the cached/allensdk format is a flat list with ``rgb_triplet`` already
+    attached (see ``_sample_flat_structure_tree``).
     """
     return [
         {
@@ -53,6 +55,36 @@ def _sample_structure_tree() -> list[dict]:
                 },
             ],
         }
+    ]
+
+
+def _sample_flat_structure_tree() -> list[dict]:
+    """A flat structure-tree list in allensdk's cache format.
+
+    Mirrors the post-``clean_structures`` format that allensdk writes to disk:
+    a flat list of node dicts (no ``children`` key) where each node already has
+    ``rgb_triplet`` (list of 3 ints) instead of ``color_hex_triplet``. The
+    committed 25µm regression fixture (``structure_tree.json``) uses this
+    format, and ``export_label_description`` reads ``rgb_triplet`` directly
+    from it.
+    """
+    return [
+        {
+            "id": 997,
+            "acronym": "root",
+            "name": "root",
+            "rgb_triplet": [1, 147, 147],
+            "graph_order": 0,
+            "structure_id_path": [997],
+        },
+        {
+            "id": 8,
+            "acronym": "grey",
+            "name": "Basic cell groups and regions",
+            "rgb_triplet": [255, 0, 0],
+            "graph_order": 1,
+            "structure_id_path": [997, 8],
+        },
     ]
 
 
@@ -178,6 +210,49 @@ class TestFlattenStructureTree:
         assert [n["id"] for n in flat] == [1, 2, 3, 4]
 
 
+class TestFlattenStructureTreeFlatFormat:
+    """``_flatten_structure_tree`` handles allensdk's cached flat-list format.
+
+    allensdk's ``clean_structures`` converts the raw API response into a flat
+    list of node dicts with ``rgb_triplet`` (ints) already attached — no
+    ``children`` key, no ``color_hex_triplet``. The committed 25µm regression
+    fixture uses this format, and ``_flatten_structure_tree`` must pass it
+    through unchanged (preserving ``rgb_triplet`` and msg/graph_order).
+    """
+
+    def test_flat_list_returned_as_is_in_msg_order(self):
+        from liom_toolkit.utils.allen_sdk import _flatten_structure_tree
+
+        flat = _flatten_structure_tree(_sample_flat_structure_tree())
+        assert len(flat) == 2
+        assert flat[0]["id"] == 997
+        assert flat[1]["id"] == 8
+
+    def test_flat_list_preserves_existing_rgb_triplet(self):
+        """The existing rgb_triplet must NOT be overwritten with zeros."""
+        from liom_toolkit.utils.allen_sdk import _flatten_structure_tree
+
+        flat = _flatten_structure_tree(_sample_flat_structure_tree())
+        assert flat[0]["rgb_triplet"] == [1, 147, 147]
+        assert flat[1]["rgb_triplet"] == [255, 0, 0]
+
+    def test_flat_list_preserves_all_fields(self):
+        from liom_toolkit.utils.allen_sdk import _flatten_structure_tree
+
+        flat = _flatten_structure_tree(_sample_flat_structure_tree())
+        assert flat[0]["acronym"] == "root"
+        assert flat[0]["graph_order"] == 0
+        assert flat[0]["structure_id_path"] == [997]
+        assert flat[1]["structure_id_path"] == [997, 8]
+
+    def test_flat_list_does_not_add_color_hex_triplet(self):
+        from liom_toolkit.utils.allen_sdk import _flatten_structure_tree
+
+        flat = _flatten_structure_tree(_sample_flat_structure_tree())
+        assert "color_hex_triplet" not in flat[0]
+        assert "children" not in flat[0]
+
+
 class TestBuildStructureMetadata:
     """``_build_structure_metadata`` builds the 8-column ITK-SNAP label DataFrame."""
 
@@ -232,6 +307,31 @@ class TestBuildStructureMetadata:
         # IDX order = flatten order = JSON msg order
         assert list(df["IDX"].values) == [997, 8]
         assert list(df["LABEL"].values) == ["root", "grey"]
+
+    def test_reads_rgb_triplet_directly_from_flat_list(self):
+        """Metadata reads node['rgb_triplet'] directly — no hex conversion.
+
+        This is the allensdk ``export_label_description`` semantics: the
+        cached/flat list already has ``rgb_triplet`` as ints, and the
+        DataFrame reads it directly (the hex→rgb conversion happens at
+        download/clean time, not at metadata-build time).
+        """
+        from liom_toolkit.utils.allen_sdk import _build_structure_metadata
+
+        flat = _sample_flat_structure_tree()
+        df = _build_structure_metadata(flat)
+        assert list(df.columns) == ["IDX", "-R-", "-G-", "-B-", "-A-", "VIS", "MSH", "LABEL"]
+        # Row 0: root (id=997, rgb=[1,147,147])
+        assert df.loc[0, "IDX"] == 997
+        assert df.loc[0, "-R-"] == 1
+        assert df.loc[0, "-G-"] == 147
+        assert df.loc[0, "-B-"] == 147
+        assert df.loc[0, "-A-"] == 1.0
+        assert df.loc[0, "LABEL"] == "root"
+        # Row 1: grey (id=8, rgb=[255,0,0])
+        assert df.loc[1, "IDX"] == 8
+        assert df.loc[1, "-R-"] == 255
+        assert df.loc[1, "LABEL"] == "grey"
 
 
 class TestRemapToIdType:
@@ -601,7 +701,7 @@ def test_no_construct_reference_space_cache():
 # ---------------------------------------------------------------------------
 
 _FIXTURE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     "fixtures",
     "allen_itksnap_25um",
 )

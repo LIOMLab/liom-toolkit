@@ -1,19 +1,57 @@
 """Allen Brain Atlas CCFv3 download + ITK-SNAP label metadata.
 
-This module is being rewritten to replace the former ``allensdk``-based
-implementation with direct HTTP download of the canonical Allen Institute
-CCFv3 NRRD volumes and the structure-tree JSON. The public API
-(``download_allen_atlas``, ``download_allen_template``,
-``construct_reference_space``, ``convert_allen_nrrd_to_ants``,
-``load_allen_template``, ``generate_label_color_dict_allen``) is preserved so
-callers in ``registration/register.py`` and ``segmentation/stats.py`` require
-no changes.
+This module replaces the former ``allensdk``-based implementation with direct
+HTTP download of the canonical Allen Institute CCFv3 NRRD volumes and the
+structure-tree JSON. The public API (``download_allen_atlas``,
+``download_allen_template``, ``construct_reference_space``,
+``convert_allen_nrrd_to_ants``, ``load_allen_template``,
+``generate_label_color_dict_allen``) is preserved so callers in
+``registration/register.py`` and ``segmentation/stats.py`` require no changes.
 
+Structure-tree format and ``export_itksnap_labels`` semantics
+-------------------------------------------------------------
+allensdk's ``export_label_description`` (v2.16.2) builds the 8-column
+ITK-SNAP DataFrame by reading, for each node in ``self.nodes()`` (the flat
+structure list in API ``graph_order``):
+
+    IDX   = node['id']
+    -R-   = node['rgb_triplet'][0]   # read DIRECTLY — no hex_to_rgb here
+    -G-   = node['rgb_triplet'][1]
+    -B-   = node['rgb_triplet'][2]
+    -A-   = alphas.get(node['id'], 1.0)
+    VIS   = 1 if node['id'] not in exclude_label_vis else 0
+    MSH   = 1 if node['id'] not in exclude_mesh_vis else 0
+    LABEL = node['acronym']
+
+The hex→RGB conversion happens earlier, at download/clean time:
+allensdk's ``clean_structures`` maps ``color_hex_triplet`` →
+``StructureTree.hex_to_rgb`` and renames the field to ``rgb_triplet`` before
+caching the flat list. The committed 25µm regression fixture
+(``structure_tree.json``) is this post-clean flat list — each node carries
+``rgb_triplet`` (a list of 3 ints), not ``color_hex_triplet``. The rewrite's
+read path (``_flatten_structure_tree`` + ``_build_structure_metadata``)
+reproduces this exactly: the flat list is passed through unchanged and
+``rgb_triplet`` is read directly.
+
+The download path uses the ``structure_graph_download/1.json`` static-file
+endpoint (a nested tree with ``color_hex_triplet`` + ``children``).
+``_flatten_structure_tree`` walks it depth-first, converts
+``color_hex_triplet`` → ``rgb_triplet`` via ``_hex_to_rgb``, and sorts by
+``graph_order`` so the produced cache matches allensdk's flat-list format and
+the caches are interchangeable. (allensdk itself fetches structures via an
+RMA ``OntologiesApi.get_structures_with_sets`` query ordered by
+``structures.graph_order``; the static-file endpoint plus ``graph_order``
+sort produces an equivalent flat list for the rewrite's own caches. The
+25µm regression test exercises only the read path against the committed
+allensdk-cached fixture, so it is independent of this endpoint choice.)
+
+Endpoint and tampering surface
+------------------------------
 The structure-tree JSON endpoint is plain HTTP (no HTTPS variant exists on the
 static-file server). The CCF2017 content has been frozen since 2020, and the
 25µm regression fixture in ``tests/test_utils/fixtures/allen_itksnap_25um/``
 catches any divergence from the known-good ``allensdk`` output, which is the
-mitigation for the HTTP tampering surface (T-4-01).
+mitigation for the HTTP tampering surface.
 """
 
 from __future__ import annotations
@@ -71,26 +109,50 @@ def _hex_to_rgb(hex_color: str) -> list[int]:
 
 
 def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
-    """Walk the nested structure-tree ``msg`` hierarchy depth-first into a flat list.
+    """Flatten a structure-tree payload into a flat list of node dicts with ``rgb_triplet``.
 
-    The Allen ``structure_graph_download/1.json`` payload is a nested tree: each
-    node has a ``children`` array of descendant nodes. This helper walks the
-    tree depth-first (children in array order) and returns a flat list of node
-    dicts in JSON ``msg`` order. Each node gets an added ``rgb_triplet`` key
-    (the ``[R, G, B]`` uint8 list from ``_hex_to_rgb(color_hex_triplet)``).
+    Handles two on-disk formats:
+
+    1. **Flat list** (allensdk's cache format, and the format committed in the
+       25µm regression fixture): each node already has ``rgb_triplet`` (a list
+       of 3 ints) and no ``children`` key. allensdk's ``clean_structures``
+       converts the raw API ``color_hex_triplet`` hex string into
+       ``rgb_triplet`` before caching, and ``export_label_description`` reads
+       ``rgb_triplet`` directly. This format is returned as-is, in ``msg``
+       order (which is the API's ``graph_order`` order).
+
+    2. **Nested tree** (the ``structure_graph_download/1.json`` static-file
+       endpoint used by this module's own download path): each node has
+       ``color_hex_triplet`` (a hex string) and a ``children`` array. This
+       helper walks the tree depth-first (children in array order), converts
+       ``color_hex_triplet`` to ``rgb_triplet`` via ``_hex_to_rgb``, and
+       returns a flat list. If every node carries a ``graph_order`` field,
+       the result is sorted by ``graph_order`` so the produced flat list
+       matches allensdk's ``graph_order``-ordered cache format — keeping this
+       module's caches interchangeable with allensdk's.
+
     All original node fields (``id``, ``acronym``, ``name``,
-    ``color_hex_triplet``, ``structure_id_path``, etc.) are preserved.
+    ``structure_id_path``, etc.) are preserved.
 
-    :param msg: The ``msg`` array from the structure-tree JSON (list with one
-        root node whose ``children`` cascade).
-    :return: Flat list of node dicts with ``rgb_triplet`` attached, in
-        depth-first JSON order.
+    :param msg: The ``msg`` array from the structure-tree JSON — either a flat
+        list of node dicts (cache format) or a list of root nodes whose
+        ``children`` cascade (nested download format).
+    :return: Flat list of node dicts with ``rgb_triplet`` attached.
     """
+    # Detect format: nested if any node carries a 'children' key.
+    is_nested = any("children" in node for node in msg)
+    if not is_nested:
+        # Flat list — rgb_triplet already attached by allensdk's clean_structures.
+        # Return shallow copies in msg order so the caller cannot mutate the
+        # cached dicts.
+        return [dict(node) for node in msg]
+
     flat: list[dict] = []
 
     def _walk(node: dict) -> None:
         node = dict(node)  # shallow copy so we don't mutate the caller's dict
-        node["rgb_triplet"] = _hex_to_rgb(node.get("color_hex_triplet", "0"))
+        if "rgb_triplet" not in node:
+            node["rgb_triplet"] = _hex_to_rgb(node.get("color_hex_triplet", "0"))
         children = node.pop("children", [])
         flat.append(node)
         for child in children:
@@ -98,6 +160,11 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
 
     for root in msg:
         _walk(root)
+
+    # Match allensdk's flat-list ordering (the RMA query orders by
+    # structures.graph_order) so this module's caches are interchangeable.
+    if flat and all("graph_order" in n for n in flat):
+        flat.sort(key=lambda n: n["graph_order"])
     return flat
 
 
@@ -375,7 +442,12 @@ def construct_reference_space(
     if not os.path.exists(tree_file):
         _download_structure_tree(tree_file)
     with open(tree_file) as f:
-        tree_msg = json.load(f)["msg"]
+        tree_data = json.load(f)
+    # The cached file may be the raw ``msg`` list (allensdk's cache format and
+    # the committed regression fixture) or the wrapped ``{"msg": [...]}`` API
+    # response (this module's own download cache). Accept both so existing
+    # allensdk caches and the regression fixture replay without network.
+    tree_msg = tree_data["msg"] if isinstance(tree_data, dict) else tree_data
     structures = _flatten_structure_tree(tree_msg)
 
     structure_tree = _StructureTree(structures)
@@ -408,7 +480,8 @@ def _download_structure_tree(dest: str) -> list[dict]:
     """Download the Allen structure-tree JSON, cache it to ``dest``, return flattened list.
 
     Fetches ``_STRUCTURE_TREE_URL`` (D-02: static-file endpoint), extracts the
-    ``msg`` array, writes the raw JSON to ``dest`` for caching, and returns
+    ``msg`` array, writes the raw ``msg`` list to ``dest`` for caching (matching
+    allensdk's cache format so caches are interchangeable), and returns
     ``_flatten_structure_tree(msg)``.
     """
     r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
@@ -416,7 +489,7 @@ def _download_structure_tree(dest: str) -> list[dict]:
     payload = r.json()
     msg = payload["msg"]
     with open(dest, "w") as f:
-        json.dump(payload, f)
+        json.dump(msg, f)
     return _flatten_structure_tree(msg)
 
 

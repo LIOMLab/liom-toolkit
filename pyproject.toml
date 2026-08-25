@@ -84,6 +84,7 @@ dev = [
     "types-opencv-python>=1.0.11",
     "scipy-stubs",
     "pandas-stubs",
+    "pyarrow>=25.0.1",
 ]
 
 [project.scripts]
