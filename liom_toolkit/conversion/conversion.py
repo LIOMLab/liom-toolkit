@@ -166,9 +166,6 @@ def convert_hdf5_to_zarr(
     map_file = "temp.dat"
     data = load_hdf5(hdf5_file)
 
-    # Convert to numpy for now to fix 3D downsampling issues
-    data = data.compute()
-
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
     if use_memmap:
         os.remove(map_file)
@@ -253,7 +250,6 @@ def create_multichannel_zarr(
     # Merge the data along a new fourth dimension at index 0
     volume = client.submit(da.stack, [auto_fluo, vascular], axis=0).result()
     volume = client.gather(volume)
-    volume = volume.compute()
 
     # Save the volume to a zarr file
     save_zarr(volume, zarr_file, scales=scales, chunks=chunks)
@@ -357,7 +353,7 @@ def create_full_zarr_volume(
     atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
     save_atlas_to_zarr(
-        zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=resolution_level
+        zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0
     )
     temp_dir.cleanup()
     pbar.update(1)
@@ -381,7 +377,7 @@ def create_full_zarr_volume(
         chunks=chunks,
         color_dict=color_dict,
         name="mask",
-        resolution_level=resolution_level,
+        resolution_level=0,
     )
     pbar.update(1)
 
