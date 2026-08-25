@@ -351,3 +351,244 @@ class TestRemapToIdType:
         new_vol, new_df = _remap_to_id_type(annotation, df, id_type=np.uint16)
         # After reset_index the DataFrame index is 0..N-1
         assert list(new_df.index) == [0]
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — network download, wrapper classes, public API, mock-network tests
+# ---------------------------------------------------------------------------
+
+import sys
+from unittest.mock import MagicMock, patch
+
+
+def test_download_nrrd_raises_on_404(tmp_path):
+    """_download_nrrd raises HTTPError on non-200 (D-03: no silent fallback)."""
+    import requests as _requests
+
+    from liom_toolkit.utils.allen_sdk import _download_nrrd
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = _requests.HTTPError("404 Not Found")
+    mock_resp.__enter__ = lambda self: self
+    mock_resp.__exit__ = lambda *a: False
+
+    dest = str(tmp_path / "out.nrrd")
+    with patch("liom_toolkit.utils.allen_sdk.requests.get", return_value=mock_resp):
+        with pytest.raises(_requests.HTTPError):
+            _download_nrrd("http://example.com/x.nrrd", dest)
+
+
+def test_download_allen_atlas_cache_hit(tmp_path):
+    """Second call with cached NRRD + JSON skips download (D-03 caching contract).
+
+    Pre-creates the annotation NRRD and structure-tree JSON in ``tmp_path`` so
+    ``construct_reference_space`` reads from cache and never calls
+    ``requests.get``. Does not need ``ants`` — ``construct_reference_space``
+    returns the wrapper without converting to ANTsImage.
+    """
+    import nrrd as _nrrd
+
+    from liom_toolkit.utils.allen_sdk import construct_reference_space
+
+    # Build a tiny synthetic annotation volume (uint32, 2x2x2)
+    annotation = np.zeros((2, 2, 2), dtype=np.uint32)
+    annotation[0, 0, 0] = 997
+    annotation[1, 1, 1] = 8
+    nrrd_file = str(tmp_path / "allen_atlas_25.nrrd")
+    _nrrd.write(nrrd_file, annotation)
+
+    # Build a tiny synthetic structure-tree JSON
+    tree_payload = {
+        "msg": [
+            {
+                "id": 997,
+                "acronym": "root",
+                "name": "root",
+                "color_hex_triplet": "019393",
+                "structure_id_path": "997",
+                "children": [
+                    {
+                        "id": 8,
+                        "acronym": "grey",
+                        "name": "Basic cell groups and regions",
+                        "color_hex_triplet": "FF0000",
+                        "structure_id_path": "997/8",
+                        "children": [],
+                    }
+                ],
+            }
+        ]
+    }
+    import json as _json
+
+    tree_file = str(tmp_path / "structure_tree.json")
+    with open(tree_file, "w") as f:
+        _json.dump(tree_payload, f)
+
+    # Patch requests.get so it would raise if called (it should NOT be called)
+    with patch("liom_toolkit.utils.allen_sdk.requests.get") as get_mock:
+        get_mock.side_effect = AssertionError("requests.get should not be called on cache hit")
+        rs = construct_reference_space(str(tmp_path), resolution=25)
+
+    assert get_mock.call_count == 0
+    assert rs.annotation.shape == (2, 2, 2)
+    assert rs.structure_tree.get_structures_by_name(["root"])[0]["id"] == 997
+
+
+def test_construct_reference_space_returns_wrapper(tmp_path):
+    """construct_reference_space returns a wrapper with the caller-contract surface."""
+    import nrrd as _nrrd
+
+    from liom_toolkit.utils.allen_sdk import (
+        _ReferenceSpace,
+        _StructureTree,
+        construct_reference_space,
+    )
+
+    annotation = np.zeros((2, 2, 2), dtype=np.uint32)
+    annotation[0, 0, 0] = 997
+    _nrrd.write(str(tmp_path / "allen_atlas_25.nrrd"), annotation)
+
+    import json as _json
+
+    tree_payload = {
+        "msg": [
+            {
+                "id": 997,
+                "acronym": "root",
+                "name": "root",
+                "color_hex_triplet": "0",
+                "structure_id_path": "997",
+                "children": [],
+            }
+        ]
+    }
+    with open(str(tmp_path / "structure_tree.json"), "w") as f:
+        _json.dump(tree_payload, f)
+
+    rs = construct_reference_space(str(tmp_path), resolution=25)
+    assert isinstance(rs, _ReferenceSpace)
+    assert isinstance(rs.structure_tree, _StructureTree)
+    assert isinstance(rs.annotation, np.ndarray)
+    assert callable(rs.export_itksnap_labels)
+    assert callable(rs.make_structure_mask)
+
+
+def test_export_itksnap_labels_via_wrapper(tmp_path):
+    """The wrapper's export_itksnap_labels produces the 8-column DataFrame + volume."""
+    import nrrd as _nrrd
+
+    from liom_toolkit.utils.allen_sdk import construct_reference_space
+
+    annotation = np.zeros((2, 2, 2), dtype=np.uint32)
+    annotation[0, 0, 0] = 997
+    annotation[1, 1, 1] = 8
+    _nrrd.write(str(tmp_path / "allen_atlas_25.nrrd"), annotation)
+
+    import json as _json
+
+    tree_payload = {
+        "msg": [
+            {
+                "id": 997,
+                "acronym": "root",
+                "name": "root",
+                "color_hex_triplet": "019393",
+                "structure_id_path": "997",
+                "children": [
+                    {
+                        "id": 8,
+                        "acronym": "grey",
+                        "name": "Basic cell groups and regions",
+                        "color_hex_triplet": "FF0000",
+                        "structure_id_path": "997/8",
+                        "children": [],
+                    }
+                ],
+            }
+        ]
+    }
+    with open(str(tmp_path / "structure_tree.json"), "w") as f:
+        _json.dump(tree_payload, f)
+
+    rs = construct_reference_space(str(tmp_path), resolution=25)
+    vol, df = rs.export_itksnap_labels()
+    # No IDX > 65535 here, so no remap — volume returned unchanged
+    np.testing.assert_array_equal(vol, annotation)
+    assert list(df.columns) == ["IDX", "-R-", "-G-", "-B-", "-A-", "VIS", "MSH", "LABEL"]
+    assert list(df["IDX"].values) == [997, 8]
+
+
+def test_make_structure_mask(tmp_path):
+    """make_structure_mask builds a boolean mask for the structure + its descendants."""
+    import nrrd as _nrrd
+
+    from liom_toolkit.utils.allen_sdk import construct_reference_space
+
+    annotation = np.zeros((2, 2, 2), dtype=np.uint32)
+    annotation[0, 0, 0] = 997  # root
+    annotation[0, 0, 1] = 8  # grey (descendant of root)
+    annotation[1, 1, 1] = 99  # unrelated
+    _nrrd.write(str(tmp_path / "allen_atlas_25.nrrd"), annotation)
+
+    import json as _json
+
+    tree_payload = {
+        "msg": [
+            {
+                "id": 997,
+                "acronym": "root",
+                "name": "root",
+                "color_hex_triplet": "0",
+                "structure_id_path": "997",
+                "children": [
+                    {
+                        "id": 8,
+                        "acronym": "grey",
+                        "name": "grey",
+                        "color_hex_triplet": "0",
+                        "structure_id_path": "997/8",
+                        "children": [],
+                    }
+                ],
+            }
+        ]
+    }
+    with open(str(tmp_path / "structure_tree.json"), "w") as f:
+        _json.dump(tree_payload, f)
+
+    rs = construct_reference_space(str(tmp_path), resolution=25)
+    # Mask for root (id=997) should include root + its descendant grey (id=8)
+    mask = rs.make_structure_mask([997])
+    assert mask.dtype == bool
+    assert mask[0, 0, 0]  # root voxel
+    assert mask[0, 0, 1]  # grey voxel (descendant)
+    assert not mask[1, 1, 1]  # unrelated voxel
+
+
+def test_import_allen_sdk_no_allensdk():
+    """Importing allen_sdk does not pull in allensdk (D-03: allensdk gone from runtime)."""
+    # Remove any cached allensdk from a prior import, then import the module
+    sys.modules.pop("allensdk", None)
+    sys.modules.pop("liom_toolkit.utils.allen_sdk", None)
+    import liom_toolkit.utils.allen_sdk  # noqa: F401
+
+    assert "allensdk" not in sys.modules
+
+
+def test_no_allensdk_import_in_source():
+    """The allen_sdk.py source contains no allensdk import (grep-style guard)."""
+    import liom_toolkit.utils.allen_sdk as mod
+
+    source = open(mod.__file__).read()
+    assert "from allensdk" not in source
+    assert "import allensdk" not in source
+
+
+def test_no_construct_reference_space_cache():
+    """construct_reference_space_cache is deleted (allensdk gone)."""
+    import liom_toolkit.utils.allen_sdk as mod
+
+    assert not hasattr(mod, "construct_reference_space_cache")
+    assert not hasattr(mod, "ReferenceSpaceCache")
+    assert not hasattr(mod, "ReferenceSpace")

@@ -173,11 +173,8 @@ def _remap_to_id_type(
 
 
 # ---------------------------------------------------------------------------
-# Public API — preserved signatures (Task 2 rewrites the bodies to use the
-# new helpers + direct HTTP download; the bodies below still reference the
-# former allensdk/ants imports and will NameError at call time until Task 2
-# lands. They are retained verbatim so the module imports cleanly for the
-# Task 1 pure-logic tests.)
+# Public API — preserved signatures, rewritten to use direct HTTP download
+# (no allensdk). ``ants`` is lazy-imported inside the functions that need it.
 # ---------------------------------------------------------------------------
 
 
@@ -194,6 +191,12 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTs
     :return: The loaded template.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the Allen reference space functions of the LIOM toolkit."
+        )
     resolution = resolution / 1000
     atlas_data, _atlas_header = nrrd.read(atlas_file)
     atlas_data = atlas_data.astype("uint32")
@@ -249,12 +252,11 @@ def download_allen_atlas(
     :rtype:(ANTsImage, pd.DataFrame)
     """
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
-    # Download resolution is 10 micron to fix wrong region labels
 
     # Temporary filename
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
 
-    # Downloading the atlas
+    # Downloading the atlas via the reference space (cache-aware)
     rs = construct_reference_space(data_dir, resolution=resolution)
     vol, metadata = rs.export_itksnap_labels()
 
@@ -274,6 +276,10 @@ def download_allen_template(
     """
     Download the allen mouse brain template in RAS+ orientation.
 
+    The ``rsc`` parameter is kept for backward-signature compatibility but is
+    ignored — the former allensdk cache class is gone and this function
+    downloads the template NRRD directly from the Allen Institute endpoint.
+
     :param data_dir: The directory to save the template to.
     :type data_dir: str
     :param resolution: The template resolution in micron. Must be 10, 25, 50 or 100 microns
@@ -290,10 +296,10 @@ def download_allen_template(
     # filename
     nrrd_file = f"{data_dir}/allen_template_{resolution}.nrrd"
 
-    # Downloading the template
-    if rsc is None:
-        rsc = construct_reference_space_cache(resolution=resolution)
-    vol, _metadata = rsc.getTemplate_volume(file_name=str(nrrd_file))
+    # Downloading the template (cache check)
+    if not os.path.exists(nrrd_file):
+        _download_nrrd(_TEMPLATE_URL.format(res=resolution), nrrd_file)
+    vol, _header = nrrd.read(nrrd_file)
 
     ants_image = convert_allen_nrrd_to_ants(vol, resolution / 1000)
 
@@ -315,6 +321,12 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsIma
     :return: The converted image.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the Allen reference space functions of the LIOM toolkit."
+        )
     # Set axis to RAS
     volume = np.moveaxis(volume, [0, 1, 2], [1, 2, 0])
 
@@ -326,52 +338,150 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsIma
     return volume
 
 
-def construct_reference_space_cache(
-    resolution: int = 25, reference_space_key: str = "annotation/ccf_2017"
-):
-    """
-    Construct a reference space cache for the Allen brain atlas. Will use the 2017 adult version of the atlas.
-
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :param reference_space_key: The reference space key to use.
-    :type reference_space_key: str
-    :return: The reference space cache.
-    """
-    # Check the resolution
-    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
-
-    # Construct the reference space cache
-    rsc = ReferenceSpaceCache(resolution=resolution, reference_space_key=reference_space_key)
-
-    return rsc
-
-
 def construct_reference_space(
     data_dir: str, resolution: int = 25, reference_space_key: str = "annotation/ccf_2017"
-):
+) -> _ReferenceSpace:
     """
     Construct a reference space for the Allen brain atlas. Will use the 2017 adult version of the atlas.
 
-    :param data_dir: The directory where the atlas and structure tree are saved.
+    Downloads the annotation NRRD and structure-tree JSON into ``data_dir``
+    (reusing cached files on hit — D-03 caching contract) and returns a
+    wrapper object preserving the caller contract used by
+    ``registration/register.py`` and ``segmentation/stats.py``:
+    ``.annotation``, ``.structure_tree`` (with ``get_structures_by_name``,
+    ``descendant_ids``, ``get_structures_by_id``), ``.make_structure_mask``,
+    ``.export_itksnap_labels``.
+
+    :param data_dir: The directory where the atlas NRRD and structure-tree JSON are saved.
     :type data_dir: str
     :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
     :type resolution: int
-    :param reference_space_key: The reference space key to use.
+    :param reference_space_key: The reference space key (kept for signature compat).
     :type reference_space_key: str
-    :return: The reference space.
+    :return: A reference-space wrapper with the caller-contract attributes/methods.
+    :rtype: _ReferenceSpace
     """
     # Check the resolution
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
-    # Construct the reference space cache
-    rsc = construct_reference_space_cache(
-        resolution=resolution, reference_space_key=reference_space_key
+    # Download annotation NRRD (cache check — D-03)
+    nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
+    if not os.path.exists(nrrd_file):
+        _download_nrrd(_ANNOTATION_URL.format(res=resolution), nrrd_file)
+    annotation, _header = nrrd.read(nrrd_file)
+
+    # Download structure tree (cache check — D-03)
+    tree_file = f"{data_dir}/structure_tree.json"
+    if not os.path.exists(tree_file):
+        _download_structure_tree(tree_file)
+    with open(tree_file) as f:
+        tree_msg = json.load(f)["msg"]
+    structures = _flatten_structure_tree(tree_msg)
+
+    structure_tree = _StructureTree(structures)
+    return _ReferenceSpace(
+        resolution=resolution, annotation=annotation, structure_tree=structure_tree
     )
 
-    # Construct the reference space
-    annotation, _meta = rsc.get_annotation_volume(f"{data_dir}/allen_atlas_{resolution}.nrrd")
-    structure_tree = rsc.get_structure_tree(f"{data_dir}/structure_tree_{resolution}.json")
-    rs = ReferenceSpace(resolution=resolution, annotation=annotation, structure_tree=structure_tree)
 
-    return rs
+# ---------------------------------------------------------------------------
+# Network download helpers
+# ---------------------------------------------------------------------------
+
+
+def _download_nrrd(url: str, dest: str) -> None:
+    """Stream-download a NRRD file from ``url`` to ``dest``.
+
+    Raises ``requests.HTTPError`` on non-200 status (D-03: never silent
+    fallback). A 200-but-not-NRRD response is caught downstream by
+    ``nrrd.read`` raising ``NRRDError``.
+    """
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+
+def _download_structure_tree(dest: str) -> list[dict]:
+    """Download the Allen structure-tree JSON, cache it to ``dest``, return flattened list.
+
+    Fetches ``_STRUCTURE_TREE_URL`` (D-02: static-file endpoint), extracts the
+    ``msg`` array, writes the raw JSON to ``dest`` for caching, and returns
+    ``_flatten_structure_tree(msg)``.
+    """
+    r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
+    r.raise_for_status()
+    payload = r.json()
+    msg = payload["msg"]
+    with open(dest, "w") as f:
+        json.dump(payload, f)
+    return _flatten_structure_tree(msg)
+
+
+# ---------------------------------------------------------------------------
+# Wrapper classes — preserve the allensdk caller contract
+# ---------------------------------------------------------------------------
+
+
+class _StructureTree:
+    """Minimal stand-in for ``allensdk.core.structure_tree.StructureTree``.
+
+    Preserves the caller contract used by ``registration/register.py`` and
+    ``segmentation/stats.py``: ``get_structures_by_name``, ``descendant_ids``,
+    ``get_structures_by_id``.
+    """
+
+    def __init__(self, structures: list[dict]) -> None:
+        self.structures = structures
+
+    def get_structures_by_name(self, names: list[str]) -> list[dict]:
+        return [s for s in self.structures if s["name"] in names]
+
+    def get_structures_by_id(self, ids: list[int]) -> list[dict]:
+        return [s for s in self.structures if s["id"] in ids]
+
+    def descendant_ids(self, ids: list[int]) -> list[list[int]]:
+        result: list[list[int]] = []
+        for parent_id in ids:
+            descendants: list[int] = []
+            for s in self.structures:
+                path = s.get("structure_id_path", "")
+                if isinstance(path, str):
+                    path_parts = [int(p) for p in path.split("/") if p]
+                else:
+                    path_parts = list(path)
+                if parent_id in path_parts:
+                    descendants.append(s["id"])
+            result.append(descendants)
+        return result
+
+
+class _ReferenceSpace:
+    """Minimal stand-in for ``allensdk.core.reference_space.ReferenceSpace``.
+
+    Preserves the caller contract: ``.annotation``, ``.structure_tree``,
+    ``.make_structure_mask``, ``.export_itksnap_labels``.
+    """
+
+    def __init__(self, resolution, annotation, structure_tree) -> None:
+        self.resolution = resolution
+        self.annotation = annotation
+        self.structure_tree = structure_tree
+
+    def export_itksnap_labels(self, id_type=np.uint16) -> tuple[np.ndarray, pd.DataFrame]:
+        label_description = _build_structure_metadata(self.structure_tree.structures)
+        return _remap_to_id_type(self.annotation, label_description, id_type)
+
+    def make_structure_mask(self, structure_ids: list[int], tolerance=None) -> np.ndarray:
+        # Expand each structure_id with its descendants, then build a boolean
+        # mask where the annotation equals any expanded id.
+        expanded: set[int] = set(structure_ids)
+        for parent_id in structure_ids:
+            for group in self.structure_tree.descendant_ids([parent_id]):
+                expanded.update(group)
+        mask = np.zeros(self.annotation.shape, dtype=bool)
+        for sid in expanded:
+            mask[self.annotation == sid] = True
+        return mask
