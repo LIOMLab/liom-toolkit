@@ -57,7 +57,21 @@ jobs:
       # Run pytest on both 3.12 and 3.14 before publish. Optional-extra tests
       # are marker-gated + pytest.importorskip, so they skip cleanly wherever
       # the extra is absent (core install).
-      - run: uv run pytest -q
+      #
+      # Coverage gate: the 3.12+all leg enforces the 60% floor from
+      # pyproject.toml addopts. The 3.14+core and 3.14+all legs override to
+      # --cov-fail-under=0 because importorskip-gated tests skip there (their
+      # coverage sits at ~10-20%); a 60% gate on those legs would be
+      # permanently red and block releases. pytest-cov uses the last
+      # --cov-fail-under value, so the CLI override wins over addopts.
+      - name: Run pytest (3.12+all — 60% coverage gate enforced)
+        if: matrix.python-version == '3.12' && matrix.install-scope == 'all'
+        run: uv run pytest -q
+        env:
+          CI: "true"   # hypothesis CI profile auto-activates
+      - name: Run pytest (3.14 legs — coverage gate disabled)
+        if: "!(matrix.python-version == '3.12' && matrix.install-scope == 'all')"
+        run: uv run pytest -q --cov-fail-under=0
         env:
           CI: "true"   # hypothesis CI profile auto-activates
 

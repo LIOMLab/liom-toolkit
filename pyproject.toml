@@ -102,8 +102,13 @@ addopts = [
     "--strict-markers",
     "--cov=liom_toolkit",
     "--cov-report=term-missing",
-    # Coverage gate is intentionally absent in Phase 1; ratchet to 60% once
-    # the full test suite (TEST-01) lands in Phase 2.
+    "--cov-fail-under=60",
+    # Coverage gate ratcheted to 60% with the Phase-2 TEST-01 suite; CI
+    # overrides the gate to 0 on the 3.14+core and 3.14+all legs (see ci.yml)
+    # because importorskip-gated tests skip there. Do NOT add a zero-value
+    # coverage gate here: pytest-cov uses the last --cov-fail-under value and
+    # addopts is prepended to the CLI, so a zero in addopts would defeat the
+    # ratchet everywhere.
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
