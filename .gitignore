@@ -41,6 +41,10 @@ MANIFEST
 *.manifest
 *.spec
 
+# allensdk transient cache manifest (regenerate.py writes this alongside the
+# committed fixture; it is not needed by the regression test).
+tests/test_utils/fixtures/allen_itksnap_25um/manifest.json
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
