@@ -9,11 +9,11 @@ overwrite behavior:
   is mocked; ``h5py``/``dask.array``/``zarr`` are real and unmocked, per
   AGENTS.md §5). The ``load_hdf5`` 4D-rechunk ``ValueError`` (a characterized
   pre-migration bug — ``da.rechunk(data, chunks=(128, 128, 128))`` hardcoded
-  for 3D data but ``da.stack`` always produces 4D) is dodged via a test-local
-  ``monkeypatch.setattr`` that reimplements ``load_hdf5`` with 4D-aware
-  rechunk. This is a documented workaround for a tracked bug, NOT a
-  production-code fix — Phase 3/6 fixes the real function and the monkeypatch
-  is removed in a single edit.
+  for 3D data but ``da.stack`` always produces 4D) was previously dodged via
+  a test-local ``monkeypatch.setattr`` that reimplemented ``load_hdf5`` with
+  4D-aware rechunk. That workaround was removed once the real function's
+  rechunk was made 4D-aware (the rechunk now picks ``(1, 128, 128, 128)`` for
+  4D stacked data).
 * ``convert_hdf5_to_zarr(use_memmap=True)`` — the default-arg path hits the
   dead ``os.remove("temp.dat")`` on a file never written and raises
   ``FileNotFoundError``. Characterized via ``xfail(strict=True,
@@ -34,15 +34,12 @@ patches at the import site inside ``conversion.py`` — NOT at
 from __future__ import annotations
 
 import h5py
-import dask.array as da
 import nibabel as nib
 import nrrd
 import numpy as np
 import pytest
-from natsort import natsorted
 from unittest.mock import MagicMock, patch
 
-import liom_toolkit.conversion.conversion as conv
 from liom_toolkit.conversion.conversion import (
     convert_hdf5_to_zarr,
     convert_nifti_to_zarr,
@@ -90,46 +87,15 @@ def _make_dask_mock():
     return mock_client
 
 
-def _patched_load_hdf5(hdf5_file):
-    """Test-local reimplementation of ``load_hdf5`` with 4D-aware rechunk.
-
-    This is a characterized-bug WORKAROUND, not a production-code fix. The real
-    ``load_hdf5`` (conversion.py:50) hardcodes ``da.rechunk(data,
-    chunks=(128, 128, 128))`` for 3D data, but ``da.stack(..., axis=0)``
-    always produces a 4D array, so the rechunk raises ``ValueError: Chunks and
-    shape must be of the same length/dimension`` for any HDF5 with ≥1 channel.
-    The fix (choosing 4D chunks when ``data.ndim == 4``) is deferred to a
-    later phase; this monkeypatch lets the conversion-correctness test
-    exercise the real h5py read + real dask stack + real zarr write while
-    dodging the rechunk bug. Removed in a single edit once the real function
-    is fixed.
-    """
-    client = conv.dask_client_manager.get_client()
-    f = h5py.File(hdf5_file, "r")
-    keys = natsorted(list(f.keys()))
-    paths = [f"/{key}" for key in keys]
-    data_list = [client.submit(da.from_array, f[path]) for path in paths]
-    loaded = [client.gather(d) for d in data_list]
-    data = da.stack(loaded, axis=0)
-    # 4D-aware rechunk — the only difference from the real load_hdf5.
-    chunks = (1, 128, 128, 128) if data.ndim == 4 else (128, 128, 128)
-    data = da.rechunk(data, chunks=chunks)
-    data = client.persist(data)
-    return data
-
-
-def test_convert_hdf5_to_zarr_round_trip(tmp_path, monkeypatch):
+def test_convert_hdf5_to_zarr_round_trip(tmp_path):
     """convert_hdf5_to_zarr(use_memmap=False) round-trips a 3-channel HDF5.
 
-    The Dask client is mocked (D-04); ``load_hdf5`` is monkeypatched to dodge
-    the characterized 4D-rechunk bug. Asserts level-0 data equality, shape,
+    The Dask client is mocked (D-04); the real ``load_hdf5`` is exercised
+    (its rechunk is now 4D-aware). Asserts level-0 data equality, shape,
     dtype, pyramid level count, and the submit→gather→persist call sequence
     on the mock (one submit+gather pair per channel, one persist after
     rechunk).
     """
-    # Workaround for the characterized load_hdf5 4D-rechunk ValueError bug.
-    monkeypatch.setattr(conv, "load_hdf5", _patched_load_hdf5)
-
     arr = _make_synthetic_hdf5(str(tmp_path / "synth.h5"), n_channels=3)
     mock_client = _make_dask_mock()
     zpath = str(tmp_path / "out.zarr")
@@ -175,8 +141,6 @@ def test_convert_hdf5_use_memmap_true_raises(tmp_path, monkeypatch):
     created). Characterized via strict xfail so the Phase-6 fix (removing the
     dead code) forces marker-removal: an xpass becomes a hard failure.
     """
-    # Same 4D-rechunk workaround as the round-trip test.
-    monkeypatch.setattr(conv, "load_hdf5", _patched_load_hdf5)
     # chdir into tmp_path so the relative "temp.dat" in os.remove resolves into
     # the clean temp directory — without this, a stray temp.dat in the pytest
     # CWD would be deleted and the test would XPASS (a hard failure under
