@@ -76,8 +76,7 @@ _vseg.__all__ = ["predict_one", "predict_volume"]
 # intended ``ImportError: cannot import name 'skeletonize_3d'``. Setting
 # ``__path__`` lets Python locate ``cldice.py`` / ``utils.py`` as real
 # submodules of the mocked package.
-_vseg_pkg = sys.modules["liom_toolkit.segmentation.vseg"]
-_vseg_pkg.__path__ = [
+_vseg.__path__ = [
     os.path.normpath(
         os.path.join(
             os.path.dirname(__file__),
