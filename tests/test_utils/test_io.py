@@ -3,26 +3,30 @@
 Mirrors the package layout (``tests/test_utils/test_io.py``) and the
 known-answer style established by ``tests/test_canary.py``. Covers:
 
-* Known-answer tests for ``create_transformation_dict`` and
-  ``generate_axes_dict`` (pure functions, no I/O).
+* Known-answer tests for ``generate_axes_dict`` (now returns plain string
+  axis lists per NGFF v0.5) and the new ``validate_n_levels`` helper that
+  clamps the requested pyramid level count to what the downsampled axes
+  can actually support.
 * Real ``tmp_path`` round-trip tests for ``save_zarr``→``load_zarr`` and
   ``save_label_to_zarr``→``load_zarr`` asserting data equality, shape,
-  dtype, axes metadata, coordinate transforms, and pyramid level count.
+  dtype, axes metadata, NGFF v0.5 ``ome.version`` metadata, anisotropic
+  per-level ``coordinateTransformations`` (Z stays at base scale while
+  Y/X grow cumulatively), and pyramid level count.
 
-The round-trip tests are the guard for the Phase-3 ``CustomScaler`` deletion
-and ``write_image(scale_factors=...)`` migration: they must pass genuinely on
-the current pre-migration code so Phase 3 can prove behavioral equivalence
-after the rewrite. They write real zarr groups to ``tmp_path`` (no mocking of
-zarr/ome-zarr) per AGENTS.md §5 and the codebase testing map.
+The round-trip tests are the guard for the ``CustomScaler`` deletion and
+``write_image(scale_factors=..., method=..., scale=..., scaler=None)``
+migration: they assert the new ome-zarr 0.18 NGFF v0.5 writer path produces
+correct on-disk metadata. They write real zarr groups to ``tmp_path`` (no
+mocking of zarr/ome-zarr) per AGENTS.md §5 and the codebase testing map.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import zarr
 
 from liom_toolkit.conversion.conversion import save_zarr
 from liom_toolkit.utils.io import (
-    create_transformation_dict,
     generate_axes_dict,
     generate_label_color_dict_mask,
     load_node_by_name,
@@ -30,48 +34,48 @@ from liom_toolkit.utils.io import (
     save_label_to_zarr,
 )
 
+# ``validate_n_levels`` is a new module-level helper introduced by the
+# migration. It is imported lazily inside the tests that exercise it so the
+# suite still collects (and the round-trip tests still run/fail at runtime)
+# against the pre-migration code where the helper does not yet exist.
+def _import_validate_n_levels():
+    from liom_toolkit.utils.io import validate_n_levels
 
-def test_create_transformation_dict_3d_5_levels():
-    """5 pyramid levels of a 3D volume scale voxel_size by 2**level per axis."""
-    result = create_transformation_dict(5, (6.5, 6.5, 6.5), 3)
-    assert len(result) == 5
-    assert result[0] == [{"type": "scale", "scale": [6.5, 6.5, 6.5]}]
-    assert result[4] == [{"type": "scale", "scale": [104.0, 104.0, 104.0]}]
-
-
-def test_create_transformation_dict_4d():
-    """A 4D volume prepends a channel axis scale of 1.0.
-
-    ``_get_scale`` builds ``[1.0, voxel_size[0]*2**level, voxel_size[1]*2**level,
-    voxel_size[2]*2**level]`` and for 4D (offset=0) returns the full list, so the
-    channel axis always gets scale 1.0 and only ``voxel_size[:3]`` are used.
-    """
-    result = create_transformation_dict(3, (1.0, 2.0, 3.0, 4.0), 4)
-    assert result[0] == [{"type": "scale", "scale": [1.0, 1.0, 2.0, 3.0]}]
+    return validate_n_levels
 
 
 def test_generate_axes_dict_3d():
-    """A 3D volume has z/y/x space axes in micrometer."""
-    assert generate_axes_dict(3) == [
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"},
-    ]
+    """A 3D volume has plain string z/y/x axes (NGFF v0.5 string form)."""
+    assert generate_axes_dict(3) == ["z", "y", "x"]
 
 
 def test_generate_axes_dict_4d_prepends_channel():
-    """A 4D volume prepends a channel axis (no unit) before z/y/x."""
-    result = generate_axes_dict(4)
-    assert result[0] == {"name": "c", "type": "channel"}
-    assert len(result) == 4
+    """A 4D volume prepends a channel axis before z/y/x (string form)."""
+    assert generate_axes_dict(4) == ["c", "z", "y", "x"]
+
+
+def test_validate_n_levels_exact_boundary():
+    """A 16³ volume supports exactly 4 levels (log2(16)=4) — no clamp."""
+    validate_n_levels = _import_validate_n_levels()
+    assert validate_n_levels(4, (16, 16, 16), ["z", "y", "x"]) == 4
+
+
+def test_validate_n_levels_clamps_to_downsampled_axes():
+    """An 8³ volume can only support 3 levels (log2(8)=3 < requested 4)."""
+    validate_n_levels = _import_validate_n_levels()
+    assert validate_n_levels(4, (8, 8, 8), ["z", "y", "x"]) == 3
 
 
 def test_save_zarr_load_zarr_round_trip(tmp_path):
-    """save_zarr -> load_zarr preserves data, shape, dtype, axes, transforms, levels.
+    """save_zarr -> load_zarr preserves data, shape, dtype, axes, NGFF v0.5
+    metadata, anisotropic per-level coordinateTransformations, and level count.
 
     Uses the fresh-directory (non-overwrite) save_zarr path: ``os.mkdir`` creates
-    the zarr directory, so the path must not exist beforehand. The CustomScaler
-    default ``max_layer=4`` produces 5 pyramid levels (n_levels=5).
+    the zarr directory, so the path must not exist beforehand. With
+    ``validate_n_levels(4, (32,32,32), ["z","y","x"]) == 4`` the writer
+    produces 5 total levels (base + 4 downsample levels). The dict-form
+    ``scale_factors`` keeps Z anisotropic (Z scale stays at 6.5 across all
+    levels) while Y/X grow cumulatively (6.5, 13, 26, 52, 104).
     """
     data = np.zeros((32, 32, 32), dtype=np.uint16)
     data[8:24, 8:24, 8:24] = 1000
@@ -81,7 +85,8 @@ def test_save_zarr_load_zarr_round_trip(tmp_path):
     nodes = load_zarr(zpath)
     img = nodes[0]
 
-    # 5 pyramid levels (CustomScaler max_layer=4 -> levels 0..4)
+    # 5 pyramid levels (validate_n_levels(4, (32,32,32), ["z","y","x"]) == 4
+    # -> base + 4 downsample levels)
     assert len(img.data) == 5
     # Level-0 data equality, shape, dtype
     assert np.array_equal(np.asarray(img.data[0]), data)
@@ -91,14 +96,38 @@ def test_save_zarr_load_zarr_round_trip(tmp_path):
     axes = img.metadata["axes"]
     assert [a["name"] for a in axes] == ["z", "y", "x"]
     assert [a["type"] for a in axes] == ["space", "space", "space"]
-    # coordinateTransformations: one entry per pyramid level, each a scale
+
+    # NGFF v0.5 schema push: root ome metadata version is "0.5".
+    # The ome_zarr Reader's Node.metadata dict does not expose the raw "ome"
+    # key (only "axes"/"name"/"coordinateTransformations"), so the version
+    # check goes through zarr.open() directly.
+    root = zarr.open(zpath, mode="r")
+    assert root.attrs["ome"]["version"] == "0.5"
+
+    # coordinateTransformations: one list per pyramid level. The auto-derived
+    # transforms come back as a list of dicts (Scale, then Translation for
+    # levels > 0). Z scale stays at the base 6.5 across all levels
+    # (anisotropic LSFM), while Y/X grow cumulatively by 2× per level.
     ct = img.metadata["coordinateTransformations"]
     assert len(ct) == 5
+    # Level 0: a single Scale transform with the base voxel size.
     assert ct[0][0]["type"] == "scale"
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    # Levels 1..4: Scale then Translation. Z stays at 6.5; Y/X double each level.
+    expected_yx = [13.0, 26.0, 52.0, 104.0]
+    for i in range(1, 5):
+        scale_entry = ct[i][0]
+        assert scale_entry["type"] == "scale"
+        assert scale_entry["scale"][0] == 6.5  # Z anisotropic, stays at base
+        assert scale_entry["scale"][1] == expected_yx[i - 1]
+        assert scale_entry["scale"][2] == expected_yx[i - 1]
+        # Translation entry present at every level > 0.
+        assert ct[i][1]["type"] == "translation"
 
 
 def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
-    """save_label_to_zarr -> load_zarr finds the label node by name with matching data.
+    """save_label_to_zarr -> load_zarr finds the label node by name with
+    matching data and NGFF v0.5 anisotropic per-level coordinateTransformations.
 
     The image MUST be written via save_zarr FIRST: a label-only zarr has no
     ``ome`` multiscales metadata at the root, so the ome-zarr Reader returns 0
@@ -121,6 +150,7 @@ def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
         scales=(6.5, 6.5, 6.5),
         chunks=(16, 16, 16),
         resolution_level=0,
+        unit="micrometer",
     )
 
     nodes = load_zarr(zpath)
@@ -130,6 +160,21 @@ def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
     assert len(mask_node.data) == 5
     assert np.array_equal(np.asarray(mask_node.data[0]), label)
     assert mask_node.data[0].dtype == np.int8
+
+    # NGFF v0.5 anisotropic per-level scales for the label node, mirroring the
+    # image assertions: Z stays at base 6.5 across all levels while Y/X grow
+    # cumulatively (13, 26, 52, 104).
+    ct = mask_node.metadata["coordinateTransformations"]
+    assert len(ct) == 5
+    assert ct[0][0]["type"] == "scale"
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    expected_yx = [13.0, 26.0, 52.0, 104.0]
+    for i in range(1, 5):
+        scale_entry = ct[i][0]
+        assert scale_entry["type"] == "scale"
+        assert scale_entry["scale"][0] == 6.5
+        assert scale_entry["scale"][1] == expected_yx[i - 1]
+        assert scale_entry["scale"][2] == expected_yx[i - 1]
 
 
 def test_generate_label_color_dict_mask_structure():
