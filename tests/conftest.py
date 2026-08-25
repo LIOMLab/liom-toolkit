@@ -6,6 +6,7 @@ They are shipped in Phase 1 so later phases can consume them without
 redefinition.
 """
 
+import os
 import sys
 import types
 
@@ -30,16 +31,21 @@ import pytest
 # ``pytest.importorskip("ants")`` / ``"torch"`` and remove the corresponding
 # sys.modules entry inside the test body so the real import is attempted.
 
+# Note: ``liom_toolkit.segmentation.vseg.utils`` and
+# ``liom_toolkit.segmentation.vseg.cldice`` are intentionally NOT mocked here.
+# They are imported for real so Phase-2 tests can exercise ``calculate_metrics``,
+# ``add_patch_to_empty_array`` (via ``importorskip("torch")``/``"sklearn"``) and
+# characterize the ``cldice`` ``skeletonize_3d`` ImportError. The remaining 7
+# entries stay mocked so the barrel ``__init__.py`` chain + base-install import
+# smoke test still pass without optional deps.
 _VOL_SEG_NAMES = [
     "liom_toolkit.segmentation.volume_segmentation",
     "liom_toolkit.segmentation.vseg",
     "liom_toolkit.segmentation.vseg.prediction",
     "liom_toolkit.segmentation.vseg.dataset",
     "liom_toolkit.segmentation.vseg.model",
-    "liom_toolkit.segmentation.vseg.utils",
     "liom_toolkit.segmentation.vseg.loss",
     "liom_toolkit.segmentation.vseg.validation",
-    "liom_toolkit.segmentation.vseg.cldice",
 ]
 
 for _name in _VOL_SEG_NAMES:
@@ -62,6 +68,26 @@ _vseg = sys.modules["liom_toolkit.segmentation.vseg"]
 _vseg.predict_one = lambda *a, **k: None
 _vseg.predict_volume = lambda *a, **k: None
 _vseg.__all__ = ["predict_one", "predict_volume"]
+
+# Give the mocked ``vseg`` package a real ``__path__`` pointing at the actual
+# ``liom_toolkit/segmentation/vseg/`` directory. Without this, importing a real
+# submodule (``from liom_toolkit.segmentation.vseg.cldice import cl_dice``)
+# raises ``'liom_toolkit.segmentation.vseg' is not a package`` instead of the
+# intended ``ImportError: cannot import name 'skeletonize_3d'``. Setting
+# ``__path__`` lets Python locate ``cldice.py`` / ``utils.py`` as real
+# submodules of the mocked package.
+_vseg_pkg = sys.modules["liom_toolkit.segmentation.vseg"]
+_vseg_pkg.__path__ = [
+    os.path.normpath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "liom_toolkit",
+            "segmentation",
+            "vseg",
+        )
+    )
+]
 
 
 @pytest.fixture
