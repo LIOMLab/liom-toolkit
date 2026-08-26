@@ -269,6 +269,13 @@ def build_template(
     # file-creating helper (NamedTemporaryFile/mkstemp) would break that.
     work_dir = tempfile.mkdtemp() if output_dir is None else output_dir
 
+    # Write progress files under work_dir rather than a CWD-relative
+    # template_progress/ directory, which would litter the caller's working
+    # directory (commonly the repo root in notebooks).
+    progress_dir = os.path.join(work_dir, "template_progress")
+    if save_progress and not os.path.exists(progress_dir):
+        os.makedirs(progress_dir)
+
     def make_outprefix(k: int):
         os.makedirs(os.path.join(work_dir, f"img{k:04d}"), exist_ok=True)
         return os.path.join(work_dir, f"img{k:04d}", "out")
@@ -367,7 +374,7 @@ def build_template(
             if blending_weight is not None:
                 xavg = xavg * blending_weight + ants.iMath(xavg, "Sharpen") * (1.0 - blending_weight)
             if save_progress:
-                iio.image_write(xavg, f"template_progress/template_{i}.nii.gz")
+                iio.image_write(xavg, os.path.join(progress_dir, f"template_{i}.nii.gz"))
 
         return xavg
     finally:
