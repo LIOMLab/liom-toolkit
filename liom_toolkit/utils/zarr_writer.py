@@ -337,7 +337,9 @@ class OmeZarrWriter:
         res = (float(res[0]), float(res[1]), float(res[2]))
 
         axis_names = [ax["name"] for ax in self.axes]
-        n_levels_clamped = validate_n_levels(n_levels, self.shape, axis_names)
+        n_levels_clamped = validate_n_levels(
+            n_levels, self.shape, axis_names, downscale_factor=self.downscale_factor
+        )
 
         # Anisotropic on-disk downsample loop: Y/X only (Z stays at base).
         # Index convention: 4D (c, z, y, x) -> Y=2, X=3; 3D (z, y, x) -> Y=1, X=2.

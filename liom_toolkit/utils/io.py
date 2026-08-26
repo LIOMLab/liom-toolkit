@@ -275,30 +275,44 @@ def generate_label_color_dict_mask() -> list[dict]:
     return label_colors
 
 
-def validate_n_levels(n_levels: int, shape: tuple[int, ...], axes: list[str]) -> int:
-    """
-    Clamp ``n_levels`` so no downsampled axis shape would fall below 1 pixel.
+def validate_n_levels(
+    n_levels: int,
+    shape: tuple[int, ...],
+    axes: list[str],
+    downscale_factor: int = 2,
+) -> int:
+    """Clamp ``n_levels`` so no downsampled axis shape would fall below 1 pixel.
 
     Only the axes that are actually downsampled (those in
     :data:`_DOWNSAMPLE_AXES`) bind the level count: an anisotropic LSFM
     volume where Z stays at base resolution must not be limited by the Z
-    shape. The clamp is ``min(int(log2(s)) for s in binding_shape if s >= 2)``
-    (or ``0`` when no axis is downsampled), which guarantees by construction
-    that the deepest downsampled-axis shape stays >= 1 pixel.
+    shape. The clamp is ``min(int(log_{factor}(s)) for s in binding_shape if
+    s >= factor)`` (or ``0`` when no axis is downsampled, OR when binding
+    axes exist but none is large enough to downsample even once), which
+    guarantees by construction that the deepest downsampled-axis shape stays
+    >= 1 pixel.
 
     :param n_levels: The requested number of downsample levels.
-    :type n_levels: int
     :param shape: The shape of the level-0 array.
-    :type shape: tuple[int, ...]
     :param axes: The axis names matching ``shape`` (e.g. ``["z","y","x"]``).
-    :type axes: list[str]
+    :param downscale_factor: Per-level downsample factor (default 2). The
+        clamp uses ``log_{factor}`` so a non-2 factor is honored — e.g. for
+        factor=3 and shape ``(16,16)``, ``log_3(16) = 2`` allows 2 levels
+        (16 -> 5 -> 1), not the 4 that ``log_2(16)`` would wrongly allow.
     :return: The clamped number of downsample levels (<= ``n_levels``).
-    :rtype: int
     """
     binding_shape = [shape[i] for i, ax in enumerate(axes) if ax in _DOWNSAMPLE_AXES]
     if not binding_shape:
         return 0
-    max_levels = min(int(np.log2(s)) for s in binding_shape if s >= 2)
+    # Only axes large enough to be downsampled at least once by ``factor``
+    # contribute to the clamp. If binding axes exist but none is >= factor
+    # (e.g. shape (1,4,1,1) with factor=2 — Y/X are both 1), no levels are
+    # possible — return 0 rather than crashing on ``min()`` of an empty
+    # iterable (the docstring already promises this).
+    shrinkable = [int(np.log(s) / np.log(downscale_factor)) for s in binding_shape if s >= downscale_factor]
+    if not shrinkable:
+        return 0
+    max_levels = min(shrinkable)
     return min(n_levels, max_levels)
 
 
