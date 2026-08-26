@@ -17,7 +17,7 @@ from skimage.draw import circle_perimeter
 from skimage.measure import label
 from skimage.measure._regionprops import RegionProperties
 from skimage.morphology import skeletonize
-from skimage.util import img_as_ubyte, img_as_uint
+from skimage.util import img_as_ubyte
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
@@ -190,11 +190,18 @@ def compute_slice_metrics(
             "branching points": [branching_points_count],
         }
 
-    # Save intermediate results
-    iio.imwrite(output_dir + "regions.png", img_as_ubyte(regions))
-    iio.imwrite(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude))
-    iio.imwrite(output_dir + "_complete_mask.png", img_as_ubyte(mask))
-    iio.imwrite(output_dir + "vessels.png", img_as_ubyte(vessel_mask))
+    # Save intermediate results. The mask/region/skeleton arrays are
+    # small-integer label/mask arrays, so an explicit .astype(np.uint8)
+    # narrowing is used instead of skimage.util.img_as_ubyte: img_as_ubyte
+    # on an integer input whose max fits in uint8 emits a "Downcasting ...
+    # without scaling" UserWarning (skimage telling us it skipped the
+    # rescale), and the explicit astype is identical output with no warning
+    # and clearer intent (we are narrowing a small-integer mask, not
+    # rescaling a float image).
+    iio.imwrite(output_dir + "regions.png", regions.astype(np.uint8))
+    iio.imwrite(output_dir + "vessel_exclude.png", vessel_exclude.astype(np.uint8))
+    iio.imwrite(output_dir + "_complete_mask.png", mask.astype(np.uint8))
+    iio.imwrite(output_dir + "vessels.png", vessel_mask.astype(np.uint8))
 
     # Save data
     entry = pd.DataFrame.from_dict(total_entry)
@@ -251,7 +258,7 @@ def calculate_regional_density(
         raise ValueError(
             "Empty region: regionprops area is 0 (bad region mask, caller error)"
         )
-    iio.imwrite(output_dir + str(region_index) + ".tif", img_as_ubyte(region))
+    iio.imwrite(output_dir + str(region_index) + ".tif", region.astype(np.uint8))
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
@@ -309,7 +316,7 @@ def get_branching_point_count(
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
     points_count = branching_points.sum()
-    iio.imwrite(output_dir + filename, img_as_ubyte(skeleton))
+    iio.imwrite(output_dir + filename, skeleton.astype(np.uint8))
     return points_count, skeleton, branching_points
 
 
@@ -359,7 +366,7 @@ def draw_branch_point_circles(
     :return: The circled branching point in the skeleton.
     :rtype: np.ndarray
     """
-    circled_skeleton = gray2rgb(img_as_ubyte(skeleton))
+    circled_skeleton = gray2rgb(skeleton.astype(np.uint8))
     points_to_draw = np.argwhere(branching_points)
     for point in points_to_draw:
         circy, circx = circle_perimeter(point[0], point[1], 7, shape=skeleton.shape)
@@ -451,7 +458,13 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
 
     # Set final square to max value to ensure same scaling across heatmaps
     heatmap[-1, -1] = square_size**2
-    heatmap = img_as_uint(heatmap)
+    # heatmap is uint32 with max square_size**2 (e.g. 22500), which fits in
+    # uint16 without scaling. Use an explicit .astype(np.uint16) narrowing
+    # instead of skimage.util.img_as_uint: img_as_uint on an integer input
+    # whose max fits in uint16 emits a "Downcasting ... without scaling"
+    # UserWarning, and the explicit astype is identical output with no
+    # warning and clearer intent.
+    heatmap = heatmap.astype(np.uint16)
     heatmap = heatmap.astype(float)
     heatmap = heatmap / (square_size**2)
     iio.imwrite(output_dir + "heatmap.tif", heatmap)
