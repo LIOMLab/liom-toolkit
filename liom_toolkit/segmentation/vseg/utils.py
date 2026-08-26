@@ -8,10 +8,10 @@ import imageio.v3 as iio
 import natsort
 import numpy as np
 from numpy import dtype, ndarray
-from patchify import patchify
 from PIL import Image
 from skimage.color import rgb2gray
 from skimage.exposure import equalize_adapthist
+from skimage.util import view_as_windows
 
 if TYPE_CHECKING:
     import torch
@@ -256,7 +256,7 @@ def create_patches(
 
     image_clahe = apply_clahe(image, norm_params[0], norm_params[1]) if norm else image
 
-    patch = patchify(image_clahe, size, stride)
+    patch = view_as_windows(image_clahe, size, stride)
 
     patches.extend(patch.reshape(patch.shape[0] * patch.shape[1], patch.shape[2], patch.shape[3]))
 
