@@ -20,12 +20,13 @@ the linumpy pattern (see the ``zarr_writer`` module docstring):
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
 import zarr
 
-from liom_toolkit.utils.io import load_omero_channels, load_zarr
+from liom_toolkit.utils.io import load_omero_channels, load_zarr, validate_n_levels
 from liom_toolkit.utils.zarr_writer import (
     AnalysisOmeZarrWriter,
     OmeZarrWriter,
@@ -459,3 +460,306 @@ def test_analysisomezarrwriter_anisotropic_actual_voxel(tmp_path):
     # Sanity: the wrong-data failure mode would be (1.0, 25, 25, 25). Make
     # sure Y/X are NOT 25.
     assert scale[2] != pytest.approx(25.0)
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests for the review fixes (CR-01..CR-03, WR-01, WR-02, WR-04,
+# and the missing-omero read-back guard). Real zarr in tmp_path, no mocking
+# (AGENTS.md §5).
+# ---------------------------------------------------------------------------
+
+
+def test_analysisomezarrwriter_isotropic_drops_mid_range_target(tmp_path):
+    """CR-01: make_isotropic=True + anisotropic base_res=(1.5, 10, 10) +
+    target=5 (between min=1.5 and max=10) -> target dropped (would upscale
+    Y/X: sf_y = 5/10 = 0.5). Only L0 remains; no level silently invents
+    data via interpolation."""
+    zpath = str(tmp_path / "iso_drop.zarr")
+    writer = AnalysisOmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 8, 32, 32),
+        chunk_shape=(1, 1, 32, 32),
+        dtype=np.uint16,
+        overwrite=True,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    writer.finalize_with_resolutions(
+        base_res=(1.5, 10.0, 10.0),
+        target_resolutions_um=(5,),  # 5 >= min(1.5) but < max(10) -> dropped
+        make_isotropic=True,
+    )
+
+    nodes = load_zarr(zpath)
+    img = nodes[0]
+    # Only L0 — the target was dropped because it would upscale Y/X.
+    assert len(img.data) == 1
+    ct = img.metadata["coordinateTransformations"]
+    assert len(ct) == 1
+    assert ct[0][0]["scale"] == [1.0, 1.5, 10.0, 10.0]
+
+
+def test_analysisomezarrwriter_isotropic_keeps_target_above_max_base(tmp_path):
+    """CR-01 sanity: make_isotropic=True + anisotropic base_res=(1.5, 10, 10)
+    + target=25 (>= max=10) -> kept; per-dim sf all >= 1, no upscale."""
+    zpath = str(tmp_path / "iso_keep.zarr")
+    writer = AnalysisOmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 8, 32, 32),
+        chunk_shape=(1, 1, 32, 32),
+        dtype=np.uint16,
+        overwrite=True,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    writer.finalize_with_resolutions(
+        base_res=(1.5, 10.0, 10.0),
+        target_resolutions_um=(25,),
+        make_isotropic=True,
+    )
+
+    nodes = load_zarr(zpath)
+    img = nodes[0]
+    assert len(img.data) == 2  # L0 + 1 valid target
+    ct = img.metadata["coordinateTransformations"]
+    # Isotropic target -> all spatial dims == 25.
+    assert ct[1][0]["scale"][1] == pytest.approx(25.0)
+    assert ct[1][0]["scale"][2] == pytest.approx(25.0)
+    assert ct[1][0]["scale"][3] == pytest.approx(25.0)
+
+
+def test_omezarrwriter_rejects_file_url(tmp_path):
+    """CR-02: store_path='file://...' raises ValueError (would orphan a
+    literal 'file:/...' directory in the CWD)."""
+    zpath = tmp_path / "url.zarr"
+    with pytest.raises(ValueError, match="file://"):
+        OmeZarrWriter(
+            store_path=f"file://{zpath}",
+            shape=(4, 16, 16),
+            chunk_shape=(1, 16, 16),
+            dtype=np.uint16,
+            overwrite=True,
+        )
+    # No orphan 'file:' directory was created in the CWD.
+    assert not (Path.cwd() / "file:").exists()
+
+
+def test_omezarrwriter_degenerate_shape_returns_zero_levels(tmp_path):
+    """CR-03: shape=(1,4,1,1) (Y/X both 1, < factor=2) -> validate_n_levels
+    returns 0; finalize(n_levels=2) writes only L0 (no crash on empty min())."""
+    zpath = str(tmp_path / "degenerate.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 4, 1, 1),
+        chunk_shape=(1, 1, 1, 1),
+        dtype=np.uint16,
+        overwrite=True,
+        downscale_factor=2,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    writer.finalize(res=(6.5, 6.5, 6.5), n_levels=2)
+
+    nodes = load_zarr(zpath)
+    img = nodes[0]
+    # Only L0 — no downsample levels possible (Y/X are both 1).
+    assert len(img.data) == 1
+
+
+def test_validate_n_levels_non_default_factor():
+    """WR-03: validate_n_levels honors downscale_factor. For factor=3 and
+    shape (16,16,16), log_3(16)=2 allows 2 levels (16->5->1), NOT the 4
+    that log_2(16) would wrongly allow (which would produce 0-size shapes
+    at level 4: 16//3**4 = 0)."""
+    assert validate_n_levels(4, (16, 16, 16), ["z", "y", "x"], downscale_factor=3) == 2
+    assert validate_n_levels(2, (16, 16, 16), ["z", "y", "x"], downscale_factor=3) == 2
+    assert validate_n_levels(1, (16, 16, 16), ["z", "y", "x"], downscale_factor=3) == 1
+
+
+def test_omezarrwriter_rejects_negative_res(tmp_path):
+    """WR-01: res with a negative element -> ValueError (would silently
+    write a negative Z scale to disk)."""
+    zpath = str(tmp_path / "neg.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(4, 16, 16),
+        chunk_shape=(1, 16, 16),
+        dtype=np.uint16,
+        overwrite=True,
+    )
+    writer[:, :, :] = 0
+    with pytest.raises(ValueError, match="positive"):
+        writer.finalize(res=(-1.0, 6.5, 6.5), n_levels=2)
+
+
+def test_omezarrwriter_rejects_zero_res(tmp_path):
+    """WR-01: res with a zero element -> ValueError (would crash with
+    ZeroDivisionError in AnalysisOmeZarrWriter's sf = target_um / b)."""
+    zpath = str(tmp_path / "zero.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(4, 16, 16),
+        chunk_shape=(1, 16, 16),
+        dtype=np.uint16,
+        overwrite=True,
+    )
+    writer[:, :, :] = 0
+    with pytest.raises(ValueError, match="positive"):
+        writer.finalize(res=(0.0, 6.5, 6.5), n_levels=2)
+
+
+def test_analysisomezarrwriter_rejects_zero_base_res(tmp_path):
+    """WR-01: base_res with a zero element -> ValueError."""
+    zpath = str(tmp_path / "zero_base.zarr")
+    writer = AnalysisOmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 8, 32, 32),
+        chunk_shape=(1, 1, 32, 32),
+        dtype=np.uint16,
+        overwrite=True,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    with pytest.raises(ValueError, match="positive"):
+        writer.finalize_with_resolutions(
+            base_res=(0.0, 6.5, 6.5),
+            target_resolutions_um=(10,),
+            make_isotropic=True,
+        )
+
+
+def test_omezarrwriter_rejects_downscale_factor_below_two(tmp_path):
+    """WR-02: downscale_factor < 2 -> ValueError (0 -> ZeroDivisionError,
+    1 -> duplicate levels, negative -> negative scales)."""
+    zpath = str(tmp_path / "f0.zarr")
+    with pytest.raises(ValueError, match="downscale_factor"):
+        OmeZarrWriter(
+            store_path=zpath,
+            shape=(4, 16, 16),
+            chunk_shape=(1, 16, 16),
+            dtype=np.uint16,
+            overwrite=True,
+            downscale_factor=0,
+        )
+    with pytest.raises(ValueError, match="downscale_factor"):
+        OmeZarrWriter(
+            store_path=str(tmp_path / "f1.zarr"),
+            shape=(4, 16, 16),
+            chunk_shape=(1, 16, 16),
+            dtype=np.uint16,
+            overwrite=True,
+            downscale_factor=1,
+        )
+    with pytest.raises(ValueError, match="downscale_factor"):
+        OmeZarrWriter(
+            store_path=str(tmp_path / "fneg.zarr"),
+            shape=(4, 16, 16),
+            chunk_shape=(1, 16, 16),
+            dtype=np.uint16,
+            overwrite=True,
+            downscale_factor=-2,
+        )
+
+
+def test_omezarrwriter_double_finalize_raises(tmp_path):
+    """WR-04: calling finalize twice raises a clear RuntimeError (not
+    zarr's obscure ContainsArrayError)."""
+    zpath = str(tmp_path / "double.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(4, 16, 16),
+        chunk_shape=(1, 16, 16),
+        dtype=np.uint16,
+        overwrite=True,
+    )
+    writer[:, :, :] = 0
+    writer.finalize(res=(6.5, 6.5, 6.5), n_levels=2)
+    with pytest.raises(RuntimeError, match="single-call"):
+        writer.finalize(res=(6.5, 6.5, 6.5), n_levels=2)
+
+
+def test_analysisomezarrwriter_double_finalize_raises(tmp_path):
+    """WR-04: calling finalize_with_resolutions twice raises RuntimeError."""
+    zpath = str(tmp_path / "double_a.zarr")
+    writer = AnalysisOmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 8, 32, 32),
+        chunk_shape=(1, 1, 32, 32),
+        dtype=np.uint16,
+        overwrite=True,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    writer.finalize_with_resolutions(
+        base_res=(6.5, 6.5, 6.5),
+        target_resolutions_um=(10, 25),
+        make_isotropic=True,
+    )
+    with pytest.raises(RuntimeError, match="single-call"):
+        writer.finalize_with_resolutions(
+            base_res=(6.5, 6.5, 6.5),
+            target_resolutions_um=(10, 25),
+            make_isotropic=True,
+        )
+
+
+def test_create_transformation_dict_rejects_zero_n_levels():
+    """IN-04: n_levels < 1 -> ValueError (0 would produce a multiscales
+    metadata with zero datasets — invalid NGFF)."""
+    with pytest.raises(ValueError, match="n_levels"):
+        create_transformation_dict(n_levels=0, voxel_size=(6.5, 6.5, 6.5), ndims=4)
+    with pytest.raises(ValueError, match="n_levels"):
+        create_transformation_dict(n_levels=-1, voxel_size=(6.5, 6.5, 6.5), ndims=3)
+
+
+def test_load_omero_channels_returns_none_when_no_omero(tmp_path):
+    """BLOCKER (missing-omero read-back): finalize with omero_channels=None
+    writes no omero metadata; load_omero_channels returns None (not KeyError)
+    — a missing OPTIONAL metadata key is a legitimate state, not an error."""
+    zpath = str(tmp_path / "no_omero.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(2, 4, 16, 16),
+        chunk_shape=(1, 1, 16, 16),
+        dtype=np.uint16,
+        overwrite=True,
+        downscale_factor=2,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    writer.finalize(res=(6.5, 6.5, 6.5), n_levels=2, omero_channels=None)
+
+    # The helper returns None — no KeyError on the missing omero sub-key.
+    assert load_omero_channels(zpath) is None
+    # The root attrs helper also tolerates a missing 'ome' key (returns None
+    # rather than raising) — but here 'ome' IS present (multiscales was
+    # written), it just has no 'omero' sub-key.
+    ome = _root_attrs(zpath)
+    assert ome is not None
+    assert "omero" not in ome
+
+
+def test_load_omero_channels_returns_channels_when_present(tmp_path):
+    """BLOCKER sanity: finalize WITH omero_channels -> load_omero_channels
+    returns the channel list (round-trips correctly)."""
+    zpath = str(tmp_path / "with_omero.zarr")
+    writer = OmeZarrWriter(
+        store_path=zpath,
+        shape=(1, 4, 16, 16),
+        chunk_shape=(1, 1, 16, 16),
+        dtype=np.uint16,
+        overwrite=True,
+        downscale_factor=2,
+        unit="micrometer",
+    )
+    writer[:, :, :, :] = 0
+    omero_channels = [
+        {"label": "GFP", "color": "00FF00", "active": True, "wavelength": 488},
+    ]
+    writer.finalize(res=(6.5, 6.5, 6.5), n_levels=2, omero_channels=omero_channels)
+
+    channels = load_omero_channels(zpath)
+    assert channels is not None
+    assert len(channels) == 1
+    assert channels[0]["label"] == "GFP"
+    assert channels[0]["color"] == "00FF00"
