@@ -52,6 +52,13 @@ def compute_slice_metrics(
     :type vessel_exclude: np.ndarray
     :param voxel_size: The size of the voxels in the image
     :type voxel_size: float
+
+    Vessel-free regions: regions with no vessels yield a row with vessel
+    density = 0.0, vessel area = 0.0, and branching points = 0, but the
+    'mean diameter (um)' entry is OMITTED (the row has no such column value)
+    because the mean diameter of an empty vessel set is undefined. The
+    omitted diameter row is itself a publishable 'no vessels detected'
+    signal, not a silent gap.
     """
 
     # Setup output
@@ -95,21 +102,38 @@ def compute_slice_metrics(
             skeleton, branching_points, output_dir, filename=str(i) + "_skeleton_circled.png"
         )
 
-        # Calculate average diameter
-        mean_diameter = compute_average_diameter(region, skeleton, voxel_size)
-
-        # Save data
-        entry = pd.DataFrame.from_dict(
-            {
-                "image": [image],
-                "region": [i],
-                "vessel area (um2)": [vessel_area],
-                "tissue area (um2)": [total_area],
-                "vessel density (um2/um2)": [density],
-                "branching points": [branching_points_count],
-                "mean diameter (um)": [mean_diameter],
-            }
-        )
+        # Calculate average diameter. Vessel-free regions raise ValueError
+        # from compute_average_diameter (mean diameter of an empty set is
+        # undefined); the diameter row is OMITTED for those regions while
+        # the density=0.0 row above is kept. The omitted diameter row is
+        # itself a publishable 'no vessels detected' signal, not a silent
+        # gap.
+        try:
+            mean_diameter = compute_average_diameter(region, skeleton, voxel_size)
+            # Save data
+            entry = pd.DataFrame.from_dict(
+                {
+                    "image": [image],
+                    "region": [i],
+                    "vessel area (um2)": [vessel_area],
+                    "tissue area (um2)": [total_area],
+                    "vessel density (um2/um2)": [density],
+                    "branching points": [branching_points_count],
+                    "mean diameter (um)": [mean_diameter],
+                }
+            )
+        except ValueError:
+            # Vessel-free region: density=0.0 row kept, diameter row omitted.
+            entry = pd.DataFrame.from_dict(
+                {
+                    "image": [image],
+                    "region": [i],
+                    "vessel area (um2)": [vessel_area],
+                    "tissue area (um2)": [total_area],
+                    "vessel density (um2/um2)": [density],
+                    "branching points": [branching_points_count],
+                }
+            )
         df = pd.concat([df, entry])
 
     # Compute metrics for the whole slice
@@ -206,8 +230,21 @@ def calculate_density(
     :type voxel_size: float
     :return: The area of the tissue, the area of the vessels, and the density of the vessels.
     :rtype: tuple[float, float, float]
+
+    Empty-result contract:
+
+    * Empty vessel mask over positive tissue (``mask.sum() > 0``) returns
+      ``(tissue_area, 0.0, 0.0)`` -- 0 vessels / positive tissue area is a
+      well-defined 0 density (the math is defined).
+    * Empty tissue mask (``mask.sum() == 0``) raises ``ValueError`` -- an
+      empty tissue mask is a bad region mask and a caller error, not a
+      valid result.
     """
     tissue_area = mask.sum() * math.pow(voxel_size, 2)
+    if tissue_area == 0:
+        raise ValueError(
+            "Empty tissue mask: mask.sum() == 0 (bad region mask, caller error)"
+        )
     vessel_area = vessel_mask.sum() * math.pow(voxel_size, 2)
     vessel_density = vessel_area / tissue_area
     return tissue_area, vessel_area, vessel_density
@@ -306,10 +343,28 @@ def compute_average_diameter(
     :type voxel_size: float
     :return: The average diameter of the vessels in the mask.
     :rtype: float
+
+    Empty-result contract:
+
+    * Empty vessel set (no positive radii in the skeleton) raises
+      ``ValueError`` -- the mean diameter of an empty set is undefined;
+      returning 0.0 would imply zero-width vessels exist (a
+      plausible-shaped-but-wrong value), and returning ``NaN`` would let a
+      silent NaN escape into the published pandas DataFrame. The raise sits
+      BEFORE ``np.mean`` so no NaN + RuntimeWarning can escape.
+    * Empty tissue mask raises ``ValueError`` -- mean diameter is undefined
+      when there is no tissue.
     """
+    if mask.sum() == 0:
+        raise ValueError("Empty tissue mask: mean diameter is undefined")
     distance = distance_transform_edt(mask)
     radii = distance * skeleton.astype(bool)
-    mean_radius = np.mean(radii[radii > 0])
+    positive_radii = radii[radii > 0]
+    if positive_radii.size == 0:
+        raise ValueError(
+            "Empty vessel set: mean diameter is undefined (no positive radii in skeleton)"
+        )
+    mean_radius = np.mean(positive_radii)
     mean_diameter = 2 * mean_radius
     return mean_diameter * voxel_size
 
@@ -332,16 +387,21 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     image = image / 255
     image = image.astype(np.uint8)
     heatmap = np.zeros_like(image, dtype=np.uint32)
+    # Compute the per-dimension block counts separately so non-square images
+    # iterate the correct number of squares per dimension (a single
+    # shape[0]/square_size count for both dims produces a staircase pattern
+    # on non-square or multi-row images).
+    n_x = int(image.shape[0] / square_size)
+    n_y = int(image.shape[1] / square_size)
     x_start = 0
-    y_start = 0
-    for _ in range(0, int(image.shape[0] / square_size)):
-        for _j in range(0, int(image.shape[1] / square_size)):
+    for _ in range(n_x):
+        y_start = 0  # reset at the start of each outer iteration
+        for _j in range(n_y):
             heatmap[x_start : x_start + square_size, y_start : y_start + square_size] = image[
                 x_start : x_start + square_size, y_start : y_start + square_size
             ].sum()
             y_start += square_size
         x_start += square_size
-        y_start = 0
 
     # Set final square to max value to ensure same scaling across heatmaps
     heatmap[-1, -1] = square_size**2

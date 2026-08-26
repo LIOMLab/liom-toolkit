@@ -172,26 +172,48 @@ def test_compute_average_diameter_known_answer():
 # ---------------------------------------------------------------------------
 
 
-def test_compute_slice_metrics_vessel_free_region_omits_diameter(tmp_path):
+def test_compute_slice_metrics_vessel_free_region_omits_diameter(tmp_path, monkeypatch):
     """A vessel-free region yields a row with ``vessel density = 0.0`` and
     NO ``mean diameter (um)`` entry (the diameter row is omitted for
     vessel-free regions per the D-01 row-omission contract). The omitted
     diameter row is itself a publishable 'no vessels detected' signal, not
-    a silent gap."""
-    # 30x30 image; one tissue region (the whole frame) with NO vessels in
-    # it. region_map labels a single region; vessel_mask is all-zero so the
-    # region is vessel-free.
-    image = np.zeros((30, 30), dtype=np.uint8)
+    a silent gap.
+
+    The test captures the DataFrame that ``compute_slice_metrics`` would
+    write to xlsx by intercepting ``pd.DataFrame.to_excel`` -- this avoids
+    the undeclared openpyxl runtime dependency (a pre-existing BUG-02
+    finding) while exercising the real per-region row-omission logic. No
+    numpy/scipy/skimage mocking is involved.
+    """
+    import pandas as pd
+
+    captured = {}
+
+    def fake_to_excel(self, path, index=False):
+        captured["df"] = self
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+
+    # 30x30 image with two regions: left half (region label 1, region_index
+    # 0) is vessel-free; right half (region label 2, region_index 1) has a
+    # small vessel block. The whole-slice vessel_mask has vessels (in the
+    # right half) so the 'total' row computes without crashing; the
+    # per-region row for region_index 0 is vessel-free and must omit the
+    # diameter entry. The ``image`` parameter is the slice label written
+    # into the output DataFrame (a string), not an array used by the
+    # metrics math.
     mask = np.ones((30, 30), dtype=np.uint8)
     vessel_mask = np.zeros((30, 30), dtype=np.uint8)
-    region_map = np.ones((30, 30), dtype=np.uint8)
+    vessel_mask[10:20, 20:30] = 1  # vessels only in the right half
+    region_map = np.zeros((30, 30), dtype=np.uint8)
+    region_map[:, :15] = 1  # left half = region label 1
+    region_map[:, 15:] = 2  # right half = region label 2
     vessel_exclude = np.ones((30, 30), dtype=np.uint8)
 
     output_dir = str(tmp_path) + "/"
     compute_slice_metrics(
         output_dir,
         "test_slice",
-        image,
         mask,
         vessel_mask,
         region_map,
@@ -199,9 +221,7 @@ def test_compute_slice_metrics_vessel_free_region_omits_diameter(tmp_path):
         voxel_size=0.65,
     )
 
-    import pandas as pd
-
-    df = pd.read_excel(output_dir + "regions.xlsx")
+    df = captured["df"]
     region_rows = df[df["region"] == 0]
     assert len(region_rows) == 1
     row = region_rows.iloc[0]
@@ -210,14 +230,26 @@ def test_compute_slice_metrics_vessel_free_region_omits_diameter(tmp_path):
     # The mean-diameter entry is OMITTED for vessel-free regions: the cell
     # is NaN/missing because no diameter row was written for this region.
     diameter_val = row["mean diameter (um)"]
-    assert isinstance(diameter_val, float) and np.isnan(diameter_val) or pd.isna(diameter_val)
+    assert pd.isna(diameter_val)
 
 
-def test_compute_slice_metrics_vessel_region_has_diameter(tmp_path):
+def test_compute_slice_metrics_vessel_region_has_diameter(tmp_path, monkeypatch):
     """A region WITH vessels yields a row WITH a ``mean diameter (um)``
-    entry (the vessel-present path is unchanged)."""
+    entry (the vessel-present path is unchanged).
+
+    The test captures the DataFrame via ``monkeypatch`` on
+    ``pd.DataFrame.to_excel`` to avoid the undeclared openpyxl dependency
+    (see the vessel-free test for the same pattern)."""
+    import pandas as pd
+
+    captured = {}
+
+    def fake_to_excel(self, path, index=False):
+        captured["df"] = self
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+
     # 30x30 image; one tissue region with a small vessel block in it.
-    image = np.zeros((30, 30), dtype=np.uint8)
     mask = np.ones((30, 30), dtype=np.uint8)
     vessel_mask = np.zeros((30, 30), dtype=np.uint8)
     vessel_mask[10:20, 10:20] = 1  # a vessel block
@@ -228,7 +260,6 @@ def test_compute_slice_metrics_vessel_region_has_diameter(tmp_path):
     compute_slice_metrics(
         output_dir,
         "test_slice",
-        image,
         mask,
         vessel_mask,
         region_map,
@@ -236,9 +267,7 @@ def test_compute_slice_metrics_vessel_region_has_diameter(tmp_path):
         voxel_size=0.65,
     )
 
-    import pandas as pd
-
-    df = pd.read_excel(output_dir + "regions.xlsx")
+    df = captured["df"]
     region_rows = df[df["region"] == 0]
     assert len(region_rows) == 1
     row = region_rows.iloc[0]
@@ -265,13 +294,16 @@ def test_create_heatmap_non_square(tmp_path):
     separately and resets ``y_start`` at the start of each outer iteration.
     """
     # 300 (rows) x 450 (cols) -- non-square. square_size=150 -> 2 rows of
-    # blocks x 3 cols of blocks.
+    # blocks x 3 cols of blocks. Use 255 (on) / 0 (off) values so they
+    # survive the /255 + astype(uint8) quantization inside create_heatmap
+    # (values 10-60 would quantize to 0 and the test would be vacuous).
     image = np.zeros((300, 450), dtype=np.uint8)
-    # Put a distinct constant value in each 150x150 block so a staircase or
-    # off-by-one is unambiguous: block[i, j] holds value (i * 3 + j + 1).
-    for i in range(2):
-        for j in range(3):
-            image[i * 150 : (i + 1) * 150, j * 150 : (j + 1) * 150] = (i * 3 + j + 1) * 10
+    # Checkerboard-ish pattern: block (0, 2) = 255 (on), block (1, 2) = 0
+    # (off). Under the bug, the rightmost column is never written (inner
+    # loop runs 2 iterations instead of 3) so both blocks would be 0; under
+    # the fix, block (0, 2) is 255 and block (1, 2) is 0.
+    image[0:150, 300:450] = 255  # block (0, 2) = on
+    # block (1, 2) stays 0 (off)
 
     output_dir = str(tmp_path) + "/"
     create_heatmap(image, output_dir, square_size=150)
@@ -282,16 +314,15 @@ def test_create_heatmap_non_square(tmp_path):
     # The heatmap is normalized by square_size**2 at the end; read it back
     # and verify the per-block AVERAGE (sum / 150**2) matches the input
     # block's value / 255 (the input is divided by 255 before summing).
-    # Easier: assert that two blocks in the same row but different columns
+    # Easier: assert that two blocks in the same column but different rows
     # hold DIFFERENT values (a staircase clobbers them to the same value).
     block_0_2 = heatmap[0:150, 300:450].mean()
     block_1_2 = heatmap[150:300, 300:450].mean()
     # Under the bug, the rightmost column is either never written or
     # clobbered by the staircase; under the fix, the two blocks differ
-    # because their input values differ (10 vs 40).
+    # because their input values differ (255 vs 0).
     assert block_0_2 != pytest.approx(block_1_2, abs=1e-6)
-    # And the rightmost column block in row 0 reflects its own input value,
-    # not a neighbor's: input block (0, 2) has value 30, so the heatmap
-    # average should be approximately 30 / 255 (after the /255 + /square**2
-    # normalization the value is preserved up to scaling).
+    # And the rightmost column block in row 0 reflects its own input value
+    # (255 on), so the heatmap average should be positive (the block sum is
+    # 150*150 = 22500, normalized to 1.0 before the img_as_uint cast).
     assert block_0_2 > 0
