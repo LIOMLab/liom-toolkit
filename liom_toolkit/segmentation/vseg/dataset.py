@@ -5,10 +5,47 @@ from multiprocessing import cpu_count
 import dask.array as da
 import numpy as np
 import torch
+import zarr
 from torch.utils.data import Dataset
 from tqdm.contrib.concurrent import process_map
 
 from .utils import apply_clahe
+
+
+def _level0_component(zarr_path: str, group_path: str = "") -> str:
+    """Resolve the level-0 (full-resolution) array component path from OME-Zarr multiscales metadata.
+
+    NGFF v0.5 (zarr v3) names multiscale datasets ``s0``, ``s1``, ... while
+    legacy NGFF v0.4 used ``0``, ``1``, ... Hardcoding either convention
+    breaks when reading files written by the other. This reads the group's
+    ``ome.multiscales`` (v0.5) or ``multiscales`` (v0.4) metadata and returns
+    the first dataset's path so the reader follows whatever the writer used.
+
+    :param zarr_path: Path to the OME-Zarr store.
+    :param group_path: Optional subpath to a group whose multiscales metadata
+        should be read (e.g. ``"labels/training"`` for a label group). Empty
+        string reads the root image group.
+    :return: The component path for ``da.from_zarr(..., component=...)`` —
+        ``"{group_path}/{level0_path}"`` (or just ``"{level0_path}"`` when
+        ``group_path`` is empty).
+    :raises ValueError: If the group has no OME multiscales metadata.
+    """
+    root = zarr.open_group(zarr_path, mode="r")
+    group = root if not group_path else root[group_path]
+    ome = group.attrs.get("ome")
+    multiscales = (
+        ome["multiscales"]
+        if isinstance(ome, dict)
+        else group.attrs.get("multiscales")
+    )
+    if not multiscales:
+        raise ValueError(
+            f"No OME multiscales metadata found in {zarr_path}"
+            + (f" at group {group_path!r}" if group_path else "")
+            + " — cannot resolve the level-0 dataset path."
+        )
+    level0_path = multiscales[0]["datasets"][0]["path"]
+    return f"{group_path}/{level0_path}" if group_path else level0_path
 
 
 class OmeZarrDataset(Dataset):
@@ -69,7 +106,9 @@ class OmeZarrDataset(Dataset):
         self.normalise = normalise
         self.max_value = normalisation_value
         self.rotate_patches = rotate_patches
-        self.data = da.from_zarr(self.zarr_path, component="0")
+        self.data = da.from_zarr(
+            self.zarr_path, component=_level0_component(self.zarr_path)
+        )
         if len(self.data.shape) == 4:
             self.data = self.data[channel]
 
@@ -207,7 +246,12 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             z_range,
         )
         self.filter_empty = filter_empty
-        self.label_data = da.from_zarr(self.zarr_path, component=f"labels/{label_node_name}/0")
+        self.label_data = da.from_zarr(
+            self.zarr_path,
+            component=_level0_component(
+                self.zarr_path, group_path=f"labels/{label_node_name}"
+            ),
+        )
         if len(self.label_data.shape) == 4:
             self.label_data = self.label_data[channel]
         if z_range is not None:
