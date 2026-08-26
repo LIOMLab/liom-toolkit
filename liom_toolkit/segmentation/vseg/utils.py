@@ -209,7 +209,13 @@ def crop_image(image: np.ndarray, size: tuple[int, int], stride: int) -> np.ndar
     :return: The cropped image
     :rtype: np.ndarray
     """
-    to_remove_x = (image.shape[1] - size[0]) % stride
+    # size[0] is the window height (axis 0 / rows), size[1] is the window
+    # width (axis 1 / cols) — view_as_windows requires the window shape to
+    # match the image axes. The x-axis crop (cols) must pair image.shape[1]
+    # with size[1]; the y-axis crop (rows) pairs image.shape[0] with
+    # size[0]. Using size[0] for both (the previous code) is correct only
+    # for square patches and silently mis-crops for non-square windows.
+    to_remove_x = (image.shape[1] - size[1]) % stride
     to_remove_left_x = np.floor(to_remove_x / 2).astype(int)
     to_remove_right_x = np.ceil(to_remove_x / 2).astype(int)
 
