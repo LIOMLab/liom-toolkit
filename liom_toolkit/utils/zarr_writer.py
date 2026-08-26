@@ -116,12 +116,15 @@ def create_transformation_dict(
     branches on it so the scale list length always matches the axes length.
 
     :param n_levels: Number of levels (INCLUDING L0). Returns ``n_levels``
-        entries.
+        entries. Must be >= 1 (0 would produce a multiscales metadata with
+        zero datasets — invalid NGFF).
     :param voxel_size: ``(z, y, x)`` base voxel size in ``unit``.
     :param ndims: 3 or 4 — selects whether a channel element is prepended.
     :param downscale_factor: Per-level Y/X downsample factor (default 2).
     :return: A list of ``n_levels`` ``[{"type":"scale","scale":[...]}]``
         entries, one per pyramid level (L0 first).
+    :raises ValueError: If ``ndims`` is not 3 or 4, ``voxel_size`` is not a
+        3-element sequence, or ``n_levels`` is < 1.
     """
     if ndims not in (3, 4):
         raise ValueError(f"ndims must be 3 or 4, got {ndims!r}.")
@@ -129,6 +132,12 @@ def create_transformation_dict(
         raise ValueError(
             f"voxel_size must be a 3-element (z, y, x) sequence, got len={len(voxel_size)}."
         )
+    if n_levels < 1:
+        # n_levels=0 (and negatives via range) would return [], producing a
+        # multiscales metadata with zero datasets — invalid NGFF. The
+        # internal call path always passes n_levels_clamped + 1 (>= 1), but
+        # this is a public export (__all__) so guard direct callers too.
+        raise ValueError(f"n_levels must be >= 1, got {n_levels!r}.")
 
     z_base, y_base, x_base = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
     transforms: list[list[dict]] = []
@@ -318,7 +327,7 @@ class OmeZarrWriter:
         Reads L0 via ``da.from_zarr``, downsamples Y/X only (Z stays at base
         resolution — matches ``_DOWNSAMPLE_AXES``) per level via
         ``da_resize``, and writes each level via ``da.to_zarr``. No eager
-        No eager materialization — Dask materializes lazily at the write boundary.
+        materialization — Dask materializes lazily at the write boundary.
 
         Each iteration reads from L0 (cumulative factor from base, NOT
         compounded from the previous level) to avoid rounding error.

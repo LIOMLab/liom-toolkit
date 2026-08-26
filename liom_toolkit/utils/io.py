@@ -124,6 +124,7 @@ def create_and_write_mask(
     chunks: tuple = (128, 128, 128),
     resolution_level: int = 0,
     fill_holes=True,
+    unit: str = "micrometer",
 ) -> None:
     """
     Create a mask for a zarr file and write it to disk inside the labels group.
@@ -138,6 +139,11 @@ def create_and_write_mask(
     :type resolution_level: int
     :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
     :type fill_holes: bool
+    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
+        in. Defaults to ``"micrometer"`` to preserve existing callers, and is
+        forwarded to :func:`save_label_to_zarr` (matching
+        :func:`save_atlas_to_zarr`, which already threads ``unit`` through).
+    :type unit: str
     """
     mask = create_mask_from_zarr(zarr_file, resolution_level, fill_holes=fill_holes)
     mask = mask.astype("int8")
@@ -150,6 +156,7 @@ def create_and_write_mask(
         color_dict=color_dict,
         name="mask",
         resolution_level=resolution_level,
+        unit=unit,
     )
 
 
