@@ -277,6 +277,66 @@ def test_compute_slice_metrics_vessel_region_has_diameter(tmp_path, monkeypatch)
     assert diameter_val > 0
 
 
+def test_compute_slice_metrics_vessel_free_slice_omits_total_diameter(tmp_path, monkeypatch):
+    """A vessel-free SLICE (no vessels anywhere) must not crash
+    ``compute_slice_metrics``. The whole-slice 'total' row's
+    ``compute_average_diameter`` call raises ``ValueError`` on an empty
+    vessel set (the D-01 contract); the per-region loop wraps that call in
+    ``try/except ValueError`` and omits the diameter row, but the whole-slice
+    call must be wrapped the same way -- otherwise a vessel-free slice
+    crashes the whole metrics computation and the user loses every per-region
+    row computed up to that point.
+
+    The 'total' row for a vessel-free slice keeps the density=0.0 /
+    branching-points / vessel-area rows and OMITS the 'mean diameter (um)'
+    entry, mirroring the per-region row-omission pattern. The DataFrame is
+    captured via ``monkeypatch`` on ``pd.DataFrame.to_excel`` to avoid the
+    undeclared openpyxl runtime dependency (no numpy/scipy/skimage mocking).
+    """
+    import pandas as pd
+
+    captured = {}
+
+    def fake_to_excel(self, path, index=False):
+        captured["df"] = self
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+
+    # 30x30 image with one tissue region and NO vessels anywhere in the
+    # slice. The whole-slice vessel_mask is all-zero, so the 'total' row's
+    # compute_average_diameter(vessel_mask, skeleton, ...) hits the empty-
+    # vessel-set ValueError (D-01). Without the wrap this raises out of
+    # compute_slice_metrics and the xlsx is never written.
+    mask = np.ones((30, 30), dtype=np.uint8)
+    vessel_mask = np.zeros((30, 30), dtype=np.uint8)  # no vessels anywhere
+    region_map = np.ones((30, 30), dtype=np.uint8)  # one region
+    vessel_exclude = np.ones((30, 30), dtype=np.uint8)
+
+    output_dir = str(tmp_path) + "/"
+    # Must not raise.
+    compute_slice_metrics(
+        output_dir,
+        "test_slice",
+        mask,
+        vessel_mask,
+        region_map,
+        vessel_exclude,
+        voxel_size=0.65,
+    )
+
+    df = captured["df"]
+    total_rows = df[df["region"] == "total"]
+    assert len(total_rows) == 1
+    row = total_rows.iloc[0]
+    # The density row is kept and equals 0.0 for the vessel-free slice.
+    assert row["vessel density (um2/um2)"] == pytest.approx(0.0)
+    # The mean-diameter entry is OMITTED for the vessel-free 'total' row
+    # (NaN/missing because no diameter value was written), mirroring the
+    # per-region row-omission contract.
+    diameter_val = row["mean diameter (um)"]
+    assert pd.isna(diameter_val)
+
+
 # ---------------------------------------------------------------------------
 # create_heatmap -- non-square reset (D-14)
 # ---------------------------------------------------------------------------

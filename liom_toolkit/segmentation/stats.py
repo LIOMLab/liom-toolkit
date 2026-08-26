@@ -149,17 +149,18 @@ def compute_slice_metrics(
         vessel_mask, output_dir
     )
     draw_branch_point_circles(skeleton, branching_points, output_dir)
-    mean_diameter = compute_average_diameter(vessel_mask, skeleton, voxel_size)
-
-    # Save intermediate results
-    iio.imwrite(output_dir + "regions.png", img_as_ubyte(regions))
-    iio.imwrite(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude))
-    iio.imwrite(output_dir + "_complete_mask.png", img_as_ubyte(mask))
-    iio.imwrite(output_dir + "vessels.png", img_as_ubyte(vessel_mask))
-
-    # Save data
-    entry = pd.DataFrame.from_dict(
-        {
+    # Whole-slice diameter: wrap in try/except ValueError mirroring the
+    # per-region row-omission pattern above. A vessel-free slice (no vessels
+    # anywhere) hits the empty-vessel-set ValueError from
+    # compute_average_diameter (D-01 contract); without this wrap the whole
+    # metrics computation crashes and the user loses every per-region row
+    # computed up to this point. The 'total' row keeps the density=0.0 /
+    # branching-points / vessel-area entries and OMITS the mean-diameter
+    # entry, the same publishable 'no vessels detected' signal used for
+    # vessel-free regions.
+    try:
+        mean_diameter = compute_average_diameter(vessel_mask, skeleton, voxel_size)
+        total_entry = {
             "image": [image],
             "region": "total",
             "vessel area (um2)": [vessel_area],
@@ -168,7 +169,25 @@ def compute_slice_metrics(
             "branching points": [branching_points_count],
             "mean diameter (um)": [mean_diameter],
         }
-    )
+    except ValueError:
+        # Vessel-free slice: density=0.0 row kept, diameter row omitted.
+        total_entry = {
+            "image": [image],
+            "region": "total",
+            "vessel area (um2)": [vessel_area],
+            "tissue area (um2)": [tissue_area],
+            "vessel density (um2/um2)": [vessel_density],
+            "branching points": [branching_points_count],
+        }
+
+    # Save intermediate results
+    iio.imwrite(output_dir + "regions.png", img_as_ubyte(regions))
+    iio.imwrite(output_dir + "vessel_exclude.png", img_as_ubyte(vessel_exclude))
+    iio.imwrite(output_dir + "_complete_mask.png", img_as_ubyte(mask))
+    iio.imwrite(output_dir + "vessels.png", img_as_ubyte(vessel_mask))
+
+    # Save data
+    entry = pd.DataFrame.from_dict(total_entry)
     df = pd.concat([df, entry])
     df.to_excel(output_dir + "regions.xlsx", index=False)
 
