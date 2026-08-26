@@ -231,14 +231,22 @@ def _remap_to_id_type(
     if np.any(label_description["IDX"].values > np.iinfo(id_type).max):
         label_description = label_description.sort_values(by="LABEL")
         label_description = label_description.reset_index(drop=True)
-        new_annotation = np.zeros(annotation.shape, dtype=id_type)
+        # Build old-IDX -> new-IDX (1..N) map. Vectorize the volume remap with
+        # np.unique + inverse-index instead of a per-ID full-volume scan: Allen
+        # structure IDs reach ~6e8, so a 1327-iteration loop over a 77M-voxel
+        # volume is O(N*V) and takes minutes. np.unique is O(V log V) and the
+        # LUT lookup touches only the unique values (~1327), not every voxel.
         id_map: dict[int, int] = {}
         for ii, idx in enumerate(label_description["IDX"].values):
             id_map[idx] = ii + 1
-            new_annotation[annotation == idx] = ii + 1
-        label_description["IDX"] = label_description.apply(
-            lambda row: id_map[row["IDX"]], axis=1
+        unique_vals, inverse = np.unique(annotation, return_inverse=True)
+        lut = np.fromiter(
+            (id_map.get(int(v), 0) for v in unique_vals),
+            dtype=id_type,
+            count=unique_vals.size,
         )
+        new_annotation = lut[inverse].reshape(annotation.shape)
+        label_description["IDX"] = label_description["IDX"].map(id_map)
         return new_annotation, label_description
     return annotation, label_description
 
