@@ -410,93 +410,97 @@ def build_template_for_resolution(
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         )
-    temp_folder = tempfile.TemporaryDirectory()
-    resolution_mm = template_resolution / 1000
+    # Use a context manager so the temp dir is cleaned up on every exit
+    # path, not just the success path. Without this, a download,
+    # create_template, segment_3d, or image_write failure would leak the
+    # temp dir on disk.
+    with tempfile.TemporaryDirectory() as temp_folder:
+        resolution_mm = template_resolution / 1000
 
-    # Update brain names if flipped brains
-    if flipped_brains:
-        brain_names = update_brain_name_list(brain_names)
-
-    # Load allen template
-    template_volume = download_allen_template(
-        temp_folder.name, resolution=template_resolution, keep_nrrd=True
-    )
-    template_volume = ants.reorient_image2(template_volume, "RAS")
-
-    brain_volumes = []
-    masks = []
-    for file in tqdm(
-        zarr_files,
-        desc="Loading brains",
-        leave=False,
-        total=len(zarr_files),
-        unit="brain",
-        position=1,
-    ):
-        zarr_file = file
-        nodes = load_zarr(zarr_file)
-        image_node = nodes[0]
-        mask_node = load_node_by_name(nodes, "mask")
-
-        brain_volume, mask = load_volume_for_registration(
-            image_node, mask_node, resolution_level, flipped=False
-        )
-        brain_volumes.append(brain_volume)
-        masks.append(mask)
-
-        # Added flipped brains
+        # Update brain names if flipped brains
         if flipped_brains:
+            brain_names = update_brain_name_list(brain_names)
+
+        # Load allen template
+        template_volume = download_allen_template(
+            temp_folder, resolution=template_resolution, keep_nrrd=True
+        )
+        template_volume = ants.reorient_image2(template_volume, "RAS")
+
+        brain_volumes = []
+        masks = []
+        for file in tqdm(
+            zarr_files,
+            desc="Loading brains",
+            leave=False,
+            total=len(zarr_files),
+            unit="brain",
+            position=1,
+        ):
+            zarr_file = file
+            nodes = load_zarr(zarr_file)
+            image_node = nodes[0]
+            mask_node = load_node_by_name(nodes, "mask")
+
             brain_volume, mask = load_volume_for_registration(
-                image_node, mask_node, resolution_level, flipped=True
+                image_node, mask_node, resolution_level, flipped=False
             )
             brain_volumes.append(brain_volume)
             masks.append(mask)
 
-    if init_with_template:
-        template = create_template(
-            brain_volumes,
-            masks,
-            brain_names,
-            template_volume,
-            template_resolution=resolution_mm,
-            iterations=iterations,
-            pre_registration_type="Rigid",
-        )
-    else:
-        template = create_template(
-            brain_volumes,
-            masks,
-            brain_names,
-            template_volume,
-            template_resolution=resolution_mm,
-            iterations=iterations,
-            init_with_template=init_with_template,
-            pre_registration_type="Rigid",
-        )
-    if register_to_template:
-        template_transform = ants.registration(
-            fixed=template_volume,
-            moving=template,
-            type_of_transform="SyN",
-            use_legacy_histogram_matching=False,
-        )
-        template = apply_transforms(
-            fixed=template_volume,
-            moving=template,
-            transformlist=template_transform["fwdtransforms"],
-        )
-    # Mask template to remove noise
-    from ..segmentation import segment_3d
+            # Added flipped brains
+            if flipped_brains:
+                brain_volume, mask = load_volume_for_registration(
+                    image_node, mask_node, resolution_level, flipped=True
+                )
+                brain_volumes.append(brain_volume)
+                masks.append(mask)
 
-    template_mask = segment_3d(template)
-    new_template = template * template_mask
+        if init_with_template:
+            template = create_template(
+                brain_volumes,
+                masks,
+                brain_names,
+                template_volume,
+                template_resolution=resolution_mm,
+                iterations=iterations,
+                pre_registration_type="Rigid",
+            )
+        else:
+            template = create_template(
+                brain_volumes,
+                masks,
+                brain_names,
+                template_volume,
+                template_resolution=resolution_mm,
+                iterations=iterations,
+                init_with_template=init_with_template,
+                pre_registration_type="Rigid",
+            )
+        if register_to_template:
+            template_transform = ants.registration(
+                fixed=template_volume,
+                moving=template,
+                type_of_transform="SyN",
+                use_legacy_histogram_matching=False,
+            )
+            template = apply_transforms(
+                fixed=template_volume,
+                moving=template,
+                transformlist=template_transform["fwdtransforms"],
+            )
+        # Mask template to remove noise
+        from ..segmentation import segment_3d
 
-    # Apply properties after multiplication
-    new_template.set_direction(template.direction)
-    new_template.set_spacing(template.spacing)
-    new_template.set_origin(template.origin)
+        template_mask = segment_3d(template)
+        new_template = template * template_mask
 
-    ants.image_write(new_template, output_file)
+        # Apply properties after multiplication
+        new_template.set_direction(template.direction)
+        new_template.set_spacing(template.spacing)
+        new_template.set_origin(template.origin)
+
+        ants.image_write(new_template, output_file)
 
 
 def load_volume_for_registration(

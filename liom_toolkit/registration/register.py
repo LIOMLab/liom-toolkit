@@ -455,14 +455,18 @@ def align_volume_to_allen(
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         )
-    temp_folder = tempfile.TemporaryDirectory()
-    # Get the Allen template
-    template = download_allen_template(temp_folder.name, resolution=resolution, keep_nrrd=False)
+    # Use a context manager so the temp dir is cleaned up on every exit
+    # path, not just the success path. Without this, a download or
+    # registration failure would leak the temp dir on disk.
+    with tempfile.TemporaryDirectory() as temp_folder:
+        # Get the Allen template
+        template = download_allen_template(
+            temp_folder, resolution=resolution, keep_nrrd=False
+        )
 
-    # Align the image to the Allen template
-    aligned_image, _ = deformably_register_volume(
-        image, mask, template, use_legacy_histogram_matching=False
-    )
+        # Align the image to the Allen template
+        aligned_image, _ = deformably_register_volume(
+            image, mask, template, use_legacy_histogram_matching=False
+        )
 
-    temp_folder.cleanup()
     return aligned_image
