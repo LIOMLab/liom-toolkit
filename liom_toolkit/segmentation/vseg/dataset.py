@@ -331,7 +331,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             desc="Validating patches",
             position=0,
             leave=True,
-            max_workers=(cpu_count() - 2),
+            max_workers=max(1, cpu_count() - 2),
             chunksize=100,
         )
 
