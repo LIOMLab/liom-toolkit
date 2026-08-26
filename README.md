@@ -45,12 +45,25 @@ The repository can be found here: [LIOM Notebooks](https://github.com/LIOMLab/li
 
 ## Requirements
 
-To create an anaconda environment with all the required packages, run the following commands:
+The package requires **Python 3.12 or 3.14** (see
+[Supported Python versions](#supported-python-versions) above; the package
+declares `requires-python = ">=3.12"`). The recommended way to install is
+with [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+# Core package + dev tools (pytest, sphinx)
+uv sync                              # create/update .venv from uv.lock (core deps + dev group)
+uv sync --extra ai                   # add torch/timm/einops/wandb (only if you need vseg)
+uv sync --extra antspy               # add antspyx (only if you need registration; 3.12 only)
+uv sync --all-extras                 # everything (heavy; use only when you need it all)
+```
+
+To create an anaconda environment instead, run the following commands:
 
 ```bash
 conda create -n <name>
 conda activate <name>
-conda install python=3.10
+conda install python=3.12
 
 # Install Pytorch at this point, follow the instructions on the Pytorch website:
 # https://pytorch.org/get-started/locally/
@@ -60,16 +73,12 @@ conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvi
 # For MacOS:
 conda install pytorch::pytorch torchvision torchaudio -c pytorch
 
-# The lines below are for Apple Silicon specifically. 
-# Hdf5 needs to be installed using homebrew.
-# Tables is used by the allenSDK and requires hdf5 to be installed.
-# On apple silicon, HDF5 is not automatically installed by tables or detected on the system.
+# The lines below are for Apple Silicon specifically.
+# Hdf5 needs to be installed using homebrew (used by h5py).
 brew install hdf5
-HDF5_DIR=/opt/homebrew/Cellar/hdf5/1.14.3_1 pip install tables
 
 # From now on pip will be used to install the packages. Some packages are not available on conda, or are out of date.
-pip install allensdk
-pip install antspyx
+pip install antspyx                  # registration module (3.12 only)
 pip install liom-toolkit
 
 # To build the documentation of the package

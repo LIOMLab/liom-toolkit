@@ -46,26 +46,35 @@ The repository can be found here: `LIOM Notebooks <https://github.com/LIOMLab/li
 Requirements
 ============
 
-The package requires the following packages to be installed and will attempt to install them using installation:
+The package requires the following core packages to be installed (declared in
+``pyproject.toml`` under ``[project.dependencies]``):
 
-- antspyx
 - tqdm
 - scikit-image
+- imageio
 - ome-zarr
 - nibabel
 - zarr
 - h5py
 - pynrrd
+- pandas
+- requests
 - PyWavelets
 - SimpleITK
-- allensdk
 - dask
+- bokeh
+- distributed
 - opencv-python
-- torch
-- torchvision
-- wandb
 - natsort
-- albumentations
+
+The following are **optional extras** (install with ``pip install
+liom-toolkit[extra]``):
+
+- ``antspyx`` (``[antspy]``) — required only by the registration module;
+  supported on Python 3.12 only (no cp314 wheel).
+- ``torch``, ``torchvision``, ``timm``, ``einops``, ``wandb``,
+  ``scikit-learn`` (``[ai]``) — required only by the ``vseg`` deep-learning
+  vessel segmentation submodule.
 
 To create an anaconda environment with all the required packages, run the following commands:
 
@@ -73,7 +82,7 @@ To create an anaconda environment with all the required packages, run the follow
 
     conda create -n <name>
     conda activate <name>
-    conda install python=3.10
+    conda install python=3.12
 
     # Install Pytorch at this point, follow the instructions on the Pytorch website:
     # https://pytorch.org/get-started/locally/
@@ -84,16 +93,10 @@ To create an anaconda environment with all the required packages, run the follow
     conda install pytorch::pytorch torchvision torchaudio -c pytorch
 
     # The lines below are for Apple Silicon specifically.
-    # Hdf5 needs to be installed using homebrew.
-    # Tables is used by the allenSDK and requires hdf5 to be installed.
-    # On apple silicon, HDF5 is not automatically installed by tables or detected on the system.
-    # As of 2022-02-22, the latest version of HDF5 is 1.14.3_1.
-    # Double check the version before running the command and replace below if necessary.
+    # Hdf5 needs to be installed using homebrew (used by h5py).
     brew install hdf5
-    HDF5_DIR=/opt/homebrew/Cellar/hdf5/1.14.3_1 pip install tables
 
     # From now on pip will be used to install the packages. Some packages are not available on conda, or are out of date.
-    pip install allensdk
     pip install antspyx
     pip install liom-toolkit
 
