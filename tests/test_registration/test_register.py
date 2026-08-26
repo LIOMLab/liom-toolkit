@@ -291,6 +291,61 @@ def test_align_brain_region_to_atlas_wiring(mock_ants, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_align_brain_region_to_atlas_invalid_resolution_raises(tmp_path):
+    """align_brain_region_to_atlas rejects an invalid resolution with
+    ValueError (not AssertionError, not silent under python -O).
+
+    The validation guard is an ``if resolution not in [...]: raise ValueError``
+    form (converted from the prior ``assert resolution in [...]`` so it
+    survives optimized runs). The mock-orchestration pattern mirrors the
+    existing wiring tests: a MagicMock is injected as ``ants`` in
+    ``sys.modules`` so the function-scope ``import ants`` resolves to the
+    mock and the call reaches the resolution guard. ``registration_volume``
+    is a MagicMock (NOT None) so the D-09 None-reorient path owned by plan
+    06-08 is not exercised here.
+    """
+    from liom_toolkit.registration.register import align_brain_region_to_atlas
+
+    mock_ants = _install_mock_ants()
+    try:
+        with pytest.raises(ValueError):
+            align_brain_region_to_atlas(
+                target_volume=MagicMock(),
+                mask=MagicMock(),
+                template=MagicMock(),
+                region="foo",
+                data_dir=str(tmp_path),
+                resolution=42,
+                registration_volume=MagicMock(),
+            )
+    finally:
+        sys.modules.pop("ants", None)
+
+
+def test_align_annotations_to_volume_invalid_resolution_raises(tmp_path):
+    """align_annotations_to_volume rejects an invalid resolution with
+    ValueError (not AssertionError, not silent under python -O).
+
+    Same boundary-edge resolution guard as align_brain_region_to_atlas;
+    same mock-orchestration pattern.
+    """
+    from liom_toolkit.registration.register import align_annotations_to_volume
+
+    mock_ants = _install_mock_ants()
+    try:
+        with pytest.raises(ValueError):
+            align_annotations_to_volume(
+                target_volume=MagicMock(),
+                mask=MagicMock(),
+                template=MagicMock(),
+                atlas=MagicMock(),
+                data_dir=str(tmp_path),
+                resolution=42,
+            )
+    finally:
+        sys.modules.pop("ants", None)
+
+
 def test_align_brain_region_to_atlas_none_reorient_pin(tmp_path):
     """PIN the current buggy behavior: align_brain_region_to_atlas(registration_volume=None)
     calls ants.reorient_image2(None, ...) BEFORE the None-check at line 283,

@@ -25,6 +25,7 @@ imageio), so no ``pytest.importorskip`` gating is needed.
 """
 
 import numpy as np
+import pytest
 from skimage import morphology
 
 from liom_toolkit.segmentation.plane_segmentation import erode_mask, segment_2d_image
@@ -73,3 +74,24 @@ def test_segment_2d_image_runs_end_to_end(tmp_path, bimodal_2d):
     vessel_mask_path = tmp_path / "test_vessel_mask.tif"
     assert mask_path.exists()
     assert vessel_mask_path.exists()
+
+
+def test_segment_2d_image_even_threshold_size_raises(tmp_path, bimodal_2d):
+    """segment_2d_image rejects an even local_threshold_size with ValueError
+    (not AssertionError, not silent under python -O).
+
+    The validation guard is an ``if local_threshold_size % 2 == 0: raise
+    ValueError(...)`` form (converted from the prior ``assert
+    local_threshold_size % 2 == 1`` so it survives optimized runs). The
+    f-string includes the offending value so the error is actionable.
+    """
+    output_dir = str(tmp_path) + "/"
+
+    with pytest.raises(ValueError):
+        segment_2d_image(
+            output_dir,
+            bimodal_2d,
+            "test",
+            local_threshold=True,
+            local_threshold_size=2,
+        )
