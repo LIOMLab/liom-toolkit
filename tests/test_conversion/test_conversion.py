@@ -48,6 +48,7 @@ from liom_toolkit.conversion.conversion import (
     convert_hdf5_to_zarr,
     convert_nifti_to_zarr,
     convert_nrrd_to_zarr,
+    load_hdf5,
     save_zarr,
 )
 from liom_toolkit.utils.io import load_zarr
@@ -297,3 +298,45 @@ def test_cli_help_has_no_use_memmap_flag():
     parser = _build_argument_parser()
     for action in parser._actions:
         assert "--use_memmap" not in action.option_strings
+
+
+def test_load_hdf5_no_file_descriptor_leak(tmp_path):
+    """Repeated load_hdf5 calls do not leak OS file descriptors.
+
+    This is a GREEN-verify regression test for the prior-phase
+    ``with h5py.File(hdf5_file, "r") as f:`` context-manager fix in
+    ``load_hdf5``: the context manager must release the OS file descriptor
+    on every exit path (success or exception), so 50 repeated calls on the
+    same HDF5 file must leave the process open-fd count unchanged. A failure
+    here means the prior fix regressed (a real bug to investigate), not that
+    this test drives new behavior.
+
+    The fd-count measurement uses ``psutil.Process().num_fds()``; if psutil
+    is not installed the test is skipped (no weaker fallback that could
+    silently pass against a regressed fix — per the no-silent-wrong-data
+    rule applied to tests). The Dask client is mocked via the existing
+    ``_make_dask_mock`` helper (orchestration mock only); ``h5py``,
+    ``dask.array``, and ``numpy`` are real and unmocked, per AGENTS.md §5.
+    Each iteration rebinds the result (``_ = load_hdf5(...)``) so no
+    cross-iteration reference pins the dask array and masks a genuine leak.
+    """
+    psutil = pytest.importorskip("psutil")  # fd-count mechanism; skip if absent
+
+    h5path = str(tmp_path / "leak.h5")
+    _make_synthetic_hdf5(h5path, n_channels=1, shape=(8, 8, 8))
+    mock_client = _make_dask_mock()
+
+    fd_before = psutil.Process().num_fds()
+    with patch("liom_toolkit.conversion.conversion.dask_client_manager") as mgr:
+        mgr.get_client.return_value = mock_client
+        for _ in range(50):
+            # Rebind each iteration so no cross-iteration reference pins the
+            # returned dask array and hides a real fd leak in the count.
+            _ = load_hdf5(h5path)
+    fd_after = psutil.Process().num_fds()
+
+    assert fd_after == fd_before, (
+        f"load_hdf5 leaked OS file descriptors: {fd_before} before -> "
+        f"{fd_after} after 50 repeated calls (the with h5py.File context "
+        "manager must release the fd on every exit path)"
+    )
