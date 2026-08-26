@@ -267,98 +267,106 @@ def build_template(
         os.makedirs(os.path.join(work_dir, f"img{k:04d}"), exist_ok=True)
         return os.path.join(work_dir, f"img{k:04d}", "out")
 
-    xavg = initial_template.clone()
-    for i in tqdm(
-        range(iterations),
-        desc="Running template iterations",
-        leave=False,
-        total=iterations,
-        unit="iteration",
-        position=1,
-    ):
-        affinelist = []
-        for k in range(len(image_list)):
-            if masks is None:
-                w1 = ants.registration(
-                    xavg,
-                    image_list[k],
-                    type_of_transform=type_of_transform,
-                    outprefix=make_outprefix(k),
-                    **kwargs,
+    # Wrap the body in try/finally so the mkdtemp work_dir is removed on
+    # every exit path, not just the success path. Without this, any
+    # ants.registration / apply_transforms / write_transform / image_write
+    # failure mid-iteration would leak the work_dir (and all per-image
+    # transform subdirectories) on disk. Only the auto-created temp dir is
+    # cleaned up; an explicit output_dir is retained by the caller.
+    try:
+        xavg = initial_template.clone()
+        for i in tqdm(
+            range(iterations),
+            desc="Running template iterations",
+            leave=False,
+            total=iterations,
+            unit="iteration",
+            position=1,
+        ):
+            affinelist = []
+            for k in range(len(image_list)):
+                if masks is None:
+                    w1 = ants.registration(
+                        xavg,
+                        image_list[k],
+                        type_of_transform=type_of_transform,
+                        outprefix=make_outprefix(k),
+                        **kwargs,
+                    )
+                else:
+                    w1 = ants.registration(
+                        xavg,
+                        image_list[k],
+                        type_of_transform=type_of_transform,
+                        outprefix=make_outprefix(k),
+                        moving_mask=masks[k],
+                        **kwargs,
+                    )
+                L = len(w1["fwdtransforms"])
+                affinelist.append(w1["fwdtransforms"][L - 1])
+                if k == 0:
+                    if L == 2:
+                        wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                    xavgNew = w1["warpedmovout"] * weights[k]
+                else:
+                    if L == 2:
+                        wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                    xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
+                    # Fork divergence from upstream 0.6.3: per-iteration cleanup
+                    # of per-image transform files. Upstream only does an
+                    # end-of-function shutil.rmtree(work_dir), but mid-run temp
+                    # data grows too large on the lab system and causes the
+                    # algorithm to fail, so the per-image cleanup is required.
+                    # Skip the last iteration so the final transforms remain
+                    # available to the affine-averaging block below.
+                    if i < iterations - 1 and remove_temp_output:
+                        for fwd_transform in w1["fwdtransforms"]:
+                            os.remove(fwd_transform)
+                        for inv_transform in w1["invtransforms"]:
+                            os.remove(inv_transform)
+
+            if useNoRigid:
+                avgaffine = ants.average_affine_transform_no_rigid(affinelist)
+            else:
+                avgaffine = ants.average_affine_transform(affinelist)
+            afffn = os.path.join(work_dir, "avgAffine.mat")
+            ants.write_transform(avgaffine, afffn)
+
+            if L == 2:
+                print(wavg.abs().mean())
+                wscl = (-1.0) * gradient_step
+                wavg = wavg * wscl
+                wavgA = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=wavg,
+                    imagetype=1,
+                    transformlist=afffn,
+                    whichtoinvert=[1],
+                )
+                wavgfn = os.path.join(work_dir, "avgWarp.nii.gz")
+                iio.image_write(wavgA, wavgfn)
+                xavg = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=xavgNew,
+                    transformlist=[wavgfn, afffn],
+                    whichtoinvert=[0, 1],
                 )
             else:
-                w1 = ants.registration(
-                    xavg,
-                    image_list[k],
-                    type_of_transform=type_of_transform,
-                    outprefix=make_outprefix(k),
-                    moving_mask=masks[k],
-                    **kwargs,
+                xavg = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=xavgNew,
+                    transformlist=[afffn],
+                    whichtoinvert=[1],
                 )
-            L = len(w1["fwdtransforms"])
-            affinelist.append(w1["fwdtransforms"][L - 1])
-            if k == 0:
-                if L == 2:
-                    wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
-                xavgNew = w1["warpedmovout"] * weights[k]
-            else:
-                if L == 2:
-                    wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
-                xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
-                # Fork divergence from upstream 0.6.3: per-iteration cleanup
-                # of per-image transform files. Upstream only does an
-                # end-of-function shutil.rmtree(work_dir), but mid-run temp
-                # data grows too large on the lab system and causes the
-                # algorithm to fail, so the per-image cleanup is required.
-                # Skip the last iteration so the final transforms remain
-                # available to the affine-averaging block below.
-                if i < iterations - 1 and remove_temp_output:
-                    for fwd_transform in w1["fwdtransforms"]:
-                        os.remove(fwd_transform)
-                    for inv_transform in w1["invtransforms"]:
-                        os.remove(inv_transform)
+            if blending_weight is not None:
+                xavg = xavg * blending_weight + ants.iMath(xavg, "Sharpen") * (1.0 - blending_weight)
+            if save_progress:
+                iio.image_write(xavg, f"template_progress/template_{i}.nii.gz")
 
-        if useNoRigid:
-            avgaffine = ants.average_affine_transform_no_rigid(affinelist)
-        else:
-            avgaffine = ants.average_affine_transform(affinelist)
-        afffn = os.path.join(work_dir, "avgAffine.mat")
-        ants.write_transform(avgaffine, afffn)
-
-        if L == 2:
-            print(wavg.abs().mean())
-            wscl = (-1.0) * gradient_step
-            wavg = wavg * wscl
-            wavgA = ants.apply_transforms(
-                fixed=xavgNew,
-                moving=wavg,
-                imagetype=1,
-                transformlist=afffn,
-                whichtoinvert=[1],
-            )
-            wavgfn = os.path.join(work_dir, "avgWarp.nii.gz")
-            iio.image_write(wavgA, wavgfn)
-            xavg = ants.apply_transforms(
-                fixed=xavgNew,
-                moving=xavgNew,
-                transformlist=[wavgfn, afffn],
-                whichtoinvert=[0, 1],
-            )
-        else:
-            xavg = ants.apply_transforms(
-                fixed=xavgNew,
-                moving=xavgNew,
-                transformlist=[afffn],
-                whichtoinvert=[1],
-            )
-        if blending_weight is not None:
-            xavg = xavg * blending_weight + ants.iMath(xavg, "Sharpen") * (1.0 - blending_weight)
-        if save_progress:
-            iio.image_write(xavg, f"template_progress/template_{i}.nii.gz")
-
-    if output_dir is None:
-        shutil.rmtree(work_dir)
-    return xavg
+        return xavg
+    finally:
+        if output_dir is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def build_template_for_resolution(
