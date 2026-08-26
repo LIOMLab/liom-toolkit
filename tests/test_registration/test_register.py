@@ -20,11 +20,12 @@ Hybrid suite per D-05:
   does not work — there is no module attribute to replace). The mock is
   popped from ``sys.modules`` after each test so it does not leak.
 
-* **D-07 pin test** (``test_align_brain_region_to_atlas_none_reorient_pin``)
-  is a PASSING test (NO xfail) that pins the current buggy behavior of
-  ``align_brain_region_to_atlas(registration_volume=None)``: the function
-  calls ``ants.reorient_image2(None, ...)`` before the None-check, which
-  raises. Phase 6 BUG-01 will flip this to assert a valid mask is returned.
+* **None-reorient regression** (``test_align_brain_region_to_atlas_none_reorient_returns_valid_mask``,
+  antspy-marked) uses REAL ants (no ants mock) to assert that
+  ``align_brain_region_to_atlas(registration_volume=None)`` returns a valid
+  ANTsImage mask — the documented ``registration_volume=None`` contract
+  ("If None, the target_volume will be used") holds. It replaces the
+  Phase-5 mock-ants pin test that asserted the buggy raise.
 """
 
 from __future__ import annotations
@@ -287,8 +288,91 @@ def test_align_brain_region_to_atlas_wiring(mock_ants, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# C. D-07 pin test (passing — NO xfail)
+# C. None-reorient regression (antspy-marked, real ants — no ants mock)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.antspy
+def test_align_brain_region_to_atlas_none_reorient_returns_valid_mask(
+    synthetic_ants_image, tmp_path
+):
+    """align_brain_region_to_atlas(registration_volume=None) returns a valid
+    ANTsImage mask instead of raising TypeError.
+
+    The documented ``registration_volume=None`` contract ("If None, the
+    target_volume will be used") must hold: the function substitutes
+    ``target_volume`` for ``registration_volume`` BEFORE the
+    ``ants.reorient_image2`` call, so the None path returns a valid mask
+    instead of crashing on reorient-of-None. This is the BUG-01 / D-09
+    None-reorient regression — it replaces the Phase-5 mock-ants pin test
+    (``test_align_brain_region_to_atlas_none_reorient_pin``) that asserted
+    the buggy raise.
+
+    Real ants is used (no ants mock) so the bug locus — reorient of None —
+    is exercised by the real ``ants.reorient_image2`` implementation, not a
+    MagicMock configured to mimic it. Only the non-ants liom_toolkit
+    pipeline helpers are patched to keep the test hermetic and offline.
+    """
+    pytest.importorskip("ants")  # body-level per pytest #9542
+    import ants
+    import numpy as np
+
+    from liom_toolkit.registration.register import align_brain_region_to_atlas
+
+    img = synthetic_ants_image
+    mask = ants.from_numpy(
+        np.ones((8, 8, 8), dtype="float32"),
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        direction=np.eye(3),
+    )
+
+    # Patch ONLY the non-ants liom_toolkit pipeline helpers to keep the test
+    # hermetic and offline. Do NOT patch ants itself (AGENTS section 5 —
+    # never mock ants; the bug locus must run through real ants).
+    ones_mask = ants.from_numpy(
+        np.ones((8, 8, 8), dtype="float32"),
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        direction=np.eye(3),
+    )
+    mock_rs = MagicMock()
+    mock_rs.structure_tree.get_structures_by_name.return_value = [{"id": 1}]
+    mock_rs.make_structure_mask.return_value = ones_mask
+
+    with (
+        patch(
+            "liom_toolkit.registration.register.construct_reference_space",
+            return_value=mock_rs,
+        ),
+        patch(
+            "liom_toolkit.registration.register.download_allen_template",
+            return_value=synthetic_ants_image,
+        ),
+        patch(
+            "liom_toolkit.registration.register.get_transformations_for_atlas",
+            return_value=(
+                {"invtransforms": ["IdentityTransform"]},
+                {"fwdtransforms": ["IdentityTransform"]},
+            ),
+        ),
+        patch(
+            "liom_toolkit.registration.register.convert_allen_nrrd_to_ants",
+            side_effect=lambda region_mask, res: region_mask,
+        ),
+    ):
+        result = align_brain_region_to_atlas(
+            target_volume=img,
+            mask=mask,
+            template=img,
+            region="foo",
+            data_dir=str(tmp_path),
+            resolution=25,
+            registration_volume=None,
+        )
+
+    assert result is not None
+    assert hasattr(result, "numpy")
 
 
 def test_align_brain_region_to_atlas_invalid_resolution_raises(tmp_path):
@@ -342,47 +426,5 @@ def test_align_annotations_to_volume_invalid_resolution_raises(tmp_path):
                 data_dir=str(tmp_path),
                 resolution=42,
             )
-    finally:
-        sys.modules.pop("ants", None)
-
-
-def test_align_brain_region_to_atlas_none_reorient_pin(tmp_path):
-    """PIN the current buggy behavior: align_brain_region_to_atlas(registration_volume=None)
-    calls ants.reorient_image2(None, ...) BEFORE the None-check at line 283,
-    so it raises today. Phase 6 BUG-01 will flip this to assert a valid mask
-    is returned.
-
-    This is a PASSING test of current behavior (no xfail). The reorient call
-    on None is the bug; with a real ants it raises TypeError; with a
-    MagicMock we configure reorient_image2 to raise on None to mirror the
-    real behavior.
-    """
-    from liom_toolkit.registration.register import align_brain_region_to_atlas
-
-    def _reorient_side_effect(img, orientation):
-        # Real ants.reorient_image2(None, ...) raises; mirror that here.
-        if img is None:
-            raise TypeError("Cannot reorient None image")
-        return img
-
-    mock_ants = _install_mock_ants()
-    mock_ants.reorient_image2.side_effect = _reorient_side_effect
-    try:
-        with (
-            patch("liom_toolkit.registration.register.construct_reference_space") as mock_rs,
-            patch("liom_toolkit.registration.register.download_allen_template") as mock_dl,
-        ):
-            mock_rs.return_value = MagicMock()
-            mock_dl.return_value = MagicMock()
-
-            with pytest.raises(TypeError):
-                align_brain_region_to_atlas(
-                    target_volume=MagicMock(),
-                    mask=MagicMock(),
-                    template=MagicMock(),
-                    region="foo",
-                    data_dir=str(tmp_path),
-                    registration_volume=None,
-                )
     finally:
         sys.modules.pop("ants", None)
