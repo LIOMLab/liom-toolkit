@@ -205,3 +205,62 @@ def test_predict_one_norm_false_skips_clahe(tmp_path, monkeypatch):
     assert calls == [], "CLAHE must not be applied when norm=False"
     assert isinstance(result, np.ndarray)
     assert result.dtype == np.uint8
+
+
+def test_predict_one_all_zero_inference_no_runtime_warning(tmp_path):
+    """predict_one on a model that predicts no vessels (all-zero output)
+    must not emit a RuntimeWarning from divide-by-zero, and must return a
+    valid all-zero uint8 mask.
+
+    An all-zero inference is a VALID model output (the model predicted no
+    vessels for a vessel-free image) -- the correct segmentation mask is
+    all-zero. The pre-fix code does ``inference / inference.max()`` which
+    divides by zero when ``inference.max() == 0``, producing ``NaN`` +
+    ``RuntimeWarning: invalid value encountered in divide``, then
+    ``.astype(np.uint8)`` silently converts ``NaN`` to ``0`` (undefined
+    behavior in NumPy, implementation-defined across platforms). The fix
+    skips the division when ``inference.max() == 0`` and returns the
+    all-zero mask directly via the same bool->uint8*255 path the non-zero
+    branch uses -- the correct output, computed without the NaN path.
+
+    This test uses the same _make_stub_model() that returns all-zeros (the
+    model output is below the 0.5 threshold -> all-background), so the
+    inference array is all-zero before the normalization line.
+    """
+    pytest.importorskip("torch")
+
+    import warnings
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    img_path = _write_tiny_png(tmp_path)
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_zero_inf"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = predict_one(
+            model=model,
+            img_path=str(img_path),
+            save_path=str(out_dir),
+            norm=True,
+            dev="cpu",
+            patching=False,
+        )
+
+    import numpy as np
+
+    # Output is a valid all-zero uint8 mask (correct for a vessel-free
+    # prediction -- the model predicted no vessels, so the mask is empty).
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.uint8
+    assert result.sum() == 0
+
+    # No RuntimeWarning (divide-by-zero) may escape predict_one on an
+    # all-zero inference. The pre-fix code emits one from
+    # `inference / inference.max()`; the fix skips the division.
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert len(runtime_warnings) == 0, (
+        f"RuntimeWarning(s) escaped predict_one on all-zero inference: "
+        f"{[str(w.message) for w in runtime_warnings]}"
+    )

@@ -141,8 +141,19 @@ def predict_one(
         y1 += 1
 
     inference = np.floor(inference)
-    inference = (inference / inference.max() * 255).astype(np.uint8)
-    inference = inference.astype(bool)
+    # All-zero inference is a valid model output (the model predicted no
+    # vessels for a vessel-free image); the correct mask is all-zero. Skip
+    # the / inference.max() division when max == 0 -- dividing by zero
+    # produces NaN + RuntimeWarning, then .astype(np.uint8) silently
+    # converts NaN to 0 (undefined behavior, implementation-defined across
+    # platforms). The all-zero branch skips the divide and goes straight
+    # through the same bool -> uint8 * 255 path the non-zero branch uses,
+    # producing the correct all-zero mask without the NaN path.
+    if inference.max() == 0:
+        inference = inference.astype(bool)
+    else:
+        inference = (inference / inference.max() * 255).astype(np.uint8)
+        inference = inference.astype(bool)
     inference = inference.astype(np.uint8) * 255
 
     save_inf = f"{save_path}/{image_id}_segmented.png"
