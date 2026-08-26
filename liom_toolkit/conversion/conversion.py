@@ -115,17 +115,28 @@ def save_zarr(
         raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
 
     n_dims = len(data.shape)
-    axes = generate_axes_dict(n_dims)
+    axes = generate_axes_dict(n_dims, unit=unit)
+    # validate_n_levels / build_scale_factors take axis-name lists (not the
+    # dict form). Derive the name list from the dict form so those helpers
+    # stay unchanged.
+    axis_names = [ax["name"] for ax in axes]
 
     print("Saving...")
-    os.mkdir(zarr_file)
+    # Use the symlink-aware create_directory helper instead of a bare
+    # os.mkdir (which has no overwrite support and races on existing paths).
+    # Function-scope import avoids a circular import with utils.zarr_writer
+    # at module load time.
+    from pathlib import Path
+
+    from liom_toolkit.utils.zarr_writer import create_directory
+
+    create_directory(Path(zarr_file), overwrite=False)
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
-    n_levels = validate_n_levels(4, data.shape, axes)
-    scale_factors = build_scale_factors(n_levels, axes)
+    n_levels = validate_n_levels(4, data.shape, axis_names)
+    scale_factors = build_scale_factors(n_levels, axis_names)
     scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
-    axes_units = {ax: unit for ax in axes if ax != "c"}
 
     write_image(
         image=data,
@@ -134,7 +145,6 @@ def save_zarr(
         scale_factors=scale_factors,
         method=Methods.RESIZE,
         scale=scale,
-        axes_units=axes_units,
         storage_options={"chunks": chunks},
         scaler=None,
     )

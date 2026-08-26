@@ -3,8 +3,9 @@
 Mirrors the package layout (``tests/test_utils/test_io.py``) and the
 known-answer style established by ``tests/test_canary.py``. Covers:
 
-* Known-answer tests for ``generate_axes_dict`` (now returns plain string
-  axis lists per NGFF v0.5) and the new ``validate_n_levels`` helper that
+* Known-answer tests for ``generate_axes_dict`` (returns NGFF v0.5 full
+  dict-form axes — ``[{"name":"z","type":"space","unit":...}, ...]`` with a
+  channel axis prepended for 4D) and the ``validate_n_levels`` helper that
   clamps the requested pyramid level count to what the downsampled axes
   can actually support.
 * Real ``tmp_path`` round-trip tests for ``save_zarr``→``load_zarr`` and
@@ -45,13 +46,33 @@ def _import_validate_n_levels():
 
 
 def test_generate_axes_dict_3d():
-    """A 3D volume has plain string z/y/x axes (NGFF v0.5 string form)."""
-    assert generate_axes_dict(3) == ["z", "y", "x"]
+    """A 3D volume has NGFF dict-form z/y/x axes with unit on each spatial axis."""
+    assert generate_axes_dict(3) == [
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
+    ]
 
 
 def test_generate_axes_dict_4d_prepends_channel():
-    """A 4D volume prepends a channel axis before z/y/x (string form)."""
-    assert generate_axes_dict(4) == ["c", "z", "y", "x"]
+    """A 4D volume prepends a channel axis (no unit key) before z/y/x."""
+    assert generate_axes_dict(4) == [
+        {"name": "c", "type": "channel"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
+    ]
+
+
+def test_generate_axes_dict_unit_param():
+    """The ``unit`` param lands on each spatial axis; channel has no unit."""
+    axes_3d = generate_axes_dict(3, unit="millimeter")
+    assert all(ax["unit"] == "millimeter" for ax in axes_3d)
+    axes_4d = generate_axes_dict(4, unit="millimeter")
+    # Channel axis (index 0) carries only name + type — no "unit" key.
+    assert "unit" not in axes_4d[0]
+    assert axes_4d[0] == {"name": "c", "type": "channel"}
+    assert all(ax["unit"] == "millimeter" for ax in axes_4d[1:])
 
 
 def test_validate_n_levels_exact_boundary():

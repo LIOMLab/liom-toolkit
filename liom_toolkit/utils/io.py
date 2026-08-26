@@ -220,7 +220,11 @@ def save_label_to_zarr(
         raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
 
     n_dims = len(label.shape)
-    axes = generate_axes_dict(n_dims)
+    axes = generate_axes_dict(n_dims, unit=unit)
+    # validate_n_levels / build_scale_factors take axis-name lists (not the
+    # dict form). Derive the name list from the dict form so those helpers
+    # stay unchanged.
+    axis_names = [ax["name"] for ax in axes]
 
     # D-06/D-07: when a low-res label is passed, upscale it to the main
     # image's level-0 shape (read from the same zarr_file the label is
@@ -238,10 +242,9 @@ def save_label_to_zarr(
 
     label_metadata = {"colors": color_dict, "source": {"image": "../../"}}
 
-    n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axes)
-    scale_factors = build_scale_factors(n_levels, axes)
+    n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axis_names)
+    scale_factors = build_scale_factors(n_levels, axis_names)
     scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
-    axes_units = {ax: unit for ax in axes if ax != "c"}
 
     write_labels(
         labels=label,
@@ -251,7 +254,6 @@ def save_label_to_zarr(
         scale_factors=scale_factors,
         method=Methods.NEAREST,
         scale=scale,
-        axes_units=axes_units,
         label_metadata=label_metadata,
         storage_options={"chunks": chunks},
         scaler=None,
@@ -326,20 +328,52 @@ def build_scale_factors(n_levels: int, axes: list[str]) -> list[dict[str, int]]:
     ]
 
 
-def generate_axes_dict(dimensions: int) -> list[str]:
+def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
     """
-    Generate the axes list for the zarr file as plain NGFF v0.5 axis strings.
+    Generate the NGFF v0.5 full dict-form axes list for the zarr file.
 
-    :param dimensions: The number of dimensions in the image.
+    Returns axes in ``(c, z, y, x)`` order (channel prepended for 4D only).
+    The channel axis dict carries only ``name`` and ``type`` (NO ``unit`` key
+    — channels are not spatial). Each spatial axis dict carries ``name``,
+    ``type`` = ``"space"``, and ``unit``.
+
+    This is the canonical ome-zarr representation under v0.5; both
+    ``write_image`` and ``write_multiscales_metadata`` accept dict-form axes
+    directly (passing ``axes_units`` is then unnecessary — the ``unit`` lives
+    on each axis dict). Callers that need the plain axis-name list (e.g. for
+    ``validate_n_levels`` / ``build_scale_factors``, which take name lists)
+    derive it via ``[ax["name"] for ax in axes]``.
+
+    :param dimensions: The number of dimensions in the image (3 or 4).
     :type dimensions: int
-    :return: The axis name list (``["z","y","x"]`` or
-        ``["c","z","y","x"]`` for 4D).
-    :rtype: list[str]
+    :param unit: The NGFF UDUNITS-2 length unit for the spatial axes.
+        Defaults to ``"micrometer"`` to preserve existing callers.
+    :type unit: str
+    :raises ValueError: If ``unit`` is not a known NGFF length unit, or
+        ``dimensions`` is not 3 or 4. (Uses ``raise ValueError``, never
+        ``assert`` — ``assert`` is stripped under ``python -O``.)
+    :return: The dict-form axes list, e.g.
+        ``[{"name":"z","type":"space","unit":"micrometer"}, ...]`` for 3D or
+        ``[{"name":"c","type":"channel"}, {"name":"z",...}, ...]`` for 4D.
+    :rtype: list[dict]
     """
-    axes = ["z", "y", "x"]
+    if dimensions not in (3, 4):
+        raise ValueError(f"dimensions must be 3 or 4, got {dimensions!r}.")
+    if unit not in _NGFF_LENGTH_UNITS:
+        raise ValueError(
+            f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit "
+            f"(one of {sorted(_NGFF_LENGTH_UNITS)})."
+        )
+
+    spatial = [
+        {"name": "z", "type": "space", "unit": unit},
+        {"name": "y", "type": "space", "unit": unit},
+        {"name": "x", "type": "space", "unit": unit},
+    ]
     if dimensions == 4:
-        axes.insert(0, "c")
-    return axes
+        # Channel axis carries NO unit key — channels are not spatial.
+        return [{"name": "c", "type": "channel"}, *spatial]
+    return spatial
 
 
 def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
