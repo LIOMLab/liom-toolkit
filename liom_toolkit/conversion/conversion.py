@@ -130,9 +130,13 @@ def save_zarr(
     axis_names = [ax["name"] for ax in axes]
 
     print("Saving...")
-    # Symlink-aware directory creation (FileExistsError on collision when
-    # overwrite=False — no silent clobber). Imported at module top.
-    create_directory(Path(zarr_file), overwrite=False)
+    # Symlink-aware directory creation with overwrite=True: a second call
+    # into an existing zarr store directory shutil.rmtree's the store then
+    # recreates it before the zarr write proceeds (zarr stores are
+    # directories with subdirectories, so shutil.rmtree is the correct
+    # clearing primitive — not os.remove which only handles flat files).
+    # Imported at module top to avoid a circular import with utils.zarr_writer.
+    create_directory(Path(zarr_file), overwrite=True)
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
