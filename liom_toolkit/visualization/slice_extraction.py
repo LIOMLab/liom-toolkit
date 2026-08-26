@@ -60,7 +60,7 @@ def extract_and_save_slice_form_zarr(
     return image
 
 
-def extract_slices_form_zarr(
+def extract_slices_from_zarr(
     node: Node, start_z: int, num_slices: int, channel=0, resolution_level=0
 ) -> np.ndarray:
     """
@@ -92,12 +92,12 @@ def extract_slices_form_zarr(
         idx = int(z)
         image = volume[idx, :, :]
         image = image.compute()
-        full_volume[i:, :, :] = image
+        full_volume[i, :, :] = image
 
     return full_volume
 
 
-def extract_and_save_slices_form_zarr(
+def extract_and_save_slices_from_zarr(
     node: Node,
     start_z: int,
     num_slices: int,
@@ -129,7 +129,7 @@ def extract_and_save_slices_form_zarr(
     :return: 3D volume with the extracted slices
     :rtype: np.ndarray
     """
-    volume = extract_slices_form_zarr(
+    volume = extract_slices_from_zarr(
         node, start_z, num_slices, channel=channel, resolution_level=resolution_level
     )
 

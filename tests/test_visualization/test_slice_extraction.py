@@ -9,9 +9,10 @@ guard two locked Phase-6 decisions:
   slice-range ``full_volume[i:, :, :] = image`` that clobbered every slice
   from ``i`` onward with the current iteration's data (the canonical AGENTS
   section 2 silent-data-corruption anti-pattern).
-* The hard rename (D-03, slice-rename portion): the public functions
-  ``extract_slices_form_zarr`` and ``extract_and_save_slices_form_zarr`` are
-  renamed to ``extract_slices_from_zarr`` and ``extract_and_save_slices_from_zarr``
+* The hard rename (D-03, slice-rename portion): the two slice-extraction
+  functions previously carried a misspelled ``form_zarr`` suffix in their
+  public names; they are renamed to the correct ``from_zarr`` spelling
+  (``extract_slices_from_zarr`` and ``extract_and_save_slices_from_zarr``)
   with no deprecation shim (clean break at the 1.0.0 boundary).
 
 Per AGENTS section 5, ``numpy`` / ``dask`` / ``zarr`` / ``ome_zarr`` are NOT
