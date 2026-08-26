@@ -217,16 +217,24 @@ def test_get_valid_indices_fork_mutation(tmp_path):
     )
 
     # Single-process expected valid set. dataset_length must mirror what
-    # get_valid_indices uses internally: len(self) // 4 evaluated BEFORE
-    # valid_indices is set (i.e. the full grid length, not the post-filter
-    # length). After construction len(ds) returns the filtered length, so
-    # recompute the pre-filter length from grid_shape the same way
-    # OmeZarrDataset.__len__ does (grid product * 4 when rotate_patches).
+    # get_valid_indices uses internally: grid_product when
+    # rotate_patches=False (1:1 grid-to-dataset mapping), or grid_product
+    # when rotate_patches=True (len(self) // 4 == grid_product). The
+    # per-grid-patch label is fetched at dataset index ``i`` when
+    # rotate_patches=False (no rotation division in load_patch) or
+    # ``i * 4`` when rotate_patches=True (load_patch divides by 4).
+    # After construction len(ds) returns the filtered length, so recompute
+    # the pre-filter length from grid_shape the same way OmeZarrDataset.__len__
+    # does (grid product * 4 when rotate_patches).
     grid_product = ds.grid_shape[0] * ds.grid_shape[1] * ds.grid_shape[2]
-    pre_filter_len = grid_product * (4 if ds.rotate_patches else 1)
-    dataset_length = pre_filter_len // 4
+    if ds.rotate_patches:
+        dataset_length = grid_product
+        patch_index = lambda i: i * 4  # noqa: E731
+    else:
+        dataset_length = grid_product
+        patch_index = lambda i: i  # noqa: E731
     expected = [
-        i for i in range(dataset_length) if ds.check_patch(ds[i * 4][1])
+        i for i in range(dataset_length) if ds.check_patch(ds[patch_index(i)][1])
     ]
 
     assert len(ds.valid_indices) > 0, (
@@ -234,4 +242,66 @@ def test_get_valid_indices_fork_mutation(tmp_path):
     )
     assert np.array_equal(
         np.sort(np.asarray(ds.valid_indices)), np.sort(np.asarray(expected))
+    )
+
+
+def test_get_valid_indices_rotate_patches_false_validates_all_grid_patches(tmp_path):
+    """Regression for the rotate_patches=False indexing bug in _process_patch.
+
+    The pre-fix ``_process_patch`` hardcoded ``self[idx * 4][1]``. With
+    ``rotate_patches=False`` ``load_patch`` does NOT divide the index by 4,
+    so ``self[idx * 4]`` resolved to grid patch ``idx * 4`` -- skipping 3 of
+    every 4 grid patches. Combined with ``dataset_length = len(self) // 4``
+    (also wrong for rotate_patches=False, where len(self) == grid_product),
+    the validation loop only checked patches at grid indices 0, 4, 8, ...
+    instead of 0, 1, 2, 3, ...
+
+    This test builds a labeled zarr where ONLY grid patch 1 has a non-empty
+    label (grid patches 0, 2, 3 are empty). Under the bug, grid patch 1 is
+    never checked (the loop checks 0, 4, 8, ... which are all empty), so
+    ``valid_indices`` is empty. Under the fix, grid patch 1 IS checked and
+    is the sole valid index.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    from liom_toolkit.conversion.conversion import save_zarr, save_label_to_zarr
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+    from liom_toolkit.utils.io import generate_label_color_dict_mask
+
+    # 24x8x8 volume with patch_size=(8,8,8) -> grid_shape (3,1,1) -> 3 grid
+    # patches. Put a non-empty label ONLY in grid patch 1 (z=8:16).
+    arr = np.zeros((24, 8, 8), dtype=np.uint16)
+    save_zarr(arr, str(tmp_path / "ds.zarr"), scales=(6.5, 6.5, 6.5), chunks=(24, 8, 8))
+
+    label = np.zeros((24, 8, 8), dtype=np.uint8)
+    label[8:16, :, :] = 1  # only grid patch 1 (z=8:16) is non-empty
+    zarr_path = str(tmp_path / "ds.zarr")
+    save_label_to_zarr(
+        label,
+        zarr_path,
+        generate_label_color_dict_mask(),
+        "training",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(24, 8, 8),
+    )
+
+    ds = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+
+    # grid patch 1 is the only non-empty patch -> the sole valid index.
+    assert len(ds.valid_indices) > 0, (
+        "valid_indices is empty — _process_patch skipped grid patch 1 "
+        "(rotate_patches=False indexing bug)"
+    )
+    assert np.array_equal(
+        np.sort(np.asarray(ds.valid_indices)), np.array([1])
     )

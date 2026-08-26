@@ -292,15 +292,37 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         bit travels back to the parent via the ``process_map`` return list,
         not via a shared list mutated by forked workers (D-11 — forked-worker
         list mutations are lost).
+
+        ``idx`` is a GRID patch index (0..grid_product-1), not a dataset
+        index. When ``rotate_patches=True`` each grid patch occupies 4
+        consecutive dataset indices (4*grid_idx + 0..3) and ``load_patch``
+        divides the dataset index by 4, so ``self[idx * 4]`` resolves to
+        grid patch ``idx``. When ``rotate_patches=False`` the dataset index
+        maps 1:1 to a grid patch (no division in ``load_patch``), so
+        ``self[idx * 4]`` would resolve to grid patch ``idx * 4`` and skip
+        3 of every 4 grid patches -- use ``self[idx]`` instead.
         """
-        patch = self[idx * 4][1]
+        patch_idx = idx * 4 if self.rotate_patches else idx
+        patch = self[patch_idx][1]
         return bool(self.check_patch(patch))
 
     def get_valid_indices(self):
         """
         Validate the patches in the dataset. This function is used to remove patches that are not suitable for training.
         """
-        dataset_length = len(self) // 4
+        # dataset_length is the number of GRID patches to validate. When
+        # rotate_patches=True the dataset length is grid_product * 4 (each
+        # grid patch occupies 4 rotation indices), so dividing by 4 yields
+        # grid_product. When rotate_patches=False the dataset length IS
+        # grid_product (1:1 mapping), so dividing by 4 would validate only
+        # every 4th grid patch -- use grid_product directly. len(self) here
+        # is the pre-filter length because valid_indices is not set yet
+        # (get_valid_indices runs during __init__ before valid_indices
+        # exists, so __len__ falls through to super().__len__()).
+        if self.rotate_patches:
+            dataset_length = len(self) // 4
+        else:
+            dataset_length = len(self)
 
         results = process_map(
             self._process_patch,
