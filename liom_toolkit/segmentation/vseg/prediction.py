@@ -24,6 +24,8 @@ def predict_one(
     save_path: str,
     dev: str = "cuda",
     norm_param: tuple = (10, 0.05),
+    norm: bool = True,
+    patching: bool = False,
 ) -> np.ndarray:
     """
     Predict one image
@@ -38,8 +40,20 @@ def predict_one(
     :type stride: int
     :param width: The width of the patches
     :type width: int
-    :param norm: Normalize the images
+    :param norm: When True (default), apply CLAHE via cv2.createCLAHE before
+        inference -- this preserves the shipped always-CLAHE behavior. When
+        False, skip CLAHE and use only the min-max-scaled uint8 image. The
+        default of True means callers that omit ``norm`` see no behavior
+        change.
     :type norm: bool
+    :param patching: When False (default), run the existing single full-image
+        pass (the only implemented path: stride equals the image height, one
+        patch ``{id}_0_0.png``). When True, raise NotImplementedError -- 2D
+        tiled inference is not implemented; use predict_volume for tiled
+        prediction. The explicit raise avoids silently returning
+        plausible-shaped-but-wrong single-pass output when tiled inference
+        was requested.
+    :type patching: bool
     :param dev: The device to use for prediction
     :type dev: str
     :param norm_param: The parameters for the normalization. (kernel_size, clip_limit)
@@ -53,6 +67,10 @@ def predict_one(
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
+    if patching:
+        raise NotImplementedError(
+            "2D tiled inference is not implemented; use predict_volume for tiled prediction"
+        )
     image = iio.imread(img_path)
     H = image.shape[0]
     W = image.shape[1]
@@ -78,12 +96,19 @@ def predict_one(
     # Only the clahe is done to the image
     image = iio.imread(img_path)
     image = (image / image.max() * 255).astype(np.uint8)
-    # Apply Adaptive Histogram Equalization (AHE)
-    kernel_size = norm_param[0]
-    clip_limit = norm_param[1]
-    tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
-    ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-    processed_image = ahe.apply(image)
+    # Apply Adaptive Histogram Equalization (AHE) when norm is True (default).
+    # When norm is False, skip CLAHE and use the min-max uint8 image above --
+    # mirrors create_patches(..., norm=...) in utils for cross-subpackage
+    # consistency. The min-max conversion runs unconditionally because both
+    # branches consume it.
+    if norm:
+        kernel_size = norm_param[0]
+        clip_limit = norm_param[1]
+        tile_grid_size = (image.shape[0] // kernel_size, image.shape[1] // kernel_size)
+        ahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+        processed_image = ahe.apply(image)
+    else:
+        processed_image = image
 
     saved_image = gray2rgb(processed_image)
     saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
