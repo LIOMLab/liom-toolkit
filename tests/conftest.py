@@ -6,6 +6,8 @@ They are shipped in Phase 1 so later phases can consume them without
 redefinition.
 """
 
+import sys
+
 import numpy as np
 import pytest
 
@@ -33,3 +35,53 @@ def bimodal_2d() -> np.ndarray:
     img = np.zeros((128, 128), dtype=np.uint8)
     img[32:96, 32:96] = 200
     return img
+
+
+@pytest.fixture
+def synthetic_ants_image():
+    """A tiny 8x8x8 float32 ANTsImage built via ants.from_numpy.
+
+    The fixture body imports ``ants`` and ``numpy`` INSIDE the function so
+    this conftest module imports cleanly on core-only installs (ants is an
+    extra). Callers MUST call ``pytest.importorskip("ants")`` in the test
+    body BEFORE requesting this fixture so the test skips cleanly on the
+    3.14-core CI leg instead of erroring at fixture setup.
+    """
+    import ants
+
+    arr = np.random.rand(8, 8, 8).astype("float32")
+    return ants.from_numpy(
+        arr, spacing=(1, 1, 1), origin=(0, 0, 0), direction=np.eye(3).ravel()
+    )
+
+
+@pytest.fixture
+def fake_ants():
+    """Inject a MagicMock as the ``ants`` module in ``sys.modules`` for the test.
+
+    Mirrors ``tests/test_conversion/test_use_custom_atlas.py:_install_fake_ants``.
+    ``fake.from_numpy`` / ``fake.image_read`` / ``fake.reorient_image2`` return a
+    MagicMock image whose ``.numpy()`` returns a small real numpy array. The fake
+    is popped from ``sys.modules`` on teardown so it does not leak across tests.
+
+    Note: mock-orchestration tests that use ``patch("liom_toolkit.registration.register.ants")``
+    do NOT need this fixture — the per-module patch is the safer pattern for
+    lazy-imported ants (AGENTS §5). ``fake_ants`` is for tests that exercise code
+    doing a bare ``import ants`` at module top or inside a function-scope try/except
+    where the per-module patch target is inconvenient.
+    """
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    fake_image = MagicMock()
+    fake_image.numpy.return_value = np.zeros((4, 4, 4), dtype=np.float32)
+    fake_image.orientation = "RAS"
+    fake.from_numpy.return_value = fake_image
+    fake.image_read.return_value = fake_image
+    fake.reorient_image2.return_value = fake_image
+    sys.modules["ants"] = fake
+    try:
+        yield fake
+    finally:
+        sys.modules.pop("ants", None)
+
