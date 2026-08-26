@@ -143,8 +143,18 @@ def compute_slice_metrics(
             )
         df = pd.concat([df, entry])
 
-    # Compute metrics for the whole slice
-    tissue_area, vessel_area, vessel_density = calculate_density(vessel_mask, mask, voxel_size)
+    # Compute metrics for the whole slice. Use full_vessel_mask
+    # (vessel_mask * mask * vessel_exclude) for the density calculation so
+    # the 'total' row is consistent with the per-region rows, which all
+    # derive their vessel area from full_vessel_mask via get_vessel_region.
+    # The pre-fix code passed the raw vessel_mask, so the total row's
+    # vessel_area and vessel_density included vessels outside the tissue
+    # mask and explicitly excluded vessels -- making the total density
+    # higher than the sum of per-region densities (a data inconsistency
+    # in the same output DataFrame).
+    tissue_area, vessel_area, vessel_density = calculate_density(
+        full_vessel_mask, mask, voxel_size
+    )
     branching_points_count, skeleton, branching_points = get_branching_point_count(
         vessel_mask, output_dir
     )

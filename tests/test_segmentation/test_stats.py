@@ -480,3 +480,65 @@ def test_create_heatmap_overwrite(tmp_path):
     heatmap = iio.imread(output_dir + "heatmap.tif")
     # The on-block (0,0) has a positive average; the off-block (1,1) is 0.
     assert heatmap[0:150, 0:150].mean() > 0
+
+
+def test_compute_slice_metrics_total_density_excludes_out_of_tissue_vessels(tmp_path, monkeypatch):
+    """The whole-slice 'total' row's vessel density must exclude vessels
+    outside the tissue mask and explicitly excluded vessels, matching the
+    per-region rows (which derive their vessel area from
+    ``full_vessel_mask = vessel_mask * mask * vessel_exclude``).
+
+    The pre-fix code passed the raw ``vessel_mask`` to ``calculate_density``
+    for the total row, so the total density included out-of-tissue and
+    excluded vessels -- making it higher than the sum of per-region
+    densities (a data inconsistency in the same output DataFrame).
+
+    This test builds a slice where vessels sit OUTSIDE the tissue mask
+    (mask=0 there) so the raw vessel_mask has vessels but
+    full_vessel_mask does not. Under the bug the total row's vessel area
+    is positive; under the fix it is 0 (matching the per-region rows,
+    which all see no in-tissue vessels).
+    """
+    import pandas as pd
+
+    captured = {}
+
+    def fake_to_excel(self, path, index=False):
+        captured["df"] = self
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+
+    # 30x30 image. Tissue mask covers only the left half (mask[:, :15]=1).
+    # Vessels sit ONLY in the right half (outside the tissue mask). The
+    # per-region rows see no in-tissue vessels (full_vessel_mask is all-zero
+    # in the tissue region), so the total row must also report vessel area 0.
+    mask = np.zeros((30, 30), dtype=np.uint8)
+    mask[:, :15] = 1  # tissue only in the left half
+    vessel_mask = np.zeros((30, 30), dtype=np.uint8)
+    vessel_mask[10:20, 20:30] = 1  # vessels only in the right half (outside tissue)
+    region_map = np.zeros((30, 30), dtype=np.uint8)
+    region_map[:, :15] = 1  # one tissue region
+    vessel_exclude = np.ones((30, 30), dtype=np.uint8)  # no explicit exclusion
+
+    output_dir = str(tmp_path) + "/"
+    compute_slice_metrics(
+        output_dir,
+        "test_slice",
+        mask,
+        vessel_mask,
+        region_map,
+        vessel_exclude,
+        voxel_size=0.65,
+    )
+
+    df = captured["df"]
+    total_rows = df[df["region"] == "total"]
+    assert len(total_rows) == 1
+    total_row = total_rows.iloc[0]
+    # The total row's vessel area must be 0: all vessels are outside the
+    # tissue mask, so full_vessel_mask has no vessels. Under the bug the
+    # raw vessel_mask (which has vessels in the right half) was passed,
+    # producing a positive vessel area inconsistent with the per-region
+    # rows (which all correctly see no in-tissue vessels).
+    assert total_row["vessel area (um2)"] == pytest.approx(0.0)
+    assert total_row["vessel density (um2/um2)"] == pytest.approx(0.0)
