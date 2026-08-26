@@ -14,12 +14,15 @@ overwrite behavior:
   4D-aware rechunk. That workaround was removed once the real function's
   rechunk was made 4D-aware (the rechunk now picks ``(1, 128, 128, 128)`` for
   4D stacked data).
-* ``convert_hdf5_to_zarr(use_memmap=True)`` — the default-arg path hits the
-  dead ``os.remove("temp.dat")`` on a file never written and raises
-  ``FileNotFoundError``. Characterized via ``xfail(strict=True,
-  raises=FileNotFoundError)`` so the Phase-6 fix forces marker-removal.
+* ``convert_hdf5_to_zarr`` no longer accepts a ``use_memmap`` parameter — the
+  dead ``os.remove("temp.dat")`` path that crashed with ``FileNotFoundError``
+  has been removed (clean break, no deprecation shim). The default call now
+  succeeds and writes a valid zarr; passing ``use_memmap=`` raises
+  ``TypeError``. The CLI ``--use_memmap`` flag is gone too.
 * ``convert_nifti_to_zarr`` / ``convert_nrrd_to_zarr`` — real
-  ``nib.load`` / ``nrrd.read`` round-trips (no Dask client involved).
+  ``nib.load`` / ``nrrd.read`` round-trips (no Dask client involved). The
+  misspelled ``chucks=`` parameter has been hard-renamed to ``chunks=``;
+  passing ``chucks=`` now raises ``TypeError``.
 * ``save_zarr`` overwrite — both ``overwrite=False`` (fresh directory) and
   ``overwrite=True`` (second call into an existing directory) must succeed;
   the second call overwrites the first via the symlink-aware
@@ -89,13 +92,12 @@ def _make_dask_mock():
 
 
 def test_convert_hdf5_to_zarr_round_trip(tmp_path):
-    """convert_hdf5_to_zarr(use_memmap=False) round-trips a 3-channel HDF5.
+    """convert_hdf5_to_zarr round-trips a 3-channel HDF5.
 
-    The Dask client is mocked (D-04); the real ``load_hdf5`` is exercised
-    (its rechunk is now 4D-aware). Asserts level-0 data equality, shape,
-    dtype, pyramid level count, and the submit→gather→persist call sequence
-    on the mock (one submit+gather pair per channel, one persist after
-    rechunk).
+    The Dask client is mocked; the real ``load_hdf5`` is exercised (its
+    rechunk is now 4D-aware). Asserts level-0 data equality, shape, dtype,
+    pyramid level count, and the submit→gather→persist call sequence on the
+    mock (one submit+gather pair per channel, one persist after rechunk).
     """
     arr = _make_synthetic_hdf5(str(tmp_path / "synth.h5"), n_channels=3)
     mock_client = _make_dask_mock()
@@ -106,7 +108,6 @@ def test_convert_hdf5_to_zarr_round_trip(tmp_path):
         convert_hdf5_to_zarr(
             str(tmp_path / "synth.h5"),
             zpath,
-            use_memmap=False,
             scales=(6.5, 6.5, 6.5),
             chunks=(16, 16, 16),
         )
@@ -128,26 +129,18 @@ def test_convert_hdf5_to_zarr_round_trip(tmp_path):
     assert mock_client.persist.call_count == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=FileNotFoundError,
-    reason="BUG-01: use_memmap dead code — os.remove('temp.dat') on a file never written",
-)
-def test_convert_hdf5_use_memmap_true_raises(tmp_path, monkeypatch):
-    """convert_hdf5_to_zarr(use_memmap=True) raises FileNotFoundError.
+def test_convert_hdf5_to_zarr_no_use_memmap_succeeds(tmp_path):
+    """convert_hdf5_to_zarr (no use_memmap kwarg) succeeds and writes a valid zarr.
 
-    The default-arg ``use_memmap=True`` path ends with
-    ``os.remove("temp.dat")`` on a file that was never written (the
-    ``map_file``/``map_file`` memmap code is dead — ``temp.dat`` is never
-    created). Characterized via strict xfail so the Phase-6 fix (removing the
-    dead code) forces marker-removal: an xpass becomes a hard failure.
+    The dead ``use_memmap``/``map_file`` path (which crashed with
+    ``FileNotFoundError`` on ``os.remove("temp.dat")`` against a file never
+    written) has been removed. The default call now writes the zarr and
+    returns normally; the level-0 data has the expected shape and a non-zero
+    block. This test fails RED against the current source because the
+    function still has ``use_memmap: bool = True`` as a default and still
+    calls ``os.remove("temp.dat")`` → ``FileNotFoundError`` on the default
+    path.
     """
-    # chdir into tmp_path so the relative "temp.dat" in os.remove resolves into
-    # the clean temp directory — without this, a stray temp.dat in the pytest
-    # CWD would be deleted and the test would XPASS (a hard failure under
-    # strict=True) instead of characterizing the FileNotFoundError bug.
-    monkeypatch.chdir(tmp_path)
-
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
     arr[4:12, 4:12, 4:12] = 1000
     h5path = str(tmp_path / "synth.h5")
@@ -155,23 +148,26 @@ def test_convert_hdf5_use_memmap_true_raises(tmp_path, monkeypatch):
         f.create_dataset("channel_0", data=arr)
 
     mock_client = _make_dask_mock()
+    out = str(tmp_path / "out.zarr")
     with patch("liom_toolkit.conversion.conversion.dask_client_manager") as mgr:
         mgr.get_client.return_value = mock_client
         convert_hdf5_to_zarr(
             h5path,
-            str(tmp_path / "out.zarr"),
-            use_memmap=True,
+            out,
             scales=(6.5, 6.5, 6.5),
             chunks=(16, 16, 16),
         )
+
+    nodes = load_zarr(out)
+    assert np.asarray(nodes[0].data[0]).shape == (1, 16, 16, 16)
+    assert np.asarray(nodes[0].data[0]).any()  # non-zero block present
 
 
 def test_convert_nifti_to_zarr_round_trip(tmp_path):
     """convert_nifti_to_zarr round-trips a real NIfTI via nib.load.
 
     No Dask client is involved — ``convert_nifti_to_zarr`` uses
-    ``da.from_array(nib.load(...).get_fdata())`` directly. Note the production
-    signature typo ``chucks=`` (not ``chunks=``) is matched verbatim.
+    ``da.from_array(nib.load(...).get_fdata())`` directly.
     """
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
     arr[4:12, 4:12, 4:12] = 1000
@@ -179,7 +175,7 @@ def test_convert_nifti_to_zarr_round_trip(tmp_path):
     nib.save(nib.Nifti1Image(arr, affine=np.eye(4)), npath)
 
     zpath = str(tmp_path / "nifti.zarr")
-    convert_nifti_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chucks=(16, 16, 16))
+    convert_nifti_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
 
     nodes = load_zarr(zpath)
     assert np.array_equal(np.asarray(nodes[0].data[0]), arr)
@@ -193,8 +189,7 @@ def test_convert_nrrd_to_zarr_round_trip(tmp_path):
     """convert_nrrd_to_zarr round-trips a real NRRD via nrrd.read.
 
     NRRD preserves the uint16 dtype (unlike NIfTI's float64 get_fdata), so
-    both data equality AND dtype are asserted. Note the production signature
-    typo ``chucks=`` is matched verbatim.
+    both data equality AND dtype are asserted.
     """
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
     arr[4:12, 4:12, 4:12] = 1000
@@ -202,7 +197,7 @@ def test_convert_nrrd_to_zarr_round_trip(tmp_path):
     nrrd.write(npath, arr)
 
     zpath = str(tmp_path / "nrrd.zarr")
-    convert_nrrd_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chucks=(16, 16, 16))
+    convert_nrrd_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
 
     nodes = load_zarr(zpath)
     assert np.array_equal(np.asarray(nodes[0].data[0]), arr)
@@ -237,3 +232,68 @@ def test_save_zarr_overwrite(tmp_path, overwrite):
         save_zarr(overwritten, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
         nodes = load_zarr(zpath)
         assert np.array_equal(np.asarray(nodes[0].data[0]), overwritten)
+
+
+def test_convert_nifti_to_zarr_rejects_chucks_kwarg(tmp_path):
+    """convert_nifti_to_zarr rejects the misspelled ``chucks=`` kwarg.
+
+    The parameter has been hard-renamed ``chucks``→``chunks`` (clean break,
+    no deprecation shim). Passing the old spelling as a keyword must raise
+    ``TypeError`` rather than being silently accepted or aliased. Fails RED
+    against the current source because the signature still spells the
+    parameter ``chucks=`` (no TypeError raised).
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    npath = str(tmp_path / "synth.nii.gz")
+    nib.save(nib.Nifti1Image(arr, affine=np.eye(4)), npath)
+
+    with pytest.raises(TypeError):
+        convert_nifti_to_zarr(
+            npath,
+            str(tmp_path / "out.zarr"),
+            scales=(6.5, 6.5, 6.5),
+            chucks=(16, 16, 16),
+        )
+
+
+def test_convert_hdf5_to_zarr_rejects_use_memmap_kwarg(tmp_path):
+    """convert_hdf5_to_zarr rejects the removed ``use_memmap=`` kwarg.
+
+    The dead ``use_memmap``/``map_file`` path has been removed (clean break,
+    no deprecation shim). Passing ``use_memmap=`` must raise ``TypeError``
+    rather than being silently ignored. Fails RED against the current source
+    because the signature still accepts ``use_memmap=``.
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    h5path = str(tmp_path / "synth.h5")
+    with h5py.File(h5path, "w") as f:
+        f.create_dataset("channel_0", data=arr)
+
+    mock_client = _make_dask_mock()
+    with patch("liom_toolkit.conversion.conversion.dask_client_manager") as mgr:
+        mgr.get_client.return_value = mock_client
+        with pytest.raises(TypeError):
+            convert_hdf5_to_zarr(
+                h5path,
+                str(tmp_path / "out.zarr"),
+                use_memmap=True,
+                scales=(6.5, 6.5, 6.5),
+                chunks=(16, 16, 16),
+            )
+
+
+def test_cli_help_has_no_use_memmap_flag():
+    """The HDF5→Zarr CLI parser does not register a ``--use_memmap`` flag.
+
+    The dead ``--use_memmap`` CLI flag has been removed alongside the
+    library parameter. Inspecting the parser's registered actions must find
+    no option whose ``option_strings`` contain ``--use_memmap``. Fails RED
+    against the current source because the parser still registers the flag.
+    """
+    from liom_toolkit.scripts.liom_convert_hdf5_to_zarr import _build_argument_parser
+
+    parser = _build_argument_parser()
+    for action in parser._actions:
+        assert "--use_memmap" not in action.option_strings
