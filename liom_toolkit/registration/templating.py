@@ -243,6 +243,12 @@ def build_template(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         )
 
+    # Validate image_list early so a caller using the default (None) gets an
+    # explicit, named error instead of an opaque TypeError from len(None) /
+    # None[0] deeper in the function.
+    if image_list is None or len(image_list) == 0:
+        raise ValueError("build_template requires a non-empty image_list.")
+
     if weights is None:
         weights = np.repeat(1.0 / len(image_list), len(image_list))
     weights = [x / sum(weights) for x in weights]
