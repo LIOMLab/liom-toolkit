@@ -291,6 +291,7 @@ def create_full_zarr_volume(
         import ants
 
         from liom_toolkit.registration import align_annotations_to_volume
+        from liom_toolkit.utils.allen_sdk import download_allen_atlas
         from liom_toolkit.utils.ants import load_ants_image_from_node
     except ImportError:
         raise ImportError(
@@ -324,10 +325,16 @@ def create_full_zarr_volume(
     target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
     template = ants.image_read(template_path)
 
+    # Shared atlas resolution: the download and the align call MUST use the
+    # same resolution so the downloaded atlas matches the annotation volume
+    # produced by align_annotations_to_volume. A single local constant makes
+    # the invariant explicit instead of relying on two coincidentally-coupled
+    # literals; exposing it as a public parameter is a future API change.
+    atlas_resolution = 25
     if not use_custom_atlas:
-        # TODO: Fix the circular import caused by importing download_allen_atlas
-        # base_atlas, _ = download_allen_atlas(temp_dir.name, resolution=atlas_resolution, keep_nrrd=False)
-        pass
+        base_atlas, _ = download_allen_atlas(
+            temp_dir.name, resolution=atlas_resolution, keep_nrrd=False
+        )
     else:
         base_atlas = ants.image_read(atlas_path)
 
@@ -336,7 +343,7 @@ def create_full_zarr_volume(
         mask=mask,
         template=template,
         atlas=base_atlas,
-        resolution=25,
+        resolution=atlas_resolution,
         keep_intermediary=False,
         data_dir=temp_dir.name,
     )
