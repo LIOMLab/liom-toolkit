@@ -34,7 +34,6 @@ dependencies = [
     "bokeh>=3.1.0", # Bokeh is used for the dask dashboard
     'distributed',
     'opencv-python',
-    'patchify',
     'natsort',
 ]
 
@@ -57,7 +56,7 @@ ai = [
     "scikit-learn"
 ]
 antspy = [
-    'antspyx>=0.5.3',
+    'antspyx>=0.6.3',
 ]
 
 all = [
