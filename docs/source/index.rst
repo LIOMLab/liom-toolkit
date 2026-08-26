@@ -64,7 +64,6 @@ The package requires the following packages to be installed and will attempt to 
 - torch
 - torchvision
 - wandb
-- patchify
 - natsort
 - albumentations
 
