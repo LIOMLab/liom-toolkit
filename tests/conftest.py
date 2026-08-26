@@ -53,7 +53,11 @@ def synthetic_ants_image():
     pytest.importorskip("ants")
     import ants
 
-    arr = np.random.rand(8, 8, 8).astype("float32")
+    # Seeded RNG for reproducible fixture data -- matches the pattern in
+    # test_model.py:_write_tiny_png (np.random.default_rng(0)) so test
+    # failures involving this fixture are reproducible across runs.
+    rng = np.random.default_rng(seed=42)
+    arr = rng.random((8, 8, 8)).astype("float32")
     # antspyx 0.6.x setDirection expects a 2D direction matrix
     # (Sequence[Sequence[float]]), not the raveled length-9 form accepted by
     # 0.5.x. Passing np.eye(3) keeps the identity direction in the 0.6.x shape.

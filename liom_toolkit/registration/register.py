@@ -403,7 +403,7 @@ def align_annotations_to_volume(
     # Create the data directory if it does not exist
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-        # Start registration process
+    # Start registration process
     pbar.set_description("Starting registration process")
     # Register the volume to the template
     _, syn_transform, _rigid_transform = deformably_register_volume(
