@@ -50,11 +50,11 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
             precision_score,
             recall_score,
         )
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install scikit-learn (ai extra) to use the vessel "
             "segmentation metrics of the LIOM toolkit."
-        )
+        ) from e
 
     y_true = y_true > 0.5
     y_true = y_true.astype(np.uint8)
@@ -86,10 +86,10 @@ def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
     """
     try:
         import torch
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     x = np.expand_dims(image, axis=0)
     x = np.expand_dims(x, axis=0)
     x = x.astype(np.float32)

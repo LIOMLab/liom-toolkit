@@ -49,10 +49,10 @@ def predict_one(
     """
     try:
         import torch
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     image = iio.imread(img_path)
     H = image.shape[0]
     W = image.shape[1]
@@ -139,10 +139,10 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     """
     try:
         import torch  # noqa: F401 -- do_predict uses torch; guard gives actionable error
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     new_volume = zarr.open(
         zarr_location,
         mode="w",
@@ -175,10 +175,10 @@ def do_predict(model: VsegModel, patch: torch.Tensor) -> np.ndarray:
     """
     try:
         import torch
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     if patch.ndim == 3:
         patch = patch.unsqueeze(0)
     with torch.no_grad():

@@ -301,10 +301,10 @@ def create_full_zarr_volume(
         from liom_toolkit.registration import align_annotations_to_volume
         from liom_toolkit.utils.allen_sdk import download_allen_atlas
         from liom_toolkit.utils.ants import load_ants_image_from_node
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to create the full zarr volume of the LIOM toolkit."
-        )
+        ) from e
     temp_dir = tempfile.TemporaryDirectory()
     resolution_level = 2
 

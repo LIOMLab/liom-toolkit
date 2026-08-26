@@ -272,10 +272,10 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTs
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the Allen reference space functions of the LIOM toolkit."
-        )
+        ) from e
     resolution = resolution / 1000
     atlas_data, _atlas_header = nrrd.read(atlas_file)
     atlas_data = atlas_data.astype("uint32")
@@ -408,10 +408,10 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsIma
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the Allen reference space functions of the LIOM toolkit."
-        )
+        ) from e
     # Set axis to RAS
     volume = np.moveaxis(volume, [0, 1, 2], [1, 2, 0])
 

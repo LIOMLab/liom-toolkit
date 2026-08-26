@@ -34,10 +34,10 @@ def convert_dask_to_ants(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
-        )
+        ) from e
     # Compute dask array to get values
     array = dask_array.compute()
 
@@ -73,10 +73,10 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) 
     """
     try:
         import ants  # noqa: F401 -- imported for the actionable error; convert_dask_to_ants re-imports
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
-        )
+        ) from e
     image = load_zarr_image_from_node(node, resolution_level)
     if len(image.shape) == 4:
         image = image[channel, :, :, :]

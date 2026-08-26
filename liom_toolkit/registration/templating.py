@@ -61,10 +61,10 @@ def create_template(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     template_images = []
     template_masks = []
     for i, image in tqdm(
@@ -158,10 +158,10 @@ def pre_register_brain(
     try:
         import ants
         from ants import apply_transforms
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     image_reg_transform = ants.registration(
         fixed=template, moving=volume, moving_mask=mask, type_of_transform=registration_type
     )
@@ -247,10 +247,10 @@ def build_template(
     try:
         import ants
         from ants.core import ants_image_io as iio
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
 
     # Validate image_list early so a caller using the default (None) gets an
     # explicit, named error instead of an opaque TypeError from len(None) /
@@ -428,10 +428,10 @@ def build_template_for_resolution(
     try:
         import ants
         from ants import apply_transforms
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     # Use a context manager so the temp dir is cleaned up on every exit
     # path, not just the success path. Without this, a download,
     # create_template, segment_3d, or image_write failure would leak the
@@ -545,10 +545,10 @@ def load_volume_for_registration(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     brain_volume = load_ants_image_from_node(
         image_node, resolution_level=resolution_level, channel=0
     )

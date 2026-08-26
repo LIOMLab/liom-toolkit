@@ -56,10 +56,10 @@ def deformably_register_volume(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     _rigid, rigid_transform = rigidly_register_volume(
         image,
         mask,
@@ -126,10 +126,10 @@ def rigidly_register_volume(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     rigid_transform = ants.registration(
         fixed=template,
         moving=image,
@@ -186,10 +186,10 @@ def get_transformations_for_atlas(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     syn_allen, syn_transform_allen, _rigid_transform_allen = deformably_register_volume(
         template_allen,
         None,
@@ -261,10 +261,10 @@ def align_brain_region_to_atlas(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     if resolution not in [10, 25, 50, 100]:
         raise ValueError("Resolution must be 10, 25, 50 or 100")
 
@@ -384,10 +384,10 @@ def align_annotations_to_volume(
     """
     try:
         import ants
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     if resolution not in [10, 25, 50, 100]:
         raise ValueError("Resolution must be 10, 25, 50 or 100")
 
@@ -449,10 +449,10 @@ def align_volume_to_allen(
     """
     try:
         import ants  # noqa: F401 -- imported for the actionable error; deformably_register_volume re-imports
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
-        )
+        ) from e
     # Use a context manager so the temp dir is cleaned up on every exit
     # path, not just the success path. Without this, a download or
     # registration failure would leak the temp dir on disk.

@@ -155,15 +155,11 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 # ratchet debt and picked up by a later phase:
 #   E501, B008, E721 ............ Phase 7 / LINT-01 (manual line breaks,
 #                                 default-arg refactors, type-comparison fix)
-#   B904 ....................... Phase 6 / BUG-01 (raise ... from err / None
-#                                 when the assert->raise + exception-chain
-#                                 work touches each raise site)
 # See .planning/STATE.md "Open Gaps to Address" for the tracked debt list.
 ignore = [
     "COM812",  # formatter conflict
     "ISC001",  # formatter conflict
     "E501",    # ratchet: Phase 7 / LINT-01 — long string/signature lines format can't break
-    "B904",    # ratchet: Phase 6 / BUG-01 — raise-without-from (semantic, tied to assert->raise work)
     "B008",    # ratchet: Phase 7 / LINT-01 — torch.device in default args (semantic refactor)
     "E721",    # ratchet: Phase 7 / LINT-01 — type comparison (semantic)
 ]

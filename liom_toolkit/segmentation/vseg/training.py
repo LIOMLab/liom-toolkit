@@ -83,10 +83,10 @@ def evaluate(
     """
     try:
         import torch
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     # Initialize epoch loss to 0
     # Added metrics
     epoch_loss = 0.0
@@ -237,17 +237,17 @@ def train_model(
         from .dataset import OmeZarrLabelDataSet
         from .loss import DiceBCELoss
         from .model import VsegModel
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
-        )
+        ) from e
     try:
         import wandb
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Please install wandb (ai extra) to use the vessel segmentation "
             "training of the LIOM toolkit."
-        )
+        ) from e
     if dev is None:
         dev = torch.device("cuda")
     # Setup training parameters and wandb run
