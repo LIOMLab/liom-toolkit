@@ -27,6 +27,7 @@ Hybrid suite per D-05, covering the re-forked ``build_template`` (05-02),
 
 from __future__ import annotations
 
+import inspect
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -352,3 +353,76 @@ def test_pre_register_brain_no_kwarg_wiring(mock_ants_templating):
         "pre_register_brain is an internal helper per D-01 — its ants.registration "
         "call must NOT receive use_legacy_histogram_matching (relies on default)"
     )
+
+
+@pytest.mark.antspy
+def test_build_template_uses_mkdtemp_not_mktemp(synthetic_ants_image):
+    """build_template creates its work_dir via tempfile.mkdtemp, not mktemp.
+
+    This is a GREEN-verify regression test for the prior-phase TOCTOU fix in
+    ``build_template``: the work_dir is created via ``tempfile.mkdtemp()``
+    (an atomically-unique directory with no race window), NOT via the
+    deprecated ``tempfile.mktemp`` (a predictable-filename vector). A failure
+    here means the prior fix regressed, not that this test drives new
+    behavior.
+
+    The test has two halves:
+
+    * **Source-level half** — reads ``templating.py`` as text and asserts
+      the ``build_template`` function body contains ``mkdtemp`` and does NOT
+      contain a deprecated ``mktemp(`` call form. This is an exception to
+      AGENTS.md §5's "no static-source tests" rule because the artifact
+      under verification IS a source-level construct (which API name is
+      written). The negative check targets the literal ``mktemp(`` (call
+      form with opening paren) and ``tempfile.mktemp`` followed by a
+      non-``d`` character — ``mkdtemp`` contains the substring ``mktemp``
+      but NOT ``mktemp(``, so the check does not false-positive on the fix
+      itself.
+
+    * **Runtime half** — a real ``build_template`` call on two 8^3 antspy
+      images with ``type_of_transform="Rigid"`` and ``iterations=1``
+      produces a template without raising, proving the mkdtemp work_dir
+      path executes end-to-end. This is the behavior-exercising part that
+      satisfies AGENTS.md §5.
+    """
+    pytest.importorskip("ants")  # body-level per pytest #9542
+    import ants
+
+    from liom_toolkit.registration.templating import build_template
+
+    # --- Source-level half ------------------------------------------------
+    # Scope the read to build_template's body — the actual fix locus — so a
+    # future unrelated mktemp call elsewhere in the module cannot mask a
+    # regression here.
+    source = inspect.getsource(build_template)
+    assert "mkdtemp" in source, (
+        "build_template must create its work_dir via tempfile.mkdtemp "
+        "(the secure atomically-unique directory helper)"
+    )
+    # The deprecated call form is `mktemp(` (with the opening paren) — this
+    # unambiguously identifies a call (both `mktemp(` and the qualified
+    # `tempfile.mktemp(` contain the literal `mktemp(`). `mkdtemp` contains
+    # the substring `mktemp` but NOT `mktemp(`, so this check does not
+    # false-positive on the fix itself. We check the call form rather than
+    # the bare `tempfile.mktemp` substring because the function body
+    # legitimately contains a documentation comment that names
+    # `tempfile.mktemp` when describing the fork divergence from upstream —
+    # that prose is not a call and must not trip the regression guard.
+    assert "mktemp(" not in source, (
+        "build_template must NOT call the deprecated tempfile.mktemp() "
+        "(TOCTOU-vulnerable predictable-filename vector)"
+    )
+
+    # --- Runtime half -----------------------------------------------------
+    # Mirror test_build_template_round_trip_0_6_3: two 8^3 antspy images,
+    # Rigid transform (not SyN) for CI speed, iterations=1.
+    img1 = synthetic_ants_image
+    img2 = ants.from_numpy(
+        np.random.rand(8, 8, 8).astype("float32"),
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        direction=np.eye(3),
+    )
+    template = build_template(image_list=[img1, img2], iterations=1, type_of_transform="Rigid")
+    assert template is not None
+    assert hasattr(template, "numpy")
