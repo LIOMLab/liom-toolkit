@@ -20,10 +20,11 @@ overwrite behavior:
   raises=FileNotFoundError)`` so the Phase-6 fix forces marker-removal.
 * ``convert_nifti_to_zarr`` / ``convert_nrrd_to_zarr`` — real
   ``nib.load`` / ``nrrd.read`` round-trips (no Dask client involved).
-* ``save_zarr`` overwrite — ``overwrite=False`` (fresh directory) is a real
-  passing test; ``overwrite=True`` (second call into an existing directory)
-  hits the ``os.mkdir`` race and raises ``FileExistsError``, characterized
-  via param-level ``xfail(strict=True, raises=FileExistsError)``.
+* ``save_zarr`` overwrite — both ``overwrite=False`` (fresh directory) and
+  ``overwrite=True`` (second call into an existing directory) must succeed;
+  the second call overwrites the first via the symlink-aware
+  ``create_directory(overwrite=True)`` helper, and the overwritten data
+  round-trips via ``load_zarr``.
 
 The Dask-mock pattern (``patch("liom_toolkit.conversion.conversion.dask_client_manager")``)
 patches at the import site inside ``conversion.py`` — NOT at
@@ -209,34 +210,30 @@ def test_convert_nrrd_to_zarr_round_trip(tmp_path):
     assert len(nodes[0].data) == 5
 
 
-@pytest.mark.parametrize(
-    "overwrite",
-    [
-        False,
-        pytest.param(
-            True,
-            marks=pytest.mark.xfail(
-                strict=True,
-                raises=FileExistsError,
-                reason="MP-8/BUG-01: save_zarr os.mkdir overwrite race",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("overwrite", [False, True])
 def test_save_zarr_overwrite(tmp_path, overwrite):
-    """save_zarr fresh-directory path passes; overwrite path raises FileExistsError.
+    """save_zarr fresh-directory and overwrite paths both succeed.
 
-    ``save_zarr`` uses ``os.mkdir(zarr_file)`` (conversion.py:99) which raises
-    ``FileExistsError`` if the directory already exists — there is no
-    overwrite handling. The ``overwrite=False`` branch is a real passing test
-    of the fresh-directory path; the ``overwrite=True`` branch (a second call
-    into the same existing directory) is characterized via param-level strict
-    xfail so the Phase-6 fix (replacing ``os.mkdir`` with overwrite-aware
-    creation) forces marker-removal.
+    ``save_zarr`` uses the symlink-aware ``create_directory`` helper from
+    ``utils/zarr_writer.py`` with ``overwrite=True``: a second call into an
+    existing zarr store directory ``rmtree``'s the store then recreates it
+    before the zarr write proceeds (zarr stores are directories with
+    subdirectories, so ``shutil.rmtree`` is the correct clearing primitive,
+    not ``os.remove`` which only handles flat files). Both the
+    ``overwrite=False`` (fresh directory) and ``overwrite=True`` (second call
+    into an existing directory) branches must succeed without
+    ``FileExistsError``; the overwritten data must round-trip via
+    ``load_zarr`` and match the second write, not the first.
     """
     data = np.zeros((16, 16, 16), dtype=np.uint16)
     zpath = str(tmp_path / "vol.zarr")
     save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
     if overwrite:
-        # Second call into the existing directory -> os.mkdir FileExistsError.
-        save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+        # Second call into the existing directory must succeed (overwrite-safe
+        # via create_directory(overwrite=True)). Write a distinct volume so
+        # the round-trip assertion can confirm the second write replaced the
+        # first rather than silently leaving stale data.
+        overwritten = np.full((16, 16, 16), 7, dtype=np.uint16)
+        save_zarr(overwritten, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+        nodes = load_zarr(zpath)
+        assert np.array_equal(np.asarray(nodes[0].data[0]), overwritten)
