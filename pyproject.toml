@@ -118,7 +118,18 @@ markers = [
 # surface so upcoming breaking dependency changes are visible. Add targeted
 # filters (by message/module) here only when a specific noisy warning is
 # observed during a test run.
-filterwarnings = []
+filterwarnings = [
+    # ome_zarr.writer.write_labels declares ``scaler: Scaler | None =
+    # Scaler(order=0)`` as a default argument, so ``Scaler(order=0)`` is
+    # instantiated at function-definition (module-import) time and fires this
+    # DeprecationWarning on EVERY import of ``ome_zarr.writer`` — including
+    # imports that only use ``write_image`` (which defaults ``scaler=None``
+    # and never instantiates ``Scaler``). We do not use ``write_labels`` or
+    # the ``Scaler`` class anywhere in the package; this is purely upstream
+    # noise until ome-zarr removes the def-time default. Filter by exact
+    # message so any OTHER ome-zarr deprecation still surfaces.
+    "ignore:Call to deprecated class Scaler:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py312"   # NOT py314 — load-bearing for 3.12 forward-ref support (from __future__ import annotations stays)

@@ -10,7 +10,7 @@ from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
 from ome_zarr.scale import ArrayLike
-from ome_zarr.writer import Methods, write_labels
+from ome_zarr.writer import Methods, write_image, write_label_metadata
 from tqdm.auto import tqdm
 
 from .utils import convert_to_png_for_saving
@@ -247,7 +247,7 @@ def save_label_to_zarr(
         greater than 0 the writer upscales the label to the main image's
         full-res (level-0) shape — read from the same ``zarr_file`` — using
         nearest-neighbor resize (``order=0``) so integer label values are
-        never interpolated. ``write_labels`` then downsamples with
+        never interpolated. ``write_image`` then downsamples with
         ``method=Methods.NEAREST``.
     :type resolution_level: int
     :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
@@ -278,23 +278,37 @@ def save_label_to_zarr(
     file = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=file)
 
-    label_metadata = {"colors": color_dict, "source": {"image": "../../"}}
-
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axis_names)
     scale_factors = build_scale_factors(n_levels, axis_names)
     scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
 
-    write_labels(
-        labels=label,
-        group=root,
+    # Write the label pyramid with ``write_image`` + ``write_label_metadata``
+    # instead of the deprecated ``write_labels`` wrapper. ``write_labels``'
+    # default ``scaler: Scaler | None = Scaler(order=0)`` argument is
+    # instantiated at function-definition time (module import), which fires a
+    # DeprecationWarning on every import of ``ome_zarr.writer`` even though we
+    # pass ``scaler=None``. ``write_image`` defaults ``scaler=None`` (no
+    # def-time instantiation) and writes the same multiscale pyramid to the
+    # group we pass, so we reproduce the ``labels/{name}`` layout
+    # ``write_labels`` produced: pyramid datasets under ``labels/{name}/i``
+    # plus ``image-label`` metadata on the ``labels`` group.
+    labels_group = root.require_group("labels")
+    label_subgroup = labels_group.require_group(name)
+    write_image(
+        image=label,
+        group=label_subgroup,
         axes=axes,
         name=name,
         scale_factors=scale_factors,
         method=Methods.NEAREST,
         scale=scale,
-        label_metadata=label_metadata,
         storage_options={"chunks": chunks},
-        scaler=None,
+    )
+    write_label_metadata(
+        group=labels_group,
+        name=name,
+        colors=color_dict,
+        source={"image": "../../"},
     )
 
 
