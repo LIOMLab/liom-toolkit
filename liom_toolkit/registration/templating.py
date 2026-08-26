@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
-from tempfile import mktemp
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -179,17 +179,19 @@ def build_template(
     iterations: int = 3,
     gradient_step: float = 0.2,
     blending_weight: float = 0.75,
-    weights: bool | None = None,
+    weights: list | None = None,
     masks: list | None = None,
     remove_temp_output: bool = False,
     save_progress: bool = False,
+    useNoRigid: bool = True,
+    output_dir: str | None = None,
     type_of_transform: str = "SyN",
     **kwargs,
 ) -> ANTsImage:
     """
     Estimate an optimal template from an input image_list
     A modification of the ANTsPy function build_template to use masks.
-    Source here: https://antspyx.readthedocs.io/en/latest/_modules/ants/registration/build_template.html#build_template
+    Source here: https://antspyx.readthedocs.io/en/v0.6.3/_modules/ants/registration/build_template.html#build_template
 
     :param initial_template: The initial template to use
     :type initial_template: ANTsImage
@@ -209,6 +211,15 @@ def build_template(
     :type remove_temp_output: bool
     :param save_progress: Whether to save the progress of the template building
     :type save_progress: bool
+    :param useNoRigid: Whether to exclude the rigid component when averaging
+        the per-image affine transforms (uses
+        ants.average_affine_transform_no_rigid when True,
+        ants.average_affine_transform when False)
+    :type useNoRigid: bool
+    :param output_dir: Optional directory to retain all intermediate
+        transforms in. When None (default) a secure temporary directory is
+        used and removed at the end; when set, the directory is kept.
+    :type output_dir: str | None
     :param type_of_transform: The type of transform to use for registration
     :type type_of_transform: str
     :param kwargs: Extra arguments passed to ants registration
@@ -226,8 +237,6 @@ def build_template(
     """
     try:
         import ants
-        import ants.utils as utils
-        from ants import apply_transforms, registration, resample_image_to_target
         from ants.core import ants_image_io as iio
     except ImportError:
         raise ImportError(
@@ -241,11 +250,22 @@ def build_template(
         initial_template = image_list[0] * 0
         for i in range(len(image_list)):
             temp = image_list[i] * weights[i]
-            temp = resample_image_to_target(temp, initial_template)
+            temp = ants.resample_image_to_target(temp, initial_template)
             initial_template = initial_template + temp
 
     if not os.path.exists("template_progress") and save_progress:
         os.makedirs("template_progress")
+
+    # Deliberate fork divergence from upstream antspyx 0.6.3, which still
+    # uses the TOCTOU-vulnerable tempfile.mktemp for work_dir. mkdtemp
+    # atomically creates a unique directory (no race window); work_dir is
+    # used as a directory by make_outprefix's os.makedirs, so a
+    # file-creating helper (NamedTemporaryFile/mkstemp) would break that.
+    work_dir = tempfile.mkdtemp() if output_dir is None else output_dir
+
+    def make_outprefix(k: int):
+        os.makedirs(os.path.join(work_dir, f"img{k:04d}"), exist_ok=True)
+        return os.path.join(work_dir, f"img{k:04d}", "out")
 
     xavg = initial_template.clone()
     for i in tqdm(
@@ -256,42 +276,88 @@ def build_template(
         unit="iteration",
         position=1,
     ):
+        affinelist = []
         for k in range(len(image_list)):
             if masks is None:
-                w1 = registration(
-                    xavg, image_list[k], type_of_transform=type_of_transform, **kwargs
-                )
-            else:
-                w1 = registration(
+                w1 = ants.registration(
                     xavg,
                     image_list[k],
                     type_of_transform=type_of_transform,
+                    outprefix=make_outprefix(k),
+                    **kwargs,
+                )
+            else:
+                w1 = ants.registration(
+                    xavg,
+                    image_list[k],
+                    type_of_transform=type_of_transform,
+                    outprefix=make_outprefix(k),
                     moving_mask=masks[k],
                     **kwargs,
                 )
+            L = len(w1["fwdtransforms"])
+            affinelist.append(w1["fwdtransforms"][L - 1])
             if k == 0:
-                wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                if L == 2:
+                    wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
                 xavgNew = w1["warpedmovout"] * weights[k]
             else:
-                # Remove the transform and warping when not needed, when not last i
-                wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                if L == 2:
+                    wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
                 xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
+                # Fork divergence from upstream 0.6.3: per-iteration cleanup
+                # of per-image transform files. Upstream only does an
+                # end-of-function shutil.rmtree(work_dir), but mid-run temp
+                # data grows too large on the lab system and causes the
+                # algorithm to fail, so the per-image cleanup is required.
+                # Skip the last iteration so the final transforms remain
+                # available to the affine-averaging block below.
                 if i < iterations - 1 and remove_temp_output:
                     for fwd_transform in w1["fwdtransforms"]:
                         os.remove(fwd_transform)
                     for inv_transform in w1["invtransforms"]:
                         os.remove(inv_transform)
-        print(wavg.abs().mean())
-        wscl = (-1.0) * gradient_step
-        wavg = wavg * wscl
-        wavgfn = mktemp(suffix=".nii.gz")
-        iio.image_write(wavg, wavgfn)
-        # Keep for debugging/visualization
-        xavg = apply_transforms(xavgNew, xavgNew, wavgfn)
+
+        if useNoRigid:
+            avgaffine = ants.average_affine_transform_no_rigid(affinelist)
+        else:
+            avgaffine = ants.average_affine_transform(affinelist)
+        afffn = os.path.join(work_dir, "avgAffine.mat")
+        ants.write_transform(avgaffine, afffn)
+
+        if L == 2:
+            print(wavg.abs().mean())
+            wscl = (-1.0) * gradient_step
+            wavg = wavg * wscl
+            wavgA = ants.apply_transforms(
+                fixed=xavgNew,
+                moving=wavg,
+                imagetype=1,
+                transformlist=afffn,
+                whichtoinvert=[1],
+            )
+            wavgfn = os.path.join(work_dir, "avgWarp.nii.gz")
+            iio.image_write(wavgA, wavgfn)
+            xavg = ants.apply_transforms(
+                fixed=xavgNew,
+                moving=xavgNew,
+                transformlist=[wavgfn, afffn],
+                whichtoinvert=[0, 1],
+            )
+        else:
+            xavg = ants.apply_transforms(
+                fixed=xavgNew,
+                moving=xavgNew,
+                transformlist=[afffn],
+                whichtoinvert=[1],
+            )
         if blending_weight is not None:
-            xavg = xavg * blending_weight + utils.iMath(xavg, "Sharpen") * (1.0 - blending_weight)
+            xavg = xavg * blending_weight + ants.iMath(xavg, "Sharpen") * (1.0 - blending_weight)
         if save_progress:
-            ants.image_write(xavg, f"template_progress/template_{i}.nii.gz")
+            iio.image_write(xavg, f"template_progress/template_{i}.nii.gz")
+
+    if output_dir is None:
+        shutil.rmtree(work_dir)
     return xavg
 
 
