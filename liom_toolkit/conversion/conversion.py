@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import tempfile
 
+from pathlib import Path
+
 import dask.array as da
 import h5py
 import nibabel as nib
@@ -17,6 +19,8 @@ from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import (
+    _DEFAULT_N_LEVELS,
+    _NGFF_LENGTH_UNITS,
     build_scale_factors,
     create_mask_from_zarr,
     generate_axes_dict,
@@ -28,6 +32,7 @@ from liom_toolkit.utils.io import (
     save_label_to_zarr,
     validate_n_levels,
 )
+from liom_toolkit.utils.zarr_writer import create_directory
 
 
 def load_hdf5(hdf5_file: str) -> da.Array:
@@ -111,8 +116,11 @@ def save_zarr(
         in. Defaults to ``"micrometer"`` to preserve existing callers.
     :type unit: str
     """
-    if unit not in {"micrometer", "millimeter", "meter", "nanometer"}:
-        raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
+    if unit not in _NGFF_LENGTH_UNITS:
+        raise ValueError(
+            f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit "
+            f"(one of {sorted(_NGFF_LENGTH_UNITS)})."
+        )
 
     n_dims = len(data.shape)
     axes = generate_axes_dict(n_dims, unit=unit)
@@ -122,19 +130,13 @@ def save_zarr(
     axis_names = [ax["name"] for ax in axes]
 
     print("Saving...")
-    # Use the symlink-aware create_directory helper instead of a bare
-    # os.mkdir (which has no overwrite support and races on existing paths).
-    # Function-scope import avoids a circular import with utils.zarr_writer
-    # at module load time.
-    from pathlib import Path
-
-    from liom_toolkit.utils.zarr_writer import create_directory
-
+    # Symlink-aware directory creation (FileExistsError on collision when
+    # overwrite=False — no silent clobber). Imported at module top.
     create_directory(Path(zarr_file), overwrite=False)
     store = parse_url(zarr_file, mode="w").store
     root = zarr.group(store=store)
 
-    n_levels = validate_n_levels(4, data.shape, axis_names)
+    n_levels = validate_n_levels(_DEFAULT_N_LEVELS, data.shape, axis_names)
     scale_factors = build_scale_factors(n_levels, axis_names)
     scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
 
