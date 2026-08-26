@@ -95,3 +95,43 @@ def test_segment_2d_image_even_threshold_size_raises(tmp_path, bimodal_2d):
             local_threshold=True,
             local_threshold_size=2,
         )
+
+
+def test_segment_2d_image_overwrite_safe_on_rerun(tmp_path, bimodal_2d):
+    """A second ``segment_2d_image`` call into an existing ``output_dir``
+    must not raise ``FileExistsError`` and must clear stale output files
+    from the previous run.
+
+    The pre-fix code used ``if not os.path.exists(output_dir):
+    os.mkdir(output_dir)`` -- the exists-check is racy under concurrent
+    calls and, on a re-run into an existing directory, the stale contents
+    are NOT cleared, so old ``_mask.tif``/``_vessel_mask.tif`` files from a
+    previous run leak into the new run's output. The fix uses the shared
+    overwrite-safe ``create_directory`` helper (shutil.rmtree + recreate on
+    an existing directory), the same pattern applied to ``save_zarr``,
+    ``compute_slice_metrics``, and ``create_heatmap`` in the D-12 sweep.
+    """
+    output_dir = str(tmp_path) + "/"
+
+    # First run -- creates the directory and writes both output files.
+    segment_2d_image(output_dir, bimodal_2d, "test", local_threshold=False)
+    mask_path = tmp_path / "test_mask.tif"
+    vessel_mask_path = tmp_path / "test_vessel_mask.tif"
+    assert mask_path.exists()
+    assert vessel_mask_path.exists()
+
+    # Drop a stale sentinel file that the second run must clear (proves the
+    # overwrite path rmtree's the directory contents, not just re-uses it).
+    stale = tmp_path / "stale_from_previous_run.tif"
+    stale.write_bytes(b"\x00")
+    assert stale.exists()
+
+    # Second run into the SAME existing output_dir -- must not raise
+    # FileExistsError, and must clear the stale sentinel.
+    segment_2d_image(output_dir, bimodal_2d, "test", local_threshold=False)
+
+    assert mask_path.exists()
+    assert vessel_mask_path.exists()
+    # The stale sentinel from the first run is gone -- the directory was
+    # cleared before the second run wrote its outputs.
+    assert not stale.exists()

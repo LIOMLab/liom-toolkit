@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import imageio.v3 as iio
 import numpy as np
 from scipy.ndimage import median_filter
@@ -168,8 +166,18 @@ def segment_2d_image(
             f"Local thresholding window size must be odd, got {local_threshold_size}"
         )
 
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+    # Overwrite-safe output directory creation via the symlink-aware
+    # create_directory helper from utils.zarr_writer: a second call into an
+    # existing output_dir shutil.rmtree's the directory then recreates it,
+    # eliminating the FileExistsError race on re-run and clearing stale
+    # _mask.tif / _vessel_mask.tif files from a previous run. Function-scope
+    # import avoids a circular import with utils.zarr_writer at module load
+    # time, matching the stats.py / conversion.py:save_zarr pattern.
+    from pathlib import Path
+
+    from liom_toolkit.utils.zarr_writer import create_directory
+
+    create_directory(Path(output_dir), overwrite=True)
 
     # Create full mask
     mask = estimate_tissue_mask(image)
