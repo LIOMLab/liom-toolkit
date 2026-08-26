@@ -51,9 +51,17 @@ jobs:
       - name: Install dependencies (core)
         if: matrix.install-scope == 'core'
         run: uv sync --no-all-extras
-      - name: Install dependencies (all extras)
-        if: matrix.install-scope == 'all'
+      - name: Install dependencies (all extras — 3.12)
+        if: matrix.install-scope == 'all' && matrix.python-version == '3.12'
         run: uv sync --extra all
+      # 3.14+all: antspyx has no cp314 wheel and its source build fails
+      # (statsmodels 0.9.0 / ITK / VTK C++ compile). Drop the antspy extra on
+      # 3.14 and install only the ai extras so the leg still exercises torch.
+      # The leg keeps continue-on-error: true (best-effort). Registration
+      # tests on 3.14 are mock-only (see the -m "not antspy" flag below).
+      - name: Install dependencies (ai extras only — 3.14, antspy dropped)
+        if: matrix.install-scope == 'all' && matrix.python-version == '3.14'
+        run: uv sync --extra ai
       # Run pytest on both 3.12 and 3.14 before publish. Optional-extra tests
       # are marker-gated + pytest.importorskip, so they skip cleanly wherever
       # the extra is absent (core install).
@@ -69,9 +77,12 @@ jobs:
         run: uv run pytest -q
         env:
           CI: "true"   # hypothesis CI profile auto-activates
-      - name: Run pytest (3.14 legs — coverage gate disabled)
+      - name: Run pytest (3.14 legs — coverage gate disabled, antspy deselected)
         if: "!(matrix.python-version == '3.12' && matrix.install-scope == 'all')"
-        run: uv run pytest -q --cov-fail-under=0
+        # antspyx is not installed on 3.14 (no cp314 wheel), so the
+        # @pytest.mark.antspy real round-trip tests are deselected. The
+        # mock-orchestration registration tests are unmarked and still run.
+        run: uv run pytest -q --cov-fail-under=0 -m "not antspy"
         env:
           CI: "true"   # hypothesis CI profile auto-activates
 
