@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-import wandb
 from skimage.color import gray2rgb, label2rgb
 from tqdm.auto import tqdm
 
@@ -241,6 +240,13 @@ def train_model(
     except ImportError:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
+    try:
+        import wandb
+    except ImportError:
+        raise ImportError(
+            "Please install wandb (ai extra) to use the vessel segmentation "
+            "training of the LIOM toolkit."
         )
     if dev is None:
         dev = torch.device("cuda")
