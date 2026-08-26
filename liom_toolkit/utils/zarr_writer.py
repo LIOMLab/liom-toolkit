@@ -197,7 +197,14 @@ class OmeZarrWriter:
     ) -> None:
         """Pre-allocate the level-0 zarr array for streaming writes.
 
-        :param store_path: Path (or ``file://`` URL) to the output zarr group.
+        :param store_path: Filesystem path to the output zarr group. This MUST
+            be a plain filesystem path, NOT a ``file://`` URL — passing a
+            ``file://`` URL would orphan-create a literal ``file:/...``
+            directory in the CWD (``Path("file:///tmp/x.zarr")`` is parsed as
+            the relative path ``file:/tmp/x.zarr``) while ``parse_url`` opens
+            the real store at the URL's path, leaving the two out of sync.
+            Use ``liom_toolkit.utils.io.load_zarr`` (which goes through
+            ``parse_url``) to read URL-located stores.
         :param shape: Shape of the dataset. Expected ordering is
             ``(c, z, y, x)`` for 4D or ``(z, y, x)`` for 3D.
         :param chunk_shape: Chunk size on disk. One plane per chunk
@@ -207,11 +214,15 @@ class OmeZarrWriter:
             *store_path* before creating a fresh one. If False and the path
             exists, raise ``FileExistsError`` (no silent clobber).
         :param downscale_factor: Per-level Y/X downsample factor (default 2).
+            Must be >= 2 (a factor of 0 crashes with ``ZeroDivisionError``, 1
+            produces duplicate pyramid levels, and a negative factor produces
+            negative scales).
         :param unit: NGFF UDUNITS-2 length unit for the spatial axes
             (default ``"micrometer"``, repo convention — NOT linumpy's mm).
         :param shards: Shard shape (``None`` for no sharding).
-        :raises ValueError: If ``unit`` is not a known NGFF length unit, or
-            ``shape`` is not 3D or 4D.
+        :raises ValueError: If ``unit`` is not a known NGFF length unit,
+            ``shape`` is not 3D or 4D, ``store_path`` is a ``file://`` URL,
+            or ``downscale_factor`` is < 2.
         """
         if unit not in _NGFF_LENGTH_UNITS:
             raise ValueError(
@@ -221,6 +232,25 @@ class OmeZarrWriter:
         ndims = len(shape)
         if ndims not in (3, 4):
             raise ValueError(f"shape must be 3D or 4D, got len(shape)={ndims}.")
+        if downscale_factor < 2:
+            raise ValueError(
+                f"downscale_factor must be >= 2 (0 raises ZeroDivisionError, "
+                f"1 produces duplicate levels, negative produces negative "
+                f"scales); got {downscale_factor!r}."
+            )
+        # Reject file:// URLs: create_directory takes a filesystem path, and
+        # Path("file:///tmp/x.zarr") is parsed as the relative path
+        # "file:/tmp/x.zarr" — create_directory would mkdir that literal path
+        # in the CWD while parse_url opens the real store at the URL's path,
+        # leaving the two out of sync (orphan dir in CWD). parse_url handles
+        # URL-located stores for the *read* path (load_zarr); the streaming
+        # writer requires a plain filesystem path.
+        if isinstance(store_path, str) and store_path.startswith("file://"):
+            raise ValueError(
+                f"store_path must be a filesystem path, not a file:// URL "
+                f"(got {store_path!r}); create_directory would orphan a "
+                f"literal 'file:/...' directory in the CWD. Pass a plain path."
+            )
 
         self.shape = tuple(int(v) for v in shape)
         self.downscale_factor = downscale_factor
