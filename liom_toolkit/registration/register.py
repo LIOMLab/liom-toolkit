@@ -272,6 +272,12 @@ def align_brain_region_to_atlas(
     target_volume = ants.reorient_image2(target_volume, orientation="RAS")
     mask = ants.reorient_image2(mask, orientation="RAS")
     template = ants.reorient_image2(template, orientation="RAS")
+    # Substitute the target volume for the registration volume BEFORE
+    # reorienting it: the documented contract is "If None, the target_volume
+    # will be used", and reorienting None crashes, so the substitution must
+    # happen first.
+    if registration_volume is None:
+        registration_volume = target_volume
     registration_volume = ants.reorient_image2(registration_volume, orientation="RAS")
 
     pbar = tqdm(total=3, desc="Aligning region mask", leave=True, unit="step", position=0)
@@ -279,10 +285,6 @@ def align_brain_region_to_atlas(
     # Create the data directory if it does not exist
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-
-    # Check if registration volume is None and set it to the target volume if so
-    if registration_volume is None:
-        registration_volume = target_volume
 
     # Construct the reference space cache
     rs = construct_reference_space(data_dir=data_dir, resolution=resolution)

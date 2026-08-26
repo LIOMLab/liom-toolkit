@@ -340,6 +340,15 @@ def test_align_brain_region_to_atlas_none_reorient_returns_valid_mask(
     mock_rs.structure_tree.get_structures_by_name.return_value = [{"id": 1}]
     mock_rs.make_structure_mask.return_value = ones_mask
 
+    # Write a real identity transform file so ants.apply_transforms (which
+    # reads transform files from disk) can run on real ants without a real
+    # registration. The bug locus is reorient-of-None, not the transform
+    # application — but apply_transforms must succeed for the function to
+    # return a valid mask.
+    identity_transform = ants.create_ants_transform(dimension=3)
+    identity_path = str(tmp_path / "identity.mat")
+    ants.write_transform(identity_transform, identity_path)
+
     with (
         patch(
             "liom_toolkit.registration.register.construct_reference_space",
@@ -352,8 +361,13 @@ def test_align_brain_region_to_atlas_none_reorient_returns_valid_mask(
         patch(
             "liom_toolkit.registration.register.get_transformations_for_atlas",
             return_value=(
-                {"invtransforms": ["IdentityTransform"]},
-                {"fwdtransforms": ["IdentityTransform"]},
+                # register.py wraps these as
+                #   transformlist=[invtransforms, fwdtransforms]
+                # so each value must be a single filename string (not a
+                # list) for ants.apply_transforms to receive a flat list of
+                # paths it can os.path.exists-check.
+                {"invtransforms": identity_path},
+                {"fwdtransforms": identity_path},
             ),
         ),
         patch(
