@@ -77,7 +77,7 @@ if TYPE_CHECKING:
 #   structure tree:    http://api.brain-map.org/api/v2/structure_graph_download/1.json (static file, nested children)
 # The ``current-release`` path segment is effectively "latest"; CCF2017 content
 # has been frozen since 2020. The structure-tree endpoint is HTTP-only (no HTTPS
-# variant on the static-file server) — see module docstring + T-4-01.
+# variant on the static-file server) — see module docstring.
 # ---------------------------------------------------------------------------
 _ALLEN_BASE = "https://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf"
 _ANNOTATION_URL = _ALLEN_BASE + "/annotation/ccf_2017/annotation_{res}.nrrd"
@@ -87,7 +87,7 @@ _VALID_RESOLUTIONS = (10, 25, 50, 100)
 
 
 # ---------------------------------------------------------------------------
-# Pure-logic helpers (mirror allensdk v2.16.2 semantics — D-04 byte-exactness)
+# Pure-logic helpers (mirror allensdk v2.16.2 semantics — byte-exactness)
 # ---------------------------------------------------------------------------
 
 
@@ -184,6 +184,10 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
         attached) from ``_flatten_structure_tree``.
     :return: pandas DataFrame with the 8 columns in the exact ITK-SNAP order.
     """
+    if not structures:
+        raise ValueError(
+            "Structure tree is empty — the download may have failed or the cache is corrupt."
+        )
     df = pd.DataFrame(
         [
             {
@@ -285,21 +289,19 @@ def generate_label_color_dict_allen() -> list[dict]:
     :return: The label color dictionary.
     :rtype: list[dict]
     """
-    temp_dir = tempfile.TemporaryDirectory()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _annotation, meta = download_allen_atlas(tmpdir, resolution=25, keep_nrrd=False)
 
-    _annotation, meta = download_allen_atlas(temp_dir.name, resolution=25, keep_nrrd=False)
+        # Generate a color dictionary according to the OME-NGFF specification
+        color_dict = []
+        for row in meta.iterrows():
+            color_dict.append(
+                {
+                    "label-value": row[1]["IDX"],
+                    "rgba": [row[1]["-R-"], row[1]["-G-"], row[1]["-B-"], (int(row[1]["-A-"] * 255))],
+                }
+            )
 
-    # Generate a color dictionary according to the OME-NGFF specification
-    color_dict = []
-    for row in meta.iterrows():
-        color_dict.append(
-            {
-                "label-value": row[1]["IDX"],
-                "rgba": [row[1]["-R-"], row[1]["-G-"], row[1]["-B-"], (int(row[1]["-A-"] * 255))],
-            }
-        )
-
-    temp_dir.cleanup()
     return color_dict
 
 
@@ -318,7 +320,11 @@ def download_allen_atlas(
     :return: The atlas as an ants image.
     :rtype:(ANTsImage, pd.DataFrame)
     """
-    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    if int(resolution) not in _VALID_RESOLUTIONS:
+        raise ValueError(
+            f"Resolution must be one of {sorted(_VALID_RESOLUTIONS)}, got {resolution!r}"
+        )
+    resolution = int(resolution)
 
     # Temporary filename
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
@@ -358,7 +364,11 @@ def download_allen_template(
     :rtype: ANTsImage
     """
     # Check the resolution
-    assert int(resolution) in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    if int(resolution) not in _VALID_RESOLUTIONS:
+        raise ValueError(
+            f"Resolution must be one of {sorted(_VALID_RESOLUTIONS)}, got {resolution!r}"
+        )
+    resolution = int(resolution)
 
     # filename
     nrrd_file = f"{data_dir}/allen_template_{resolution}.nrrd"
@@ -412,7 +422,7 @@ def construct_reference_space(
     Construct a reference space for the Allen brain atlas. Will use the 2017 adult version of the atlas.
 
     Downloads the annotation NRRD and structure-tree JSON into ``data_dir``
-    (reusing cached files on hit — D-03 caching contract) and returns a
+    (reusing cached files on hit) and returns a
     wrapper object preserving the caller contract used by
     ``registration/register.py`` and ``segmentation/stats.py``:
     ``.annotation``, ``.structure_tree`` (with ``get_structures_by_name``,
@@ -429,24 +439,30 @@ def construct_reference_space(
     :rtype: _ReferenceSpace
     """
     # Check the resolution
-    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    if int(resolution) not in _VALID_RESOLUTIONS:
+        raise ValueError(
+            f"Resolution must be one of {sorted(_VALID_RESOLUTIONS)}, got {resolution!r}"
+        )
+    resolution = int(resolution)
 
-    # Download annotation NRRD (cache check — D-03)
+    # Download annotation NRRD (cache check — never fall back to a silent default)
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
     if not os.path.exists(nrrd_file):
         _download_nrrd(_ANNOTATION_URL.format(res=resolution), nrrd_file)
     annotation, _header = nrrd.read(nrrd_file)
 
-    # Download structure tree (cache check — D-03)
+    # Download structure tree (cache check — never fall back to a silent default)
     tree_file = f"{data_dir}/structure_tree.json"
     if not os.path.exists(tree_file):
         _download_structure_tree(tree_file)
     with open(tree_file) as f:
         tree_data = json.load(f)
     # The cached file may be the raw ``msg`` list (allensdk's cache format and
-    # the committed regression fixture) or the wrapped ``{"msg": [...]}`` API
-    # response (this module's own download cache). Accept both so existing
-    # allensdk caches and the regression fixture replay without network.
+    # the committed regression fixture, and the format this module's own
+    # download cache writes — the extracted ``msg`` array, not the wrapped
+    # response) or the wrapped ``{"msg": [...]}`` API response. Accept both so
+    # existing allensdk caches and the regression fixture replay without
+    # network.
     tree_msg = tree_data["msg"] if isinstance(tree_data, dict) else tree_data
     structures = _flatten_structure_tree(tree_msg)
 
@@ -462,34 +478,60 @@ def construct_reference_space(
 
 
 def _download_nrrd(url: str, dest: str) -> None:
-    """Stream-download a NRRD file from ``url`` to ``dest``.
+    """Stream-download a NRRD file from ``url`` to ``dest`` atomically.
 
-    Raises ``requests.HTTPError`` on non-200 status (D-03: never silent
-    fallback). A 200-but-not-NRRD response is caught downstream by
-    ``nrrd.read`` raising ``NRRDError``.
+    The response body is written to a ``dest + ".partial"`` temp file in the
+    same directory and only renamed to ``dest`` via :func:`os.replace` once the
+    full write succeeds. This prevents an interrupted download (connection
+    reset, timeout, process killed) from leaving a partial file at ``dest``
+    that subsequent cache-hit checks would treat as a valid download — a
+    silent-data-corruption failure mode. The temp file is removed on any
+    exception.
+
+    Raises ``requests.HTTPError`` on non-200 status (never silent fallback).
+    A 200-but-not-NRRD response is caught downstream by ``nrrd.read`` raising
+    ``NRRDError``.
     """
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(dest, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
+    tmp = dest + ".partial"
+    try:
+        with requests.get(url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        os.replace(tmp, dest)  # atomic on POSIX and Windows
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _download_structure_tree(dest: str) -> list[dict]:
-    """Download the Allen structure-tree JSON, cache it to ``dest``, return flattened list.
+    """Download the Allen structure-tree JSON, cache it to ``dest`` atomically, return flattened list.
 
-    Fetches ``_STRUCTURE_TREE_URL`` (D-02: static-file endpoint), extracts the
-    ``msg`` array, writes the raw ``msg`` list to ``dest`` for caching (matching
-    allensdk's cache format so caches are interchangeable), and returns
-    ``_flatten_structure_tree(msg)``.
+    Fetches ``_STRUCTURE_TREE_URL`` (static-file endpoint), extracts the
+    ``msg`` array, writes the raw ``msg`` list to a ``dest + ".partial"`` temp
+    file and atomically renames it to ``dest`` via :func:`os.replace` once the
+    full write succeeds (so an interrupted download never leaves a partial
+    cache file). The temp file is removed on any exception. The cache format
+    matches allensdk's so caches are interchangeable.
+
+    :return: ``_flatten_structure_tree(msg)``.
     """
     r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
     r.raise_for_status()
     payload = r.json()
     msg = payload["msg"]
-    with open(dest, "w") as f:
-        json.dump(msg, f)
+    tmp = dest + ".partial"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(msg, f)
+        os.replace(tmp, dest)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
     return _flatten_structure_tree(msg)
 
 
