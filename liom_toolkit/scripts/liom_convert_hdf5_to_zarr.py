@@ -12,9 +12,6 @@ def _build_argument_parser():
     p.add_argument("input_file", help="Full path to the input HDF5 file")
     p.add_argument("output_file", help="Full path to the output Zarr file")
     p.add_argument(
-        "--use_memmap", action="store_true", help="Use memory mapping for the input hdf5 file"
-    )
-    p.add_argument(
         "--scales",
         type=float,
         nargs=3,
@@ -55,7 +52,6 @@ def main():
     convert_hdf5_to_zarr(
         hdf5_file=args.input_file,
         zarr_file=args.output_file,
-        use_memmap=args.use_memmap,
         scales=args.scales,
         chunks=args.chunks,
     )

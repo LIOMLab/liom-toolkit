@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import tempfile
 
 from pathlib import Path
@@ -160,7 +159,6 @@ def save_zarr(
 def convert_hdf5_to_zarr(
     hdf5_file: str,
     zarr_file: str,
-    use_memmap: bool = True,
     scales: tuple = (6.5, 6.5, 6.5),
     chunks: tuple = (128, 128, 128),
 ) -> None:
@@ -171,27 +169,21 @@ def convert_hdf5_to_zarr(
     :type hdf5_file: str
     :param zarr_file: Path to the zarr file.
     :type zarr_file: str
-    :param use_memmap: Whether to use a memmap or not.
-    :type use_memmap: bool
     :param scales: The resolution of the image, in z y x order.
     :type scales: tuple
     :param chunks: The chunk size to use.
     :type chunks: tuple
     """
-
-    map_file = "temp.dat"
     data = load_hdf5(hdf5_file)
 
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
-    if use_memmap:
-        os.remove(map_file)
 
 
 def convert_nifti_to_zarr(
     nifti_file: str,
     zarr_file: str,
     scales: tuple = (6.5, 6.5, 6.5),
-    chucks: tuple = (128, 128, 128),
+    chunks: tuple = (128, 128, 128),
     transpose: bool = False,
 ) -> None:
     """
@@ -203,8 +195,8 @@ def convert_nifti_to_zarr(
     :type zarr_file: str
     :param scales: The resolution of the image, in z y x order.
     :type scales: tuple
-    :param chucks: The chunk size to use in the zarr file.
-    :type chucks: tuple
+    :param chunks: The chunk size to use in the zarr file.
+    :type chunks: tuple
     :param transpose: Whether to transpose the data or not.
     :type transpose: bool
     """
@@ -213,11 +205,11 @@ def convert_nifti_to_zarr(
     data = da.from_array(ni_img.get_fdata())
     if transpose:
         data = da.transpose(data, (2, 1, 0))
-    save_zarr(data, zarr_file, scales=scales, chunks=chucks)
+    save_zarr(data, zarr_file, scales=scales, chunks=chunks)
 
 
 def convert_nrrd_to_zarr(
-    nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chucks: tuple = (128, 128, 128)
+    nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)
 ) -> None:
     """
     Convert a NRRD file to a zarr file.
@@ -228,12 +220,12 @@ def convert_nrrd_to_zarr(
     :type zarr_file: str
     :param scales: The resolution of the image, in z y x order.
     :type scales: tuple
-    :param chucks: The chunk size to use in the zarr file.
-    :type chucks: tuple
+    :param chunks: The chunk size to use in the zarr file.
+    :type chunks: tuple
     """
     print("Loading...")
     data, _header = nrrd.read(nrrd_file)
-    save_zarr(data, zarr_file, scales=scales, chunks=chucks)
+    save_zarr(data, zarr_file, scales=scales, chunks=chunks)
 
 
 def create_multichannel_zarr(
