@@ -283,22 +283,28 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         )
         return patch_image, patch_label
 
+    def _process_patch(self, idx):
+        """Classify one grid patch as valid for training.
+
+        Defined as a method (not a closure inside ``get_valid_indices``) so
+        it pickles as a bound method and ``process_map`` can ship it to
+        spawned workers on start-method=spawn runtimes (macOS). The validity
+        bit travels back to the parent via the ``process_map`` return list,
+        not via a shared list mutated by forked workers (D-11 — forked-worker
+        list mutations are lost).
+        """
+        patch = self[idx * 4][1]
+        return bool(self.check_patch(patch))
+
     def get_valid_indices(self):
         """
         Validate the patches in the dataset. This function is used to remove patches that are not suitable for training.
         """
-        valid_indices = []
         dataset_length = len(self) // 4
 
-        def process_patch(idx, indices):
-            patch = self[idx * 4][1]
-            if self.check_patch(patch):
-                indices.append(idx)
-
-        process_map(
-            process_patch,
+        results = process_map(
+            self._process_patch,
             range(dataset_length),
-            valid_indices,
             unit="patches",
             desc="Validating patches",
             position=0,
@@ -307,9 +313,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             chunksize=100,
         )
 
-        # valid_indices = [i for i, is_valid in enumerate(results) if is_valid]
-
-        valid_indices = np.array(valid_indices)
+        valid_indices = np.array([i for i, is_valid in enumerate(results) if is_valid])
 
         # Add the precentage of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
         all_indexes = range(len(self))

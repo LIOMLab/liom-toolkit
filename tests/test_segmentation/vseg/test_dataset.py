@@ -216,11 +216,15 @@ def test_get_valid_indices_fork_mutation(tmp_path):
         empty_percentage=0.0,
     )
 
-    # Single-process expected valid set: dataset_length = len(ds) // 4 (the
-    # //4 is how get_valid_indices maps rotated indices back to grid patches;
-    # with rotate_patches=False len(ds) == grid length so //4 still holds the
-    # same arithmetic the production code uses).
-    dataset_length = len(ds) // 4
+    # Single-process expected valid set. dataset_length must mirror what
+    # get_valid_indices uses internally: len(self) // 4 evaluated BEFORE
+    # valid_indices is set (i.e. the full grid length, not the post-filter
+    # length). After construction len(ds) returns the filtered length, so
+    # recompute the pre-filter length from grid_shape the same way
+    # OmeZarrDataset.__len__ does (grid product * 4 when rotate_patches).
+    grid_product = ds.grid_shape[0] * ds.grid_shape[1] * ds.grid_shape[2]
+    pre_filter_len = grid_product * (4 if ds.rotate_patches else 1)
+    dataset_length = pre_filter_len // 4
     expected = [
         i for i in range(dataset_length) if ds.check_patch(ds[i * 4][1])
     ]
