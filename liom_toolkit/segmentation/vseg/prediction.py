@@ -93,9 +93,22 @@ def predict_one(
         shutil.rmtree(patches_images_dir)
     create_dir(f"{save_path}/patches/images/")
 
-    # Only the clahe is done to the image
-    image = iio.imread(img_path)
-    image = (image / image.max() * 255).astype(np.uint8)
+    # Only the clahe is done to the image. Reuse the image already read at
+    # line 74 (the second iio.imread was redundant I/O -- the shape is known
+    # and the pixel data was discarded). Guard the divide-by-zero on an
+    # all-zero input image: image.max() == 0 produces NaN +
+    # RuntimeWarning, then .astype(np.uint8) silently converts NaN to 0
+    # (undefined behavior, implementation-defined across platforms) -- the
+    # canonical AGENTS section 2 silent-data-corruption anti-pattern. Raise
+    # ValueError explicitly, mirroring create_patches (utils.py) and the
+    # inference.max() == 0 guard below.
+    max_val = image.max()
+    if max_val == 0:
+        raise ValueError(
+            "predict_one: input image is all-zero; cannot normalize. "
+            "Check the input image path."
+        )
+    image = (image / max_val * 255).astype(np.uint8)
     # Apply Adaptive Histogram Equalization (AHE) when norm is True (default).
     # When norm is False, skip CLAHE and use the min-max uint8 image above --
     # mirrors create_patches(..., norm=...) in utils for cross-subpackage

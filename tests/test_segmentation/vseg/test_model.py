@@ -264,3 +264,43 @@ def test_predict_one_all_zero_inference_no_runtime_warning(tmp_path):
         f"RuntimeWarning(s) escaped predict_one on all-zero inference: "
         f"{[str(w.message) for w in runtime_warnings]}"
     )
+
+
+def test_predict_one_all_zero_input_raises_value_error(tmp_path):
+    """predict_one on an all-zero INPUT image must raise ValueError, not
+    silently produce an all-zero uint8 image that flows through CLAHE and
+    the model as a plausible-looking all-zero segmentation.
+
+    This is the input-image normalization guard mirroring the
+    inference.max() == 0 guard tested above and the create_patches
+    max_val == 0 guard in vseg/utils.py. The pre-fix code does
+    `image / image.max()` which divides by zero on an all-zero input,
+    producing NaN + RuntimeWarning, then `.astype(np.uint8)` silently
+    converts NaN to 0 (undefined behavior, implementation-defined across
+    platforms) -- the canonical AGENTS section 2 silent-data-corruption
+    anti-pattern. The fix raises ValueError explicitly so the caller
+    learns their input was degenerate.
+    """
+    pytest.importorskip("torch")
+
+    import imageio.v3 as iio
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    # Write an all-zero PNG (max == 0).
+    zero_path = tmp_path / "zero.png"
+    iio.imwrite(str(zero_path), np.zeros((16, 16), dtype=np.uint8))
+
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_zero_input"
+
+    with pytest.raises(ValueError, match="all-zero"):
+        predict_one(
+            model=model,
+            img_path=str(zero_path),
+            save_path=str(out_dir),
+            norm=True,
+            dev="cpu",
+            patching=False,
+        )
