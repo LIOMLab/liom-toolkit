@@ -44,10 +44,13 @@ def synthetic_ants_image():
 
     The fixture body imports ``ants`` and ``numpy`` INSIDE the function so
     this conftest module imports cleanly on core-only installs (ants is an
-    extra). Callers MUST call ``pytest.importorskip("ants")`` in the test
-    body BEFORE requesting this fixture so the test skips cleanly on the
-    3.14-core CI leg instead of erroring at fixture setup.
+    extra). ``pytest.importorskip("ants")`` runs as the first line so tests
+    requesting this fixture SKIP cleanly on core-only / 3.14-core CI legs
+    instead of erroring at fixture setup (pytest resolves fixture arguments
+    before the test body runs, so a test-body importorskip cannot gate the
+    fixture).
     """
+    pytest.importorskip("ants")
     import ants
 
     arr = np.random.rand(8, 8, 8).astype("float32")
