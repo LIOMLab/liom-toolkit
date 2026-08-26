@@ -42,13 +42,19 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
     :return: List of metrics
     :rtype: list[float]
     """
-    from sklearn.metrics import (
-        accuracy_score,
-        f1_score,
-        jaccard_score,
-        precision_score,
-        recall_score,
-    )
+    try:
+        from sklearn.metrics import (
+            accuracy_score,
+            f1_score,
+            jaccard_score,
+            precision_score,
+            recall_score,
+        )
+    except ImportError:
+        raise ImportError(
+            "Please install scikit-learn (ai extra) to use the vessel "
+            "segmentation metrics of the LIOM toolkit."
+        )
 
     y_true = y_true > 0.5
     y_true = y_true.astype(np.uint8)
