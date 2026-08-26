@@ -151,7 +151,7 @@ def create_images(
     images = []
     num_images = min(num_images, x.shape[0])
     i = 0
-    while len(images) < num_images or i - 1 == x.shape[0]:
+    while len(images) < num_images:
         img = mask_image(x, y_mask, pred_mask, i)
         images.append(img)
         i += 1
@@ -360,9 +360,6 @@ def train_model(
                 },
             }
         )
-
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
 
     print(f"Finished Training: Best Epoch = {best_epoch}")
     artifact = wandb.Artifact("model", type="model")
