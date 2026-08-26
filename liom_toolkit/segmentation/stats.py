@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import tempfile
 
 import dask.array as da
@@ -61,9 +60,17 @@ def compute_slice_metrics(
     signal, not a silent gap.
     """
 
-    # Setup output
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+    # Setup output directory (overwrite-safe via the symlink-aware
+    # create_directory helper from utils.zarr_writer: a second call into an
+    # existing output_dir shutil.rmtree's the directory then recreates it,
+    # eliminating the FileExistsError race on re-run. Function-scope import
+    # avoids a circular import with utils.zarr_writer at module load time,
+    # matching the conversion.py:save_zarr pattern.)
+    from pathlib import Path
+
+    from liom_toolkit.utils.zarr_writer import create_directory
+
+    create_directory(Path(output_dir), overwrite=True)
     df = pd.DataFrame(
         columns=[
             "image",
@@ -384,8 +391,14 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     :param square_size: The size of the squares in the heatmap
     :type square_size: int
     """
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+    # Overwrite-safe output directory creation (same create_directory helper
+    # as compute_slice_metrics above; function-scope import avoids a circular
+    # import with utils.zarr_writer at module load time).
+    from pathlib import Path
+
+    from liom_toolkit.utils.zarr_writer import create_directory
+
+    create_directory(Path(output_dir), overwrite=True)
 
     image = img_as_ubyte(image)
     image = image / 255

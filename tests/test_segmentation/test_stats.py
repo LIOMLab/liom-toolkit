@@ -326,3 +326,97 @@ def test_create_heatmap_non_square(tmp_path):
     # (255 on), so the heatmap average should be positive (the block sum is
     # 150*150 = 22500, normalized to 1.0 before the img_as_uint cast).
     assert block_0_2 > 0
+
+
+# ---------------------------------------------------------------------------
+# compute_slice_metrics / create_heatmap -- overwrite-safe second run
+# ---------------------------------------------------------------------------
+
+
+def test_compute_slice_metrics_overwrite(tmp_path, monkeypatch):
+    """compute_slice_metrics called twice with the same output_dir succeeds
+    on the second call (no FileExistsError) and produces the expected output
+    files.
+
+    The bare ``os.mkdir(output_dir)`` race is fixed by routing directory
+    creation through the symlink-aware ``create_directory(overwrite=True)``
+    helper, which ``shutil.rmtree``'s the existing output_dir then recreates
+    it before the metrics are written. The test exercises real IO in
+    ``tmp_path`` (no mocking of numpy/scipy/skimage/os per AGENTS section 5);
+    ``pd.DataFrame.to_excel`` is intercepted only to avoid the undeclared
+    openpyxl runtime dependency (a pre-existing BUG-02 finding, not
+    introduced here)."""
+    import pandas as pd
+
+    captured = {}
+
+    def fake_to_excel(self, path, index=False):
+        captured["df"] = self
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+
+    mask = np.ones((30, 30), dtype=np.uint8)
+    vessel_mask = np.zeros((30, 30), dtype=np.uint8)
+    vessel_mask[10:20, 10:20] = 1
+    region_map = np.ones((30, 30), dtype=np.uint8)
+    vessel_exclude = np.ones((30, 30), dtype=np.uint8)
+
+    output_dir = str(tmp_path) + "/"
+    compute_slice_metrics(
+        output_dir,
+        "test_slice",
+        mask,
+        vessel_mask,
+        region_map,
+        vessel_exclude,
+        voxel_size=0.65,
+    )
+    # Second call into the same existing output_dir must succeed (overwrite-safe).
+    compute_slice_metrics(
+        output_dir,
+        "test_slice",
+        mask,
+        vessel_mask,
+        region_map,
+        vessel_exclude,
+        voxel_size=0.65,
+    )
+
+    # The second run produced a DataFrame with the expected per-region row.
+    df = captured["df"]
+    region_rows = df[df["region"] == 0]
+    assert len(region_rows) == 1
+    # Expected output files exist after the second run (the directory was
+    # recreated by create_directory(overwrite=True), so these are the
+    # second-run files, not stale first-run files).
+    import os
+
+    assert os.path.isfile(output_dir + "regions.png")
+    assert os.path.isfile(output_dir + "vessels.png")
+
+
+def test_create_heatmap_overwrite(tmp_path):
+    """create_heatmap called twice with the same output_dir succeeds on the
+    second call (no FileExistsError) and produces the expected heatmap
+    output file.
+
+    The bare ``os.mkdir(output_dir)`` race is fixed by routing directory
+    creation through ``create_directory(overwrite=True)``. Real IO in
+    ``tmp_path``; no mocking per AGENTS section 5."""
+    import imageio.v3 as iio
+    import os
+
+    # 300x300 square image with a single on-block so the heatmap is non-trivial.
+    image = np.zeros((300, 300), dtype=np.uint8)
+    image[0:150, 0:150] = 255
+
+    output_dir = str(tmp_path) + "/"
+    create_heatmap(image, output_dir, square_size=150)
+    # Second call into the same existing output_dir must succeed (overwrite-safe).
+    create_heatmap(image, output_dir, square_size=150)
+
+    # The heatmap file exists after the second run (recreated directory).
+    assert os.path.isfile(output_dir + "heatmap.tif")
+    heatmap = iio.imread(output_dir + "heatmap.tif")
+    # The on-block (0,0) has a positive average; the off-block (1,1) is 0.
+    assert heatmap[0:150, 0:150].mean() > 0
