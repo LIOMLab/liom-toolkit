@@ -136,7 +136,7 @@ def test_build_template_round_trip_0_6_3(synthetic_ants_image):
         np.random.rand(8, 8, 8).astype("float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     # Rigid (not SyN) to keep CI wall-clock low on the 8^3 volume.
     template = build_template(image_list=[img1, img2], iterations=1, type_of_transform="Rigid")
@@ -158,19 +158,19 @@ def test_build_template_masks_supported(synthetic_ants_image):
         np.random.rand(8, 8, 8).astype("float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     mask1 = ants.from_numpy(
         np.ones((8, 8, 8), dtype="float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     mask2 = ants.from_numpy(
         np.ones((8, 8, 8), dtype="float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     template = build_template(
         image_list=[img1, img2], masks=[mask1, mask2], iterations=1, type_of_transform="Rigid"
@@ -192,13 +192,13 @@ def test_pre_register_brain_round_trip(synthetic_ants_image):
         np.random.rand(8, 8, 8).astype("float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     mask = ants.from_numpy(
         np.ones((8, 8, 8), dtype="float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     image_reg, mask_reg = pre_register_brain(
         moving, mask, template, brain="test", registration_type="Translation"

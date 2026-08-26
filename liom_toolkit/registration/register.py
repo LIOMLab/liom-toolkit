@@ -460,8 +460,10 @@ def align_volume_to_allen(
             temp_folder, resolution=resolution, keep_nrrd=False
         )
 
-        # Align the image to the Allen template
-        aligned_image, _ = deformably_register_volume(
+        # Align the image to the Allen template. deformably_register_volume
+        # returns a 3-tuple (syn, syn_transform, rigid_transform); only the
+        # aligned image is needed here.
+        aligned_image, _, _ = deformably_register_volume(
             image, mask, template, use_legacy_histogram_matching=False
         )
 

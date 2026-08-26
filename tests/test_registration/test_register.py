@@ -117,7 +117,7 @@ def test_align_volume_to_allen_round_trip(synthetic_ants_image):
         np.ones((8, 8, 8), dtype="float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     aligned = align_volume_to_allen(img, mask, resolution=25)
     assert aligned is not None
@@ -143,13 +143,13 @@ def test_deformably_register_volume_returns_expected_dict_shape(synthetic_ants_i
         np.ones((8, 8, 8), dtype="float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     template = ants.from_numpy(
         np.random.rand(8, 8, 8).astype("float32"),
         spacing=(1, 1, 1),
         origin=(0, 0, 0),
-        direction=np.eye(3).ravel(),
+        direction=np.eye(3),
     )
     syn, syn_transform, rigid_transform = deformably_register_volume(
         img, mask, template, deformable_type="Rigid", rigid_type="Translation"
@@ -237,8 +237,10 @@ def test_align_volume_to_allen_wiring(mock_ants):
         patch("liom_toolkit.registration.register.deformably_register_volume") as mock_deform,
         patch("liom_toolkit.registration.register.download_allen_template") as mock_dl,
     ):
-        # align_volume_to_allen unpacks `aligned_image, _ = deformably_register_volume(...)`
-        mock_deform.return_value = (MagicMock(), MagicMock())
+        # Mirror the real deformably_register_volume 3-tuple return
+        # (syn, syn_transform, rigid_transform) so the mock does not mask an
+        # unpack mismatch at the align_volume_to_allen call site.
+        mock_deform.return_value = (MagicMock(), MagicMock(), MagicMock())
         mock_dl.return_value = MagicMock()
         result = align_volume_to_allen(MagicMock(), MagicMock(), resolution=25)
         # The public API passes use_legacy_histogram_matching=False explicitly
