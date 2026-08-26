@@ -258,7 +258,17 @@ def create_patches(
     if image.ndim == 3:
         image = rgb2gray(image)
     image = crop_image(image, size, stride)
-    image = (image / image.max() * 255).astype(np.uint8)
+    # Normalize to uint8 by scaling to [0, 255]. An all-zero image (after
+    # crop) has max == 0, which would divide-by-zero and silently produce
+    # a zero-filled/NaN array — a wrong-data fallback forbidden by the
+    # project correctness rules. Make the failure explicit instead.
+    max_val = image.max()
+    if max_val == 0:
+        raise ValueError(
+            "create_patches: input image is all-zero after crop; cannot "
+            "normalize. Check the input image path or crop parameters."
+        )
+    image = (image / max_val * 255).astype(np.uint8)
 
     image_clahe = apply_clahe(image, norm_params[0], norm_params[1]) if norm else image
 
