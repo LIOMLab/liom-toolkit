@@ -163,7 +163,10 @@ def segment_2d_image(
     :param local_threshold_size: The size of the local thresholding window, must be odd
     :type local_threshold_size: int
     """
-    assert local_threshold_size % 2 == 1, "Local thresholding window size must be odd"
+    if local_threshold_size % 2 == 0:
+        raise ValueError(
+            f"Local thresholding window size must be odd, got {local_threshold_size}"
+        )
 
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)

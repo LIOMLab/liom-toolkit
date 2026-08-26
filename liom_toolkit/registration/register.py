@@ -265,7 +265,8 @@ def align_brain_region_to_atlas(
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         )
-    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    if resolution not in [10, 25, 50, 100]:
+        raise ValueError("Resolution must be 10, 25, 50 or 100")
 
     # Make sure all images are in RAS+ orientation
     target_volume = ants.reorient_image2(target_volume, orientation="RAS")
@@ -387,7 +388,8 @@ def align_annotations_to_volume(
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         )
-    assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
+    if resolution not in [10, 25, 50, 100]:
+        raise ValueError("Resolution must be 10, 25, 50 or 100")
 
     # Make sure all images are in RAS+ orientation
     target_volume = ants.reorient_image2(target_volume, orientation="RAS")
