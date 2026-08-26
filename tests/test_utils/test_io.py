@@ -33,16 +33,8 @@ from liom_toolkit.utils.io import (
     load_node_by_name,
     load_zarr,
     save_label_to_zarr,
+    validate_n_levels,
 )
-
-# ``validate_n_levels`` is a new module-level helper introduced by the
-# migration. It is imported lazily inside the tests that exercise it so the
-# suite still collects (and the round-trip tests still run/fail at runtime)
-# against the pre-migration code where the helper does not yet exist.
-def _import_validate_n_levels():
-    from liom_toolkit.utils.io import validate_n_levels
-
-    return validate_n_levels
 
 
 def test_generate_axes_dict_3d():
@@ -77,13 +69,11 @@ def test_generate_axes_dict_unit_param():
 
 def test_validate_n_levels_exact_boundary():
     """A 16³ volume supports exactly 4 levels (log2(16)=4) — no clamp."""
-    validate_n_levels = _import_validate_n_levels()
     assert validate_n_levels(4, (16, 16, 16), ["z", "y", "x"]) == 4
 
 
 def test_validate_n_levels_clamps_to_downsampled_axes():
     """An 8³ volume can only support 3 levels (log2(8)=3 < requested 4)."""
-    validate_n_levels = _import_validate_n_levels()
     assert validate_n_levels(4, (8, 8, 8), ["z", "y", "x"]) == 3
 
 
