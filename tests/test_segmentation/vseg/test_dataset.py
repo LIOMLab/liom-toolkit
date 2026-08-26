@@ -40,6 +40,39 @@ def _make_tiny_zarr(tmp_path) -> str:
     return zarr_path
 
 
+def _make_tiny_labeled_zarr(tmp_path, label_name: str = "training") -> str:
+    """Build a 16x16x16 uint16 image zarr plus a matching uint8 label.
+
+    The image is written via ``save_zarr`` and the label via
+    ``save_label_to_zarr`` — both produce NGFF v0.5 multiscale datasets at
+    ``s0/s1/...`` (NOT legacy ``0/1/...``), which ``OmeZarrLabelDataSet``
+    resolves by parsing the ``ome.multiscales`` metadata. The label has a
+    non-empty 8x8x8 region (``label[4:12, 4:12, 4:12] = 1``) so some patches
+    are valid (``check_patch`` returns True) and some are empty — the
+    fork-mutation regression needs a non-trivial valid set. Real zarr IO
+    throughout; no mocking of zarr/numpy/torch (AGENTS section 5).
+    """
+    from liom_toolkit.conversion.conversion import save_zarr, save_label_to_zarr
+    from liom_toolkit.utils.io import generate_label_color_dict_mask
+
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    zarr_path = str(tmp_path / "ds.zarr")
+    save_zarr(arr, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+
+    label = np.zeros((16, 16, 16), dtype=np.uint8)
+    label[4:12, 4:12, 4:12] = 1
+    save_label_to_zarr(
+        label,
+        zarr_path,
+        generate_label_color_dict_mask(),
+        label_name,
+        scales=(6.5, 6.5, 6.5),
+        chunks=(16, 16, 16),
+    )
+    return zarr_path
+
+
 def test_ome_zarr_dataset_len_and_grid_shape(tmp_path):
     """OmeZarrDataset with patch_size=(8,8,8) on a 16³ volume has grid_shape
     (2,2,2) and __len__ == 8 * 4 == 32 (rotate_patches=True multiplies by 4)."""
@@ -139,3 +172,62 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
 
     # Characterizes dataset.py:132-135 current formula rest = (idx // 4) % 4;
     # NOT idx % 4. Phase 6/8 fixes this — update assertions then, do not xfail.
+
+
+def test_get_valid_indices_fork_mutation(tmp_path):
+    """Regression for the D-11 fork-mutation bug in ``get_valid_indices``.
+
+    ``get_valid_indices`` runs ``process_patch`` under
+    ``tqdm.contrib.concurrent.process_map`` (forked workers). The current
+    (pre-fix) ``process_patch`` appends valid indices to a shared list passed
+    as a third positional arg — but forked workers' list mutations do NOT
+    propagate back to the parent, so ``valid_indices`` ends up empty or
+    partial. The fix rewrites ``process_patch`` to ``return
+    bool(self.check_patch(patch))`` and builds ``valid_indices`` from the
+    ``process_map`` return list.
+
+    This test exercises the REAL ``process_map`` fork path (no monkeypatch of
+    ``process_map`` — that would hide the bug per RESEARCH MP warning) and
+    asserts the FULL expected valid index set is returned. With
+    ``rotate_patches=False`` and ``empty_percentage=0.0`` the result is purely
+    the valid set (no rotation x4 expansion, no empty-patch sampling), so it
+    equals the single-process expected set computed by re-running
+    ``check_patch`` over ``range(dataset_length)``.
+
+    RED on the current (pre-fix) code: ``valid_indices`` is empty because the
+    forked appends are lost, while the expected set is non-empty (the label's
+    8x8x8 region makes some patches valid) — the ``len > 0`` guard ensures
+    the test does not pass trivially when both sides are empty.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+
+    zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
+    ds = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+
+    # Single-process expected valid set: dataset_length = len(ds) // 4 (the
+    # //4 is how get_valid_indices maps rotated indices back to grid patches;
+    # with rotate_patches=False len(ds) == grid length so //4 still holds the
+    # same arithmetic the production code uses).
+    dataset_length = len(ds) // 4
+    expected = [
+        i for i in range(dataset_length) if ds.check_patch(ds[i * 4][1])
+    ]
+
+    assert len(ds.valid_indices) > 0, (
+        "valid_indices is empty — forked-worker list mutations were lost (D-11)"
+    )
+    assert np.array_equal(
+        np.sort(np.asarray(ds.valid_indices)), np.sort(np.asarray(expected))
+    )
