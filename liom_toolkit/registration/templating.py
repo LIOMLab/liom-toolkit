@@ -3,19 +3,16 @@ from __future__ import annotations
 import os
 import tempfile
 from tempfile import mktemp
+from typing import TYPE_CHECKING
 
-import ants
-import ants.utils as utils
 import numpy as np
-from ants import apply_transforms, registration, resample_image_to_target
-from ants.core import ants_image_io as iio
-from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils import download_allen_template, load_node_by_name, load_zarr
 from liom_toolkit.utils.ants import load_ants_image_from_node
 
-from ..segmentation import segment_3d
+if TYPE_CHECKING:
+    from ants.core.ants_image import ANTsImage
 
 
 def create_template(
@@ -62,6 +59,12 @@ def create_template(
     :return: The newly created template.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     template_images = []
     template_masks = []
     for i, image in tqdm(
@@ -146,6 +149,13 @@ def pre_register_brain(
     :return: The registered image and registered mask
     :rtype: tuple[ANTsImage, ANTsImage]
     """
+    try:
+        import ants
+        from ants import apply_transforms
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     image_reg_transform = ants.registration(
         fixed=template, moving=volume, moving_mask=mask, type_of_transform=registration_type
     )
@@ -214,6 +224,15 @@ def build_template(
     >>> timage = ants.build_template( image_list = ( image, image2, image3 ) ).resample_image( (45,45))
     >>> timagew = ants.build_template( image_list = ( image, image2, image3 ), weights = (5,1,1) )
     """
+    try:
+        import ants
+        import ants.utils as utils
+        from ants import apply_transforms, registration, resample_image_to_target
+        from ants.core import ants_image_io as iio
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
 
     if weights is None:
         weights = np.repeat(1.0 / len(image_list), len(image_list))
@@ -310,6 +329,13 @@ def build_template_for_resolution(
     :type flipped_brains: bool
     :return: None
     """
+    try:
+        import ants
+        from ants import apply_transforms
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     temp_folder = tempfile.TemporaryDirectory()
     resolution_mm = template_resolution / 1000
 
@@ -383,6 +409,8 @@ def build_template_for_resolution(
             transformlist=template_transform["fwdtransforms"],
         )
     # Mask template to remove noise
+    from ..segmentation import segment_3d
+
     template_mask = segment_3d(template)
     new_template = template * template_mask
 
@@ -412,6 +440,12 @@ def load_volume_for_registration(
     :return: The loaded volume and mask.
     :rtype: tuple[ANTsImage, ANTsImage]
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     brain_volume = load_ants_image_from_node(
         image_node, resolution_level=resolution_level, channel=0
     )

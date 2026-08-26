@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import TYPE_CHECKING
 
-import ants
-from ants.core.ants_image import ANTsImage
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils import (
@@ -12,6 +11,9 @@ from liom_toolkit.utils import (
     convert_allen_nrrd_to_ants,
     download_allen_template,
 )
+
+if TYPE_CHECKING:
+    from ants.core.ants_image import ANTsImage
 
 
 def deformably_register_volume(
@@ -47,6 +49,12 @@ def deformably_register_volume(
             and the transform from the deformable registration
     :rtype: tuple[ANTsImage, dict, dict]
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     _rigid, rigid_transform = rigidly_register_volume(
         image,
         mask,
@@ -104,6 +112,12 @@ def rigidly_register_volume(
     :return: The registered image and the transform from the rigid registration
     :rtype: tuple[ANTsImage, dict]
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     rigid_transform = ants.registration(
         fixed=template,
         moving=image,
@@ -152,6 +166,12 @@ def get_transformations_for_atlas(
     :return: The transformations for the image to be aligned to the Allen template.
     :rtype: tuple[dict, dict]
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     syn_allen, syn_transform_allen, _rigid_transform_allen = deformably_register_volume(
         template_allen,
         None,
@@ -219,6 +239,12 @@ def align_brain_region_to_atlas(
     :return: The brain region mask aligned to the target volume.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
     # Make sure all images are in RAS+ orientation
@@ -338,6 +364,12 @@ def align_annotations_to_volume(
     :return: The aligned annotation.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     assert resolution in [10, 25, 50, 100], "Resolution must be 10, 25, 50 or 100"
 
     # Make sure all images are in RAS+ orientation
@@ -391,6 +423,12 @@ def align_volume_to_allen(
     :return: The aligned image
     :rtype: ANTsImage
     """
+    try:
+        import ants  # noqa: F401 -- imported for the actionable error; deformably_register_volume re-imports
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        )
     temp_folder = tempfile.TemporaryDirectory()
     # Get the Allen template
     template = download_allen_template(temp_folder.name, resolution=resolution, keep_nrrd=False)

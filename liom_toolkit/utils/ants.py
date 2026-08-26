@@ -1,18 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dask.array as da
 import numpy as np
-from ants import ANTsImage
 from ome_zarr.reader import Node
 
 from .io import load_zarr_image_from_node, load_zarr_transform_from_node
 
-try:
-    import ants
-except ImportError:
-    raise ImportError(
-        "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
-    )
+if TYPE_CHECKING:
+    from ants import ANTsImage
 
 
 def convert_dask_to_ants(
@@ -35,6 +32,12 @@ def convert_dask_to_ants(
     :return: The converted ANTs image.
     :rtype: ANTsImage
     """
+    try:
+        import ants
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
+        )
     # Compute dask array to get values
     array = dask_array.compute()
 
@@ -68,6 +71,12 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) 
     :return: The loaded ANTs image.
     :rtype: ANTsImage
     """
+    try:
+        import ants  # noqa: F401 -- imported for the actionable error; convert_dask_to_ants re-imports
+    except ImportError:
+        raise ImportError(
+            "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."
+        )
     image = load_zarr_image_from_node(node, resolution_level)
     if len(image.shape) == 4:
         image = image[channel, :, :, :]

@@ -13,8 +13,6 @@ from ome_zarr.scale import ArrayLike
 from ome_zarr.writer import Methods, write_labels
 from tqdm.auto import tqdm
 
-from liom_toolkit.segmentation import segment_3d
-
 from .utils import convert_to_png_for_saving
 
 # NGFF UDUNITS-2 length units accepted by the writer's ``unit`` parameter.
@@ -168,6 +166,8 @@ def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=
     :return: The mask
     :rtype: np.ndarray
     """
+    from liom_toolkit.segmentation import segment_3d
+
     node = load_zarr(zarr_file)[0]
     image = load_zarr_image_from_node(node, resolution_level=resolution_level)
     if len(image.shape) == 4:
