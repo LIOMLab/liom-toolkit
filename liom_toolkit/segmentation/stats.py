@@ -211,6 +211,10 @@ def calculate_regional_density(
     """
     vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
+    if total_area == 0:
+        raise ValueError(
+            "Empty region: regionprops area is 0 (bad region mask, caller error)"
+        )
     iio.imwrite(output_dir + str(region_index) + ".tif", img_as_ubyte(region))
     density = vessel_area / total_area
     return vessel_area, total_area, density
