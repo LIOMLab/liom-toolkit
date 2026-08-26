@@ -269,7 +269,7 @@ def test_build_template_masks_and_kwarg_wiring(mock_ants_templating):
     # invariant is that iio exists and is used for image_read/image_write.
     # We assert iio is the ants.core.ants_image_io module (resolved via the
     # function-scope import).
-    assert mock_iio is sys.modules.get("ants.core.ants_image_io") or mock_iio is mock_ants.core.ants_image_io
+    assert mock_iio is sys.modules.get("ants.core.ants_image_io")
 
     # (5) D-01: build_template's ants.registration calls do NOT have
     # use_legacy_histogram_matching — it is an internal helper that relies
