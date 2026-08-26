@@ -29,6 +29,7 @@ import numpy as np
 from liom_toolkit.conversion.conversion import save_zarr
 from liom_toolkit.utils.io import load_zarr
 from liom_toolkit.visualization import (
+    extract_and_save_slice_from_zarr,
     extract_and_save_slices_from_zarr,
     extract_slices_from_zarr,
 )
@@ -114,3 +115,9 @@ def test_extract_slices_from_zarr_name_exposed():
     # Both names must be callable objects re-exported via the package surface.
     assert callable(extract_slices_from_zarr)
     assert callable(extract_and_save_slices_from_zarr)
+    # The singular variant was renamed from the misspelled
+    # ``extract_and_save_slice_form_zarr`` to the correct ``from_zarr``
+    # spelling, matching the plural rename. It is star-exported via
+    # ``liom_toolkit/visualization/__init__.py`` so the renamed name is
+    # part of the public API surface.
+    assert callable(extract_and_save_slice_from_zarr)

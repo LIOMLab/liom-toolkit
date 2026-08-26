@@ -33,7 +33,7 @@ def extract_single_slice_from_zarr(
     return image
 
 
-def extract_and_save_slice_form_zarr(
+def extract_and_save_slice_from_zarr(
     node: Node, z: int, data_dir: str, channel: int = 0, resolution_level: int = 0, name: str = "S1"
 ):
     """
