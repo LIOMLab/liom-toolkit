@@ -378,10 +378,6 @@ def align_annotations_to_volume(
     :type deformable_type: str
     :param keep_intermediary: Whether to keep intermediary files or not.
     :type keep_intermediary: bool
-    :param syn_image: The syn transform for the image. If None, it will be calculated.
-    :type syn_image: dict
-    :param syn_allen: The syn transform for the Allen template. If None, it will be calculated.
-    :type syn_allen: dict
     :return: The aligned annotation.
     :rtype: ANTsImage
     """
