@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 import zarr
 
-from liom_toolkit.utils.io import load_zarr
+from liom_toolkit.utils.io import load_omero_channels, load_zarr
 from liom_toolkit.utils.zarr_writer import (
     AnalysisOmeZarrWriter,
     OmeZarrWriter,
@@ -142,10 +142,17 @@ def test_create_transformation_dict_downscale_factor():
 # ---------------------------------------------------------------------------
 
 
-def _root_attrs(zpath: str) -> dict:
+def _root_attrs(zpath: str) -> dict | None:
     """Read the raw root ``ome`` attrs via zarr.open (the ome-zarr Reader
-    Node.metadata does not expose the raw ``ome`` key)."""
-    return zarr.open(zpath, mode="r").attrs["ome"]
+    Node.metadata does not expose the raw ``ome`` key).
+
+    Tolerates a missing ``ome`` key (returns ``None``) — ome-zarr files from
+    elsewhere, older NGFF versions, or files written without channel
+    metadata may not carry the ``ome`` root attr. A missing OPTIONAL
+    metadata key is a legitimate state, not an error (AGENTS.md §2 inverted
+    on the read side: surface as None, not a crash).
+    """
+    return zarr.open(zpath, mode="r").attrs.get("ome")
 
 
 def test_omezarrwriter_streaming_3d_roundtrip(tmp_path):
@@ -243,8 +250,13 @@ def test_omezarrwriter_streaming_4d_multichannel_omero(tmp_path):
         assert scale[3] == pytest.approx(6.5 * 2**i)
 
     ome = _root_attrs(zpath)
+    assert ome is not None
     assert ome["version"] == "0.5"
-    channels = ome["omero"]["channels"]
+    # Read omero.channels via the safe production helper (returns None when
+    # ome/omero/channels is absent — guards against KeyError on files from
+    # other writers / older NGFF versions / files written without omero).
+    channels = load_omero_channels(zpath)
+    assert channels is not None
     assert len(channels) == 2
     assert channels[0]["label"] == "555 nm"
     assert channels[0]["color"] == "00FF00"

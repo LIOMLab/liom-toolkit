@@ -121,9 +121,14 @@ def test_save_zarr_load_zarr_round_trip(tmp_path):
     # NGFF v0.5 schema push: root ome metadata version is "0.5".
     # The ome_zarr Reader's Node.metadata dict does not expose the raw "ome"
     # key (only "axes"/"name"/"coordinateTransformations"), so the version
-    # check goes through zarr.open() directly.
+    # check goes through zarr.open() directly. Use .get() — files from other
+    # writers / older NGFF versions may not carry the "ome" root attr, and a
+    # missing OPTIONAL metadata key is a legitimate state (returns None),
+    # not an error.
     root = zarr.open(zpath, mode="r")
-    assert root.attrs["ome"]["version"] == "0.5"
+    ome = root.attrs.get("ome")
+    assert ome is not None
+    assert ome["version"] == "0.5"
 
     # coordinateTransformations: one list per pyramid level. The auto-derived
     # transforms come back as a list of dicts (Scale, then Translation for

@@ -76,6 +76,37 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict
     return transform
 
 
+def load_omero_channels(zarr_file: str) -> list[dict] | None:
+    """Read the ``omero.channels`` list from an OME-Zarr root group.
+
+    OME-Zarr files written by THIS package always carry an ``ome`` root attr
+    with an ``omero`` sub-key (when ``omero_channels`` was passed to
+    ``finalize``). But files from elsewhere — other writers, older NGFF
+    versions, or files written without channel metadata (``omero_channels=None``)
+    — may NOT have the ``ome`` key, or may have ``ome`` without an ``omero``
+    sub-key, or ``omero`` without a ``channels`` sub-key. A missing OPTIONAL
+    metadata key is a legitimate state, not an error: this helper returns
+    ``None`` in all those cases rather than raising ``KeyError`` (the
+    AGENTS.md §2 "no silent data loss" principle inverted on the read side —
+    a missing optional key surfaces as None, not a crash).
+
+    :param zarr_file: Path or ``file://`` URL to the OME-Zarr group.
+    :return: The ``omero.channels`` list of channel dicts, or ``None`` when
+        the file has no ``ome`` / ``omero`` / ``omero.channels`` metadata.
+    """
+    root = zarr.open(zarr_file, mode="r")
+    ome = root.attrs.get("ome")
+    if not isinstance(ome, dict):
+        return None
+    omero = ome.get("omero")
+    if not isinstance(omero, dict):
+        return None
+    channels = omero.get("channels")
+    if channels is None:
+        return None
+    return list(channels)
+
+
 def save_atlas_to_zarr(
     zarr_file: str,
     atlas: ArrayLike,
