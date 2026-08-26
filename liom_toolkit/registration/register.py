@@ -25,6 +25,7 @@ def deformably_register_volume(
     interpolator: str = "linear",
     rigid_interpolator: str = "linear",
     use_composite: bool = True,
+    use_legacy_histogram_matching: bool = False,
 ) -> (ANTsImage, dict, dict):
     """
     Register an image to a template using a rigid registration followed by a deformable registration.
@@ -45,6 +46,10 @@ def deformably_register_volume(
     :type rigid_interpolator: str
     :param use_composite: Whether to create a composite transform or not
     :type use_composite: bool
+    :param use_legacy_histogram_matching: Forwarded to ants.registration. False
+        matches the antspyx 0.6.x default (histogram matching off); the public
+        API entry points pass False explicitly, direct callers rely on this default.
+    :type use_legacy_histogram_matching: bool
     :return: The registered image, the transform from the rigid registration,
             and the transform from the deformable registration
     :rtype: tuple[ANTsImage, dict, dict]
@@ -62,6 +67,7 @@ def deformably_register_volume(
         rigid_type=rigid_type,
         interpolator=rigid_interpolator,
         use_composite=use_composite,
+        use_legacy_histogram_matching=use_legacy_histogram_matching,
     )
 
     if use_composite:
@@ -76,6 +82,7 @@ def deformably_register_volume(
         type_of_transform=deformable_type,
         initial_transform=initial_transform,
         write_composite_transform=use_composite,
+        use_legacy_histogram_matching=use_legacy_histogram_matching,
     )
     syn = ants.apply_transforms(
         fixed=template,
@@ -93,6 +100,7 @@ def rigidly_register_volume(
     rigid_type: str = "Similarity",
     interpolator: str = "linear",
     use_composite: bool = True,
+    use_legacy_histogram_matching: bool = False,
 ) -> (ANTsImage, dict):
     """
     Register an image to a template using a rigid registration.
@@ -109,6 +117,10 @@ def rigidly_register_volume(
     :type interpolator: str
     :param use_composite: Whether to create a composite transform or not
     :type use_composite: bool
+    :param use_legacy_histogram_matching: Forwarded to ants.registration. False
+        matches the antspyx 0.6.x default (histogram matching off); the public
+        API entry points pass False explicitly, direct callers rely on this default.
+    :type use_legacy_histogram_matching: bool
     :return: The registered image and the transform from the rigid registration
     :rtype: tuple[ANTsImage, dict]
     """
@@ -124,6 +136,7 @@ def rigidly_register_volume(
         moving_mask=mask,
         type_of_transform=rigid_type,
         write_composite_transform=use_composite,
+        use_legacy_histogram_matching=use_legacy_histogram_matching,
     )
     rigid = ants.apply_transforms(
         fixed=template,
@@ -143,6 +156,7 @@ def get_transformations_for_atlas(
     rigid_type: str = "Similarity",
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
+    use_legacy_histogram_matching: bool = False,
 ) -> (dict, dict):
     """
     Get the transformations for an image to be aligned to the Allen template.
@@ -163,6 +177,10 @@ def get_transformations_for_atlas(
     :type deformable_type: str
     :param keep_intermediary: Whether to keep intermediary files or not.
     :type keep_intermediary: bool
+    :param use_legacy_histogram_matching: Forwarded to deformably_register_volume
+        (and onward to ants.registration). False matches the antspyx 0.6.x
+        default; the public API entry points pass False explicitly.
+    :type use_legacy_histogram_matching: bool
     :return: The transformations for the image to be aligned to the Allen template.
     :rtype: tuple[dict, dict]
     """
@@ -179,6 +197,7 @@ def get_transformations_for_atlas(
         rigid_type=rigid_type,
         deformable_type=deformable_type,
         use_composite=True,
+        use_legacy_histogram_matching=use_legacy_histogram_matching,
     )
     if keep_intermediary:
         ants.image_write(syn_allen, f"{data_dir}/syn_allen.nii")
@@ -189,6 +208,7 @@ def get_transformations_for_atlas(
         rigid_type=rigid_type,
         deformable_type=deformable_type,
         use_composite=True,
+        use_legacy_histogram_matching=use_legacy_histogram_matching,
     )
     if keep_intermediary:
         ants.image_write(syn_image, f"{data_dir}/syn_image.nii")
@@ -289,6 +309,7 @@ def align_brain_region_to_atlas(
             rigid_type=rigid_type,
             deformable_type=deformable_type,
             keep_intermediary=keep_intermediary,
+            use_legacy_histogram_matching=False,
         )
     else:
         syn_transform_image = syn_image
@@ -386,7 +407,12 @@ def align_annotations_to_volume(
     pbar.set_description("Starting registration process")
     # Register the volume to the template
     _, syn_transform, _rigid_transform = deformably_register_volume(
-        target_volume, mask, template, rigid_type=rigid_type, deformable_type=deformable_type
+        target_volume,
+        mask,
+        template,
+        rigid_type=rigid_type,
+        deformable_type=deformable_type,
+        use_legacy_histogram_matching=False,
     )
     pbar.update(1)
 
@@ -434,7 +460,9 @@ def align_volume_to_allen(
     template = download_allen_template(temp_folder.name, resolution=resolution, keep_nrrd=False)
 
     # Align the image to the Allen template
-    aligned_image, _ = deformably_register_volume(image, mask, template)
+    aligned_image, _ = deformably_register_volume(
+        image, mask, template, use_legacy_histogram_matching=False
+    )
 
     temp_folder.cleanup()
     return aligned_image

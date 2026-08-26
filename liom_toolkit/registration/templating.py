@@ -467,7 +467,10 @@ def build_template_for_resolution(
         )
     if register_to_template:
         template_transform = ants.registration(
-            fixed=template_volume, moving=template, type_of_transform="SyN"
+            fixed=template_volume,
+            moving=template,
+            type_of_transform="SyN",
+            use_legacy_histogram_matching=False,
         )
         template = apply_transforms(
             fixed=template_volume,
