@@ -330,10 +330,15 @@ class OmeZarrWriter:
             (``{"label", "color" (6-char hex, no #), "active", "wavelength",
             "window": {"min","max","start","end"}}``). Written to
             ``root.attrs["ome"]["omero"]["channels"]`` by the ome-zarr writer.
-        :raises ValueError: If ``res`` is not a 3-element sequence.
+        :raises ValueError: If ``res`` is not a 3-element sequence or any
+            element is not positive (a negative/zero voxel size is meaningless
+            and would silently produce wrong physical coordinates —
+            AGENTS.md §2).
         """
         if len(res) != 3:
             raise ValueError(f"res must be a 3-element (z, y, x) sequence, got len={len(res)}.")
+        if any(v <= 0 for v in res):
+            raise ValueError(f"res values must be positive, got {tuple(res)!r}.")
         res = (float(res[0]), float(res[1]), float(res[2]))
 
         axis_names = [ax["name"] for ax in self.axes]
@@ -469,12 +474,17 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             anisotropic output voxels).
         :param omero_channels: Optional omero channel dicts (same shape as
             :meth:`OmeZarrWriter.finalize`).
-        :raises ValueError: If ``base_res`` is not a 3-element sequence.
+        :raises ValueError: If ``base_res`` is not a 3-element sequence or
+            any element is not positive (a negative/zero base voxel is
+            meaningless and would crash on ``target_um / b`` or silently
+            produce wrong physical coordinates — AGENTS.md §2).
         """
         if len(base_res) != 3:
             raise ValueError(
                 f"base_res must be a 3-element (z, y, x) sequence, got len={len(base_res)}."
             )
+        if any(v <= 0 for v in base_res):
+            raise ValueError(f"base_res values must be positive, got {tuple(base_res)!r}.")
         base_res = (float(base_res[0]), float(base_res[1]), float(base_res[2]))
 
         # Drop targets that would upscale (silently invent data, AGENTS.md §2).
