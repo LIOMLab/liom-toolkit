@@ -12,12 +12,6 @@ established optional-dep gating pattern (AGENTS section 5), each test calls
 for real on the 3.12-full CI leg (where the ``ai`` extra is installed) and
 cleanly skip on the 3.14-core leg (where it is not).
 
-The conftest pre-populates ``sys.modules`` with a lightweight stand-in for
-``liom_toolkit.segmentation.vseg.model`` so the barrel ``vseg/__init__.py``
-import chain succeeds on the base install. Each test pops that stand-in
-before importing so the real module (with real ``torch``/``wandb`` imports)
-is exercised.
-
 Coverage:
 
 * ``test_vsegmodel_imports`` -- ``VsegModel`` is callable and is a subclass
@@ -29,8 +23,6 @@ Coverage:
   production checkpoint load path expects.
 """
 
-import sys
-
 import pytest
 
 
@@ -38,8 +30,6 @@ def test_vsegmodel_imports():
     """VsegModel is callable and subclasses torch.nn.Module."""
     pytest.importorskip("torch")
     pytest.importorskip("wandb")
-    # Discard the conftest.py mock stand-in so the real module is imported.
-    sys.modules.pop("liom_toolkit.segmentation.vseg.model", None)
 
     import torch
     from liom_toolkit.segmentation.vseg.model import VsegModel
@@ -54,8 +44,6 @@ def test_vsegmodel_state_dict_round_trip_weights_only_true(tmp_path):
     proves the weights_only=True-first branch works for the object shape the
     production checkpoint load path expects."""
     pytest.importorskip("torch")
-    # Discard the conftest.py mock stand-in so the real module is imported.
-    sys.modules.pop("liom_toolkit.segmentation.vseg.model", None)
 
     import torch
     from liom_toolkit.segmentation.vseg.model import VsegModel
