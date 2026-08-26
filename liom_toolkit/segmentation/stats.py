@@ -21,7 +21,6 @@ from skimage.morphology import skeletonize
 from skimage.util import img_as_ubyte, img_as_uint
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import construct_reference_space
 from liom_toolkit.utils.dask_client import dask_client_manager
 
 PIL.Image.MAX_IMAGE_PIXELS = None
@@ -370,6 +369,8 @@ def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
         data_dir = temp_dir.name
 
     # Construct reference space and get itk ids
+    from liom_toolkit.utils import construct_reference_space
+
     rs = construct_reference_space(data_dir)
     structure_tree = rs.structure_tree
     _, labels = rs.export_itksnap_labels()

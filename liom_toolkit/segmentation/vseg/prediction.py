@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import os
 import shutil
+from typing import TYPE_CHECKING
 
 import cv2
 import imageio.v3 as iio
 import numpy as np
-import torch
 import zarr
 from skimage.color import gray2rgb, rgb2gray
 from tqdm.auto import tqdm
 
-from .dataset import OmeZarrDataset
-from .model import VsegModel
 from .utils import add_patch_to_empty_array, create_dir, numeric_filesort, process_image
+
+if TYPE_CHECKING:
+    from .dataset import OmeZarrDataset
+    from .model import VsegModel
 
 
 def predict_one(
@@ -45,6 +47,12 @@ def predict_one(
     :return: The predicted image
     :rtype: np.ndarray
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
     image = iio.imread(img_path)
     H = image.shape[0]
     W = image.shape[1]
@@ -129,6 +137,12 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     :param zarr_location: The location of the zarr file
     :type zarr_location: str
     """
+    try:
+        import torch  # noqa: F401 -- do_predict uses torch; guard gives actionable error
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
     new_volume = zarr.open(
         zarr_location,
         mode="w",
@@ -159,6 +173,12 @@ def do_predict(model: VsegModel, patch: torch.Tensor) -> np.ndarray:
     :return: The predicted patch
     :rtype: np.ndarray
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
     if patch.ndim == 3:
         patch = patch.unsqueeze(0)
     with torch.no_grad():

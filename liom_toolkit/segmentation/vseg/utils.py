@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import os
 from glob import glob
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import imageio.v3 as iio
 import natsort
 import numpy as np
-import torch
 from numpy import dtype, ndarray
 from patchify import patchify
 from PIL import Image
 from skimage.color import rgb2gray
 from skimage.exposure import equalize_adapthist
-from sklearn.metrics import accuracy_score, f1_score, jaccard_score, precision_score, recall_score
+
+if TYPE_CHECKING:
+    import torch
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -41,6 +42,14 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
     :return: List of metrics
     :rtype: list[float]
     """
+    from sklearn.metrics import (
+        accuracy_score,
+        f1_score,
+        jaccard_score,
+        precision_score,
+        recall_score,
+    )
+
     y_true = y_true > 0.5
     y_true = y_true.astype(np.uint8)
     y_true = y_true.reshape(-1)
@@ -69,6 +78,12 @@ def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
     :return: The processed image
     :rtype: torch.Tensor
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
     x = np.expand_dims(image, axis=0)
     x = np.expand_dims(x, axis=0)
     x = x.astype(np.float32)

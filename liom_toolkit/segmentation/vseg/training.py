@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-import torch.nn
 import wandb
 from skimage.color import gray2rgb, label2rgb
-from torch import device
-from torch.utils.data import DataLoader, Subset, random_split
 from tqdm.auto import tqdm
 
-from .dataset import OmeZarrLabelDataSet
-from .loss import DiceBCELoss
-from .model import VsegModel
 from .utils import calculate_metrics, create_dir
+
+if TYPE_CHECKING:
+    from torch import device
+    from torch.utils.data import DataLoader, Subset
+
+    from .dataset import OmeZarrLabelDataSet
+    from .loss import DiceBCELoss
+    from .model import VsegModel
 
 
 def train(
@@ -79,6 +82,12 @@ def evaluate(
     :return: The loss, the true labels, the predicted labels, the input, and the metrics
     :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float)
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
     # Initialize epoch loss to 0
     # Added metrics
     epoch_loss = 0.0
@@ -185,7 +194,7 @@ def mask_image(x, y_mask, pred_mask, i):
 def train_model(
     dataset_file: str,
     node_name: str,
-    dev: device = torch.device("cuda"),
+    dev: device = None,
     output_train: str = "training",
     learning_rate: float = 0.003673,
     batch_size: int = 35,
@@ -222,6 +231,19 @@ def train_model(
     :type pin_memory: bool
     :return: None
     """
+    try:
+        import torch
+        from torch.utils.data import DataLoader, Subset, random_split
+
+        from .dataset import OmeZarrLabelDataSet
+        from .loss import DiceBCELoss
+        from .model import VsegModel
+    except ImportError:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        )
+    if dev is None:
+        dev = torch.device("cuda")
     # Setup training parameters and wandb run
     hyperparameter_defaults = {
         "batch_size": batch_size,
@@ -351,6 +373,8 @@ def train_model(
 
 if __name__ == "__main__":
     # Hardcoded for wandb sweeps
+    import torch
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset_dir = ""
     output = ""
