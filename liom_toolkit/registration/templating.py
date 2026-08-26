@@ -268,9 +268,6 @@ def build_template(
             temp = ants.resample_image_to_target(temp, initial_template)
             initial_template = initial_template + temp
 
-    if not os.path.exists("template_progress") and save_progress:
-        os.makedirs("template_progress")
-
     # Deliberate fork divergence from upstream antspyx 0.6.3, which still
     # uses the TOCTOU-vulnerable tempfile.mktemp for work_dir. mkdtemp
     # atomically creates a unique directory (no race window); work_dir is
