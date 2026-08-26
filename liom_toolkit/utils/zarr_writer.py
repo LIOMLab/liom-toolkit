@@ -258,6 +258,11 @@ class OmeZarrWriter:
         self.store_path_str = str(store_path)
         self.fmt = CurrentFormat()
         self.axes = generate_axes_dict(ndims, unit=unit)
+        # finalize/finalize_with_resolutions are single-call: a second call
+        # would crash with zarr's ContainsArrayError (level "1" already
+        # exists) instead of a clear message. The flag turns that obscure
+        # internal error into an explicit RuntimeError (WR-04).
+        self._finalized = False
 
         # Symlink-aware directory creation (FileExistsError on collision when
         # overwrite=False — no silent clobber).
@@ -334,7 +339,16 @@ class OmeZarrWriter:
             element is not positive (a negative/zero voxel size is meaningless
             and would silently produce wrong physical coordinates —
             AGENTS.md §2).
+        :raises RuntimeError: If :meth:`finalize` has already been called on
+            this writer (finalize is single-call — a second call would crash
+            with zarr's ``ContainsArrayError`` when re-creating level "1").
         """
+        if self._finalized:
+            raise RuntimeError(
+                "finalize() has already been called on this writer; it is "
+                "single-call (re-calling would crash re-creating pyramid "
+                "levels). Construct a new writer to write another stack."
+            )
         if len(res) != 3:
             raise ValueError(f"res must be a 3-element (z, y, x) sequence, got len={len(res)}.")
         if any(v <= 0 for v in res):
@@ -400,6 +414,7 @@ class OmeZarrWriter:
             name="stack",
             metadata=metadata,
         )
+        self._finalized = True
 
 
 class AnalysisOmeZarrWriter(OmeZarrWriter):
@@ -478,7 +493,16 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             any element is not positive (a negative/zero base voxel is
             meaningless and would crash on ``target_um / b`` or silently
             produce wrong physical coordinates — AGENTS.md §2).
+        :raises RuntimeError: If :meth:`finalize_with_resolutions` (or
+            :meth:`finalize`) has already been called on this writer.
         """
+        if self._finalized:
+            raise RuntimeError(
+                "finalize_with_resolutions() has already been called on this "
+                "writer; it is single-call (re-calling would crash "
+                "re-creating pyramid levels). Construct a new writer to "
+                "write another stack."
+            )
         if len(base_res) != 3:
             raise ValueError(
                 f"base_res must be a 3-element (z, y, x) sequence, got len={len(base_res)}."
@@ -577,3 +601,4 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             name="stack",
             metadata=metadata,
         )
+        self._finalized = True
