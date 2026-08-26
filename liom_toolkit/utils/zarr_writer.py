@@ -410,8 +410,14 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         Each target in ``target_resolutions_um`` becomes a level L1..Ln,
         downsampled FROM L0 (raw) — NOT from the previous target level.
 
-        Targets smaller than ``min(base_res)`` are dropped (they would
-        upscale, silently inventing data — AGENTS.md §2).
+        Targets that would upscale ANY dim are dropped (they would silently
+        invent data via interpolation — AGENTS.md §2). For
+        ``make_isotropic=True`` a target is valid only if
+        ``target_um >= max(base_res)`` (so every dim's per-dim scale factor is
+        >= 1); for ``make_isotropic=False`` the uniform scale
+        ``target_um / min(base_res)`` is >= 1 whenever
+        ``target_um >= min(base_res)``, so the existing ``min_base`` filter
+        applies.
 
         Per-level scale dicts record the **ACTUAL per-dim voxel**
         (``base_res_d * sf``), NOT the target_um. For ``make_isotropic=True``
@@ -422,7 +428,8 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
 
         :param base_res: ``(z, y, x)`` base voxel size in µm at L0.
         :param target_resolutions_um: Target resolutions in µm (default
-            ``(10, 25, 50, 100)``). Targets < ``min(base_res)`` are dropped.
+            ``(10, 25, 50, 100)``). Targets that would upscale any dim are
+            dropped (see above).
         :param make_isotropic: If True (default), each dim is scaled
             independently to reach the target resolution (isotropic output
             voxels, aspect ratio changes). If False, all dims scale uniformly
@@ -438,9 +445,28 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             )
         base_res = (float(base_res[0]), float(base_res[1]), float(base_res[2]))
 
-        # Drop targets that would upscale (silently invent data).
+        # Drop targets that would upscale (silently invent data, AGENTS.md §2).
+        # The validity check is per-dim, not against the minimum base: a target
+        # is valid only if every dim's per-dim scale factor ``sf_d = target_um /
+        # base_res_d`` is >= 1 (i.e. the target downsamples that dim, never
+        # upscales it).
+        #
+        # For ``make_isotropic=True`` each dim is scaled independently to reach
+        # the target, so a target is valid iff ``target_um >= max(base_res)``
+        # (otherwise the thicker dims would have ``sf_d < 1`` and would be
+        # silently upscaled by ``da_resize`` — exactly the silent-data-invention
+        # failure mode this writer is meant to forbid).
+        #
+        # For ``make_isotropic=False`` the uniform scale is
+        # ``sf = target_um / min(base_res)``; ``target_um >= min(base_res)``
+        # already guarantees ``sf >= 1`` for every dim, so the existing
+        # ``min_base`` filter is correct on that path.
         min_base = min(base_res)
-        valid_targets = [float(t) for t in target_resolutions_um if t >= min_base]
+        max_base = max(base_res)
+        if make_isotropic:
+            valid_targets = [float(t) for t in target_resolutions_um if t >= max_base]
+        else:
+            valid_targets = [float(t) for t in target_resolutions_um if t >= min_base]
 
         # L0 stays raw (untouched). Downsample each target FROM L0.
         src = da.from_zarr(self.root.store_path / "0")
