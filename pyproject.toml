@@ -120,16 +120,20 @@ markers = [
 # filters (by message/module) here only when a specific noisy warning is
 # observed during a test run.
 filterwarnings = [
-    # ome_zarr.writer.write_labels declares ``scaler: Scaler | None =
-    # Scaler(order=0)`` as a default argument, so ``Scaler(order=0)`` is
-    # instantiated at function-definition (module-import) time and fires this
-    # DeprecationWarning on EVERY import of ``ome_zarr.writer`` — including
-    # imports that only use ``write_image`` (which defaults ``scaler=None``
-    # and never instantiates ``Scaler``). We do not use ``write_labels`` or
-    # the ``Scaler`` class anywhere in the package; this is purely upstream
-    # noise until ome-zarr removes the def-time default. Filter by exact
-    # message so any OTHER ome-zarr deprecation still surfaces.
-    "ignore:Call to deprecated class Scaler:DeprecationWarning",
+    # pynrrd 1.1.3 (latest) calls datetime.utcnow() inside nrrd.write
+    # (nrrd/writer.py:148), which is deprecated in Python 3.12+. This is
+    # purely upstream — we cannot fix nrrd's code and cannot upgrade
+    # (already latest). Scope by exact message so any other nrrd
+    # deprecation still surfaces. AGENTS.md §5 sanctions this targeted
+    # filter for unfixable upstream deprecations.
+    #
+    # Note: Python's warnings filter matches the message with re.match
+    # (anchored at the start), and the actual warning text begins
+    # "datetime.datetime.utcnow() is deprecated" — the regex must include
+    # the "datetime." prefix to match. A module scope cannot be used
+    # because datetime.utcnow() raises the warning from C code (_datetime
+    # module), so the warning's frame module is not nrrd.writer.
+    "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning",
 ]
 
 [tool.ruff]

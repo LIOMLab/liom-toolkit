@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 
 import dask.array as da
 import imageio.v3 as iio
@@ -10,7 +11,6 @@ from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
 from ome_zarr.scale import ArrayLike
-from ome_zarr.writer import Methods, write_image, write_label_metadata
 from tqdm.auto import tqdm
 
 from .utils import convert_to_png_for_saving
@@ -280,7 +280,15 @@ def save_label_to_zarr(
 
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axis_names)
     scale_factors = build_scale_factors(n_levels, axis_names)
-    scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
+    # ome_zarr matches scale keys to axes by name. When the data is 4D
+    # (c, z, y, x) the channel axis "c" is not a physical axis, so its
+    # scale is 1.0 (matches create_transformation_dict in
+    # utils/zarr_writer.py). Omitting it makes ome_zarr warn and default
+    # the channel scale to 1.0 silently — set it explicitly instead.
+    if n_dims == 4:
+        scale = {"c": 1.0, "z": scales[0], "y": scales[1], "x": scales[2]}
+    else:
+        scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
 
     # Write the label pyramid with ``write_image`` + ``write_label_metadata``
     # instead of the deprecated ``write_labels`` wrapper. ``write_labels``'
@@ -292,24 +300,39 @@ def save_label_to_zarr(
     # group we pass, so we reproduce the ``labels/{name}`` layout
     # ``write_labels`` produced: pyramid datasets under ``labels/{name}/i``
     # plus ``image-label`` metadata on the ``labels`` group.
+    #
+    # ``write_label_metadata`` is also imported from ``ome_zarr.writer``, so
+    # importing it at module top would trigger the same def-time Scaler
+    # warning. Lazy-import both writer names here and suppress only this exact
+    # upstream def-time warning at the import boundary so it never reaches the
+    # test suite, instead of blanket-filtering the whole DeprecationWarning
+    # class in pytest config.
     labels_group = root.require_group("labels")
     label_subgroup = labels_group.require_group(name)
-    write_image(
-        image=label,
-        group=label_subgroup,
-        axes=axes,
-        name=name,
-        scale_factors=scale_factors,
-        method=Methods.NEAREST,
-        scale=scale,
-        storage_options={"chunks": chunks},
-    )
-    write_label_metadata(
-        group=labels_group,
-        name=name,
-        colors=color_dict,
-        source={"image": "../../"},
-    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Call to deprecated class Scaler",
+            category=DeprecationWarning,
+        )
+        from ome_zarr.writer import Methods, write_image, write_label_metadata
+
+        write_image(
+            image=label,
+            group=label_subgroup,
+            axes=axes,
+            name=name,
+            scale_factors=scale_factors,
+            method=Methods.NEAREST,
+            scale=scale,
+            storage_options={"chunks": chunks},
+        )
+        write_label_metadata(
+            group=labels_group,
+            name=name,
+            colors=color_dict,
+            source={"image": "../../"},
+        )
 
 
 def generate_label_color_dict_mask() -> list[dict]:

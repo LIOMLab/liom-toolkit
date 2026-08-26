@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import warnings
 
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import zarr
 from natsort import natsorted
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
-from ome_zarr.writer import ArrayLike, Methods, write_image
+from ome_zarr.scale import ArrayLike
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
@@ -141,18 +142,44 @@ def save_zarr(
 
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, data.shape, axis_names)
     scale_factors = build_scale_factors(n_levels, axis_names)
-    scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
+    # ome_zarr matches scale keys to axes by name. When the data is 4D
+    # (c, z, y, x) the channel axis "c" is not a physical axis, so its
+    # scale is 1.0 (matches create_transformation_dict in
+    # utils/zarr_writer.py). Omitting it makes ome_zarr warn and default
+    # the channel scale to 1.0 silently — set it explicitly instead.
+    if n_dims == 4:
+        scale = {"c": 1.0, "z": scales[0], "y": scales[1], "x": scales[2]}
+    else:
+        scale = {"z": scales[0], "y": scales[1], "x": scales[2]}
 
-    write_image(
-        image=data,
-        group=root,
-        axes=axes,
-        scale_factors=scale_factors,
-        method=Methods.RESIZE,
-        scale=scale,
-        storage_options={"chunks": chunks},
-        scaler=None,
-    )
+    # ome_zarr.writer.write_labels declares ``scaler: Scaler | None =
+    # Scaler(order=0)`` as a default argument, so ``Scaler(order=0)`` is
+    # instantiated at function-definition (module-import) time and fires a
+    # DeprecationWarning on EVERY import of ``ome_zarr.writer`` — even imports
+    # that only use ``write_image`` (which defaults ``scaler=None`` and never
+    # instantiates ``Scaler``). We do not use ``Scaler`` or ``write_labels``
+    # anywhere in this package. Lazy-import ``write_image`` here and suppress
+    # only this exact upstream def-time warning at the import boundary so it
+    # never reaches the test suite, instead of blanket-filtering the whole
+    # DeprecationWarning class in pytest config.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Call to deprecated class Scaler",
+            category=DeprecationWarning,
+        )
+        from ome_zarr.writer import Methods, write_image
+
+        write_image(
+            image=data,
+            group=root,
+            axes=axes,
+            scale_factors=scale_factors,
+            method=Methods.RESIZE,
+            scale=scale,
+            storage_options={"chunks": chunks},
+            scaler=None,
+        )
     print("Done!")
 
 

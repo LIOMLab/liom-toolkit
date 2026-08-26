@@ -25,6 +25,7 @@ Target stack: NGFF v0.5, ``ome-zarr>=0.18.0``, ``zarr>=3.0``.
 from __future__ import annotations
 
 import shutil
+import warnings
 from pathlib import Path
 from typing import Sequence
 
@@ -34,7 +35,6 @@ import zarr
 from ome_zarr.dask_utils import resize as da_resize
 from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
-from ome_zarr.writer import write_multiscales_metadata
 
 from .io import _NGFF_LENGTH_UNITS, generate_axes_dict, validate_n_levels
 
@@ -415,14 +415,30 @@ class OmeZarrWriter:
             # separate top-level kwarg does NOT work.
             metadata = {**provenance, "omero": {"channels": omero_channels}}
 
-        write_multiscales_metadata(
-            self.root,
-            datasets,
-            fmt=self.fmt,
-            axes=self.axes,
-            name="stack",
-            metadata=metadata,
-        )
+        # Lazy-import write_multiscales_metadata from ome_zarr.writer and
+        # scope-suppress the upstream Scaler def-time DeprecationWarning at
+        # the import boundary (ome_zarr.writer.write_labels declares
+        # ``scaler: Scaler | None = Scaler(order=0)`` as a default arg, so
+        # Scaler is instantiated at module-import time and fires the warning
+        # on every import of ome_zarr.writer). We never use Scaler or
+        # write_labels; suppress only this exact warning so any other
+        # ome-zarr deprecation still surfaces.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Call to deprecated class Scaler",
+                category=DeprecationWarning,
+            )
+            from ome_zarr.writer import write_multiscales_metadata
+
+            write_multiscales_metadata(
+                self.root,
+                datasets,
+                fmt=self.fmt,
+                axes=self.axes,
+                name="stack",
+                metadata=metadata,
+            )
         self._finalized = True
 
 
@@ -615,12 +631,22 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         if omero_channels is not None:
             metadata = {**provenance, "omero": {"channels": omero_channels}}
 
-        write_multiscales_metadata(
-            self.root,
-            datasets,
-            fmt=self.fmt,
-            axes=self.axes,
-            name="stack",
-            metadata=metadata,
-        )
+        # Lazy-import write_multiscales_metadata (see OmeZarrWriter.finalize
+        # for the Scaler def-time suppression rationale).
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Call to deprecated class Scaler",
+                category=DeprecationWarning,
+            )
+            from ome_zarr.writer import write_multiscales_metadata
+
+            write_multiscales_metadata(
+                self.root,
+                datasets,
+                fmt=self.fmt,
+                axes=self.axes,
+                name="stack",
+                metadata=metadata,
+            )
         self._finalized = True
