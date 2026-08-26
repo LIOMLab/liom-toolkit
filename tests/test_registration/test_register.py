@@ -203,7 +203,7 @@ def test_deformably_register_volume_forwards_explicit_true(mock_ants):
     )
 
 
-def test_align_annotations_to_volume_wiring(mock_ants):
+def test_align_annotations_to_volume_wiring(mock_ants, tmp_path):
     """align_annotations_to_volume passes use_legacy_histogram_matching=False
     to deformably_register_volume, which forwards it to ants.registration."""
     from liom_toolkit.registration.register import align_annotations_to_volume
@@ -213,7 +213,7 @@ def test_align_annotations_to_volume_wiring(mock_ants):
         mask=MagicMock(),
         template=MagicMock(),
         atlas=MagicMock(),
-        data_dir="/tmp/test_align_ann",
+        data_dir=str(tmp_path / "test_align_ann"),
         resolution=25,
     )
     # The public API → internal helper → ants.registration chain:
@@ -247,7 +247,7 @@ def test_align_volume_to_allen_wiring(mock_ants):
         assert result is not None
 
 
-def test_align_brain_region_to_atlas_wiring(mock_ants):
+def test_align_brain_region_to_atlas_wiring(mock_ants, tmp_path):
     """align_brain_region_to_atlas passes use_legacy_histogram_matching=False
     to get_transformations_for_atlas (the public API tier per D-01)."""
     from liom_toolkit.registration.register import align_brain_region_to_atlas
@@ -274,7 +274,7 @@ def test_align_brain_region_to_atlas_wiring(mock_ants):
             mask=MagicMock(),
             template=MagicMock(),
             region="foo",
-            data_dir="/tmp/test_align_brain",
+            data_dir=str(tmp_path / "test_align_brain"),
             resolution=25,
             registration_volume=MagicMock(),
         )
