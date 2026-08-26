@@ -188,5 +188,8 @@ def test_use_custom_atlas_true_does_not_call_download(fake_ants):
     """use_custom_atlas=True calls ants.image_read, NOT download_allen_atlas."""
     dl_mock, _ = _run_create_full_zarr_volume(use_custom_atlas=True)
     dl_mock.assert_not_called()
-    # ants.image_read is invoked for both the template and the custom atlas.
-    assert fake_ants.image_read.call_count >= 1
+    # ants.image_read is invoked for both the template and the custom atlas;
+    # verify the custom-atlas branch was actually exercised by checking that
+    # image_read was called with the custom atlas path as a positional arg.
+    atlas_reads = [c for c in fake_ants.image_read.call_args_list if c.args[0] == "atlas.nrrd"]
+    assert len(atlas_reads) == 1

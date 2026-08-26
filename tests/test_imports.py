@@ -4,9 +4,8 @@ Run after every lazy-import move. Catches Pitfall 3 (lazy import not actually
 deferred -- a transitive module-top import still pulls the heavy dep).
 
 These tests have NO ``pytest.importorskip`` -- they MUST pass with core deps
-only (that is the whole point of DEP-02). If any of these fails on a
-core-only install, a module-top import somewhere in the package re-introduced
-an eager optional-dep import.
+only. If any of these fails on a core-only install, a module-top import
+somewhere in the package re-introduced an eager optional-dep import.
 """
 
 

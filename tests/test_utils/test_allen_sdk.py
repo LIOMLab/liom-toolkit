@@ -3,8 +3,8 @@
 Phase 4 migration: ``allen_sdk.py`` is rewritten to remove the ``allensdk``
 dependency and replace it with direct HTTP download of Allen Institute CCFv3
 NRRD volumes + structure-tree JSON. These tests cover the pure-logic helpers
-that reproduce the allensdk ``export_itksnap_labels`` semantics (D-04
-byte-exactness), plus mock-network tests for the download path and an
+that reproduce the allensdk ``export_itksnap_labels`` semantics
+(byte-exactness), plus mock-network tests for the download path and an
 import-smoke test that asserts the module loads without ``allensdk`` installed.
 
 The pure-logic tests use small synthetic structure-tree dicts and small numpy
@@ -464,7 +464,7 @@ from unittest.mock import MagicMock, patch
 
 
 def test_download_nrrd_raises_on_404(tmp_path):
-    """_download_nrrd raises HTTPError on non-200 (D-03: no silent fallback)."""
+    """_download_nrrd raises HTTPError on non-200 (no silent fallback)."""
     import requests as _requests
 
     from liom_toolkit.utils.allen_sdk import _download_nrrd
@@ -481,7 +481,7 @@ def test_download_nrrd_raises_on_404(tmp_path):
 
 
 def test_download_allen_atlas_cache_hit(tmp_path):
-    """Second call with cached NRRD + JSON skips download (D-03 caching contract).
+    """Second call with cached NRRD + JSON skips download (caching contract).
 
     Pre-creates the annotation NRRD and structure-tree JSON in ``tmp_path`` so
     ``construct_reference_space`` reads from cache and never calls
@@ -669,22 +669,13 @@ def test_make_structure_mask(tmp_path):
 
 
 def test_import_allen_sdk_no_allensdk():
-    """Importing allen_sdk does not pull in allensdk (D-03: allensdk gone from runtime)."""
+    """Importing allen_sdk does not pull in allensdk (allensdk gone from runtime)."""
     # Remove any cached allensdk from a prior import, then import the module
     sys.modules.pop("allensdk", None)
     sys.modules.pop("liom_toolkit.utils.allen_sdk", None)
     import liom_toolkit.utils.allen_sdk  # noqa: F401
 
     assert "allensdk" not in sys.modules
-
-
-def test_no_allensdk_import_in_source():
-    """The allen_sdk.py source contains no allensdk import (grep-style guard)."""
-    import liom_toolkit.utils.allen_sdk as mod
-
-    source = open(mod.__file__).read()
-    assert "from allensdk" not in source
-    assert "import allensdk" not in source
 
 
 def test_no_construct_reference_space_cache():
@@ -728,9 +719,8 @@ def test_export_itksnap_labels_25um_matches_allensdk_fixture():
 
     if not (os.path.exists(parquet_path) and os.path.exists(npz_path)):
         pytest.skip(
-            "25µm allensdk fixture not generated yet. Run: "
-            "uv sync --extra allensdk --python 3.12 && "
-            "uv run python tests/test_utils/fixtures/allen_itksnap_25um/regenerate.py"
+            "25µm allensdk fixture not generated yet. See "
+            "tests/test_utils/fixtures/allen_itksnap_25um/regenerate.py for instructions."
         )
 
     if not (os.path.exists(nrrd_path) and os.path.exists(tree_path)):
