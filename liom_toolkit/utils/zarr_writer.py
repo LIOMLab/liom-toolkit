@@ -431,6 +431,19 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
     raw L0 untouched at ``base_res`` and appends target levels as L1..Ln
     beyond raw L0. Raw data is never destroyed.
 
+    .. note::
+
+        ``AnalysisOmeZarrWriter`` inherits ``downscale_factor`` from
+        :class:`OmeZarrWriter.__init__` (so the constructor accepts it), but
+        :meth:`finalize_with_resolutions` **does not use it** — the analysis
+        pyramid's per-level scale factors are derived from
+        ``base_res``/``target_um``, not from a uniform ``downscale_factor``.
+        The inherited param is accepted only for constructor-signature
+        compatibility with the parent; passing a non-default value has no
+        effect on the analysis pyramid. (The parent's :meth:`finalize` DOES
+        use ``downscale_factor``, but :meth:`finalize_with_resolutions` is
+        the intended entry point for this subclass.)
+
     Usage::
 
         writer = AnalysisOmeZarrWriter(
