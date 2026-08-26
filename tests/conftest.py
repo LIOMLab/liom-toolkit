@@ -9,6 +9,7 @@ redefinition.
 import sys
 
 import numpy as np
+import PIL.Image
 import pytest
 
 
@@ -87,4 +88,21 @@ def fake_ants():
         yield fake
     finally:
         sys.modules.pop("ants", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_pil_max_image_pixels():
+    """Reset PIL.Image.MAX_IMAGE_PIXELS to the package's finite limit around every test.
+
+    PIL's MAX_IMAGE_PIXELS is a module-level global that guards against
+    decompression-bomb images. A test that mutates it (e.g. setting it to
+    None to allow a huge synthetic image, or to a small value to test the
+    guard) would leak that mutation into subsequent tests because module
+    globals are process-wide. This autouse fixture resets the global to
+    the package's chosen finite limit (2_000_000_000) before and after
+    every test so no cross-test contamination can occur.
+    """
+    PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000
+    yield
+    PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000
 

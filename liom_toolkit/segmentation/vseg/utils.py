@@ -16,7 +16,7 @@ from skimage.util import view_as_windows
 if TYPE_CHECKING:
     import torch
 
-Image.MAX_IMAGE_PIXELS = None
+Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None — AGENTS §2)
 
 
 def create_dir(path: str) -> None:

@@ -22,7 +22,7 @@ from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
 
-PIL.Image.MAX_IMAGE_PIXELS = None
+PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None — AGENTS §2)
 
 
 def compute_slice_metrics(

@@ -148,3 +148,23 @@ def test_create_patches_non_divisible(tmp_path):
     assert patch_shape[2] == 8 and patch_shape[3] == 8
     assert patch_shape[0] == 6 and patch_shape[1] == 6
     assert len(patches) == patch_shape[0] * patch_shape[1]
+
+
+def test_pil_max_image_pixels_is_finite():
+    """vseg/utils.py sets PIL.Image.MAX_IMAGE_PIXELS to a finite integer
+    (2_000_000_000), not None. None disables PIL's decompression-bomb guard
+    entirely (AGENTS §2 DoS vector); the finite limit preserves the guard
+    for untrusted inputs while accommodating legitimate large microscopy
+    volumes.
+
+    The autouse _reset_pil_max_image_pixels fixture in conftest.py
+    guarantees the global is the package value when this test reads it.
+    """
+    pytest.importorskip("torch")  # vseg/utils.py module-top imports torch
+    import PIL.Image
+
+    import liom_toolkit.segmentation.vseg.utils  # noqa: F401 -- import triggers the module-top assignment
+
+    assert PIL.Image.MAX_IMAGE_PIXELS is not None
+    assert isinstance(PIL.Image.MAX_IMAGE_PIXELS, int)
+    assert PIL.Image.MAX_IMAGE_PIXELS > 0
