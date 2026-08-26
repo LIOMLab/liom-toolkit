@@ -130,6 +130,7 @@ def pre_register_brain(
     brain: str,
     save_pre_reg: bool = False,
     registration_type: str = "Rigid",
+    output_dir: str | None = None,
 ) -> (ANTsImage, ANTsImage):
     """
     Register an image to a template and return the registered image and mask.
@@ -146,6 +147,11 @@ def pre_register_brain(
     :type save_pre_reg: bool
     :param registration_type: The type of registration to use
     :type registration_type: str
+    :param output_dir: Optional directory to write pre-registered images to.
+        When None (default) the files are written to a ``pre_registered/``
+        directory under the current working directory (legacy behavior);
+        when set, they are written under ``{output_dir}/pre_registered/``.
+    :type output_dir: str | None
     :return: The registered image and registered mask
     :rtype: tuple[ANTsImage, ANTsImage]
     """
@@ -166,10 +172,13 @@ def pre_register_brain(
         fixed=template, moving=mask, transformlist=image_reg_transform["fwdtransforms"]
     )
     if save_pre_reg:
-        if not os.path.exists("pre_registered"):
-            os.makedirs("pre_registered")
-        ants.image_write(image_reg, f"pre_registered/{brain}_pre_reg.nii.gz")
-        ants.image_write(mask_reg, f"pre_registered/{brain}_pre_reg_mask.nii.gz")
+        pre_reg_dir = (
+            os.path.join(output_dir, "pre_registered") if output_dir else "pre_registered"
+        )
+        if not os.path.exists(pre_reg_dir):
+            os.makedirs(pre_reg_dir)
+        ants.image_write(image_reg, os.path.join(pre_reg_dir, f"{brain}_pre_reg.nii.gz"))
+        ants.image_write(mask_reg, os.path.join(pre_reg_dir, f"{brain}_pre_reg_mask.nii.gz"))
     return image_reg, mask_reg
 
 
