@@ -542,3 +542,163 @@ def test_compute_slice_metrics_total_density_excludes_out_of_tissue_vessels(tmp_
     # rows (which all correctly see no in-tissue vessels).
     assert total_row["vessel area (um2)"] == pytest.approx(0.0)
     assert total_row["vessel density (um2/um2)"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# get_branching_points -- numerical-equivalence regression for the kernel
+# reduction (PERF-01b). The old algorithm inlined below is the reference.
+# ---------------------------------------------------------------------------
+
+
+def _old_get_branching_points(skeleton: np.ndarray) -> np.ndarray:
+    """The inherited 20-convolution branching-point detector (reference).
+
+    5 structural elements x 4 rotations = 20 ``ndi.binary_hit_or_miss`` calls,
+    OR-ed into the result. Inlined verbatim from the pre-refactor
+    ``stats.get_branching_points`` so the equivalence test is a true
+    numerical-equivalence regression (``array_equal``, not ``allclose``).
+    """
+    import scipy.ndimage as ndi
+
+    selems = []
+    selems.extend(
+        (
+            np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]),
+            np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]),
+            np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]),
+            np.array([[0, 1, 0], [1, 1, 0], [0, 0, 1]]),
+            np.array([[0, 0, 1], [1, 1, 1], [0, 1, 0]]),
+        )
+    )
+    selems = [np.rot90(selems[i], k=j) for i in range(5) for j in range(4)]
+
+    branches = np.zeros_like(skeleton, dtype=bool)
+    for selem in selems:
+        branches |= ndi.binary_hit_or_miss(skeleton, selem)
+    return branches
+
+
+def test_branching_points_equivalence():
+    """The reduced-kernel ``get_branching_points`` must be ``array_equal`` to
+    the old 20-convolution result on a synthetic skeleton with known branching
+    points (a T-junction and a Y-junction).
+
+    Numerical equivalence is asserted via ``array_equal`` (NOT ``allclose``) --
+    branching-point detection is a boolean topology operation with no float
+    intermediate, so any divergence is a topology change.
+    """
+    from liom_toolkit.segmentation.stats import get_branching_points
+
+    # T-junction: horizontal bar + vertical stem meeting at (3,3).
+    t_junction = np.zeros((7, 7), dtype=bool)
+    t_junction[3, 1:6] = True
+    t_junction[1:4, 3] = True
+
+    # Y-junction: a center with three arms (up, left, down-right diagonal).
+    y_junction = np.zeros((7, 7), dtype=bool)
+    y_junction[3, 3] = True
+    y_junction[2, 3] = True  # up
+    y_junction[3, 2] = True  # left
+    y_junction[4, 4] = True  # down-right
+
+    for sk in (t_junction, y_junction):
+        new_result = get_branching_points(sk)
+        old_result = _old_get_branching_points(sk)
+        assert np.array_equal(new_result, old_result), (
+            "get_branching_points kernel reduction diverged from the old "
+            "20-convolution result"
+        )
+
+
+def test_branching_points_equivalence_random():
+    """Randomized numerical-equivalence regression: the reduced-kernel result
+    must be ``array_equal`` to the old 20-convolution result across many random
+    skeletons (catches edge cases the two hand-built skeletons miss)."""
+    from liom_toolkit.segmentation.stats import get_branching_points
+
+    rng = np.random.default_rng(seed=42)
+    for _trial in range(50):
+        sk = rng.random((15, 15)) < 0.5
+        new_result = get_branching_points(sk)
+        old_result = _old_get_branching_points(sk)
+        assert np.array_equal(new_result, old_result), (
+            "get_branching_points kernel reduction diverged on a random skeleton"
+        )
+
+
+def test_branching_points_empty():
+    """``get_branching_points`` on an all-False skeleton returns all-False
+    (0 branching points -- no foreground, no branches)."""
+    from liom_toolkit.segmentation.stats import get_branching_points
+
+    sk = np.zeros((7, 7), dtype=bool)
+    result = get_branching_points(sk)
+    assert not result.any()
+    assert result.dtype == np.bool_
+
+
+def test_branching_points_straight_line():
+    """``get_branching_points`` on a straight-line skeleton (no branches)
+    returns all-False (a line has no junctions)."""
+    from liom_toolkit.segmentation.stats import get_branching_points
+
+    sk = np.zeros((7, 7), dtype=bool)
+    sk[3, 1:6] = True  # horizontal line, no branches
+    result = get_branching_points(sk)
+    assert not result.any()
+
+
+def test_branching_points_t_junction():
+    """``get_branching_points`` on a T-junction skeleton returns True at
+    exactly the junction voxel (and only there)."""
+    from liom_toolkit.segmentation.stats import get_branching_points
+
+    sk = np.zeros((7, 7), dtype=bool)
+    sk[3, 1:6] = True  # horizontal bar
+    sk[1:4, 3] = True  # vertical stem meeting at (3,3)
+    result = get_branching_points(sk)
+    assert result.sum() == 1, f"expected exactly 1 branching point, got {result.sum()}"
+    assert result[3, 3], "the branching point must be at the junction (3,3)"
+
+
+# ---------------------------------------------------------------------------
+# compute_mask_area -- .compute() site classification (PERF-01e).
+# ---------------------------------------------------------------------------
+
+
+def test_compute_mask_area_returns_scalar():
+    """``compute_mask_area`` must return a materialized scalar (``np.uint64``),
+    not a Dask array.
+
+    Classification of the ``.compute()`` site in ``compute_mask_area``:
+    ``client.gather(client.submit(da.sum, mask))`` returns a 0-dimensional
+    ``dask.array.Array`` (a scalar Dask array, NOT a Python scalar), so the
+    subsequent ``.compute()`` is a BOUNDARY-REQUIRED materialization (the
+    gathered Dask array must be computed to produce the scalar the function
+    promises to return). The ``.compute()`` is therefore KEPT, not removed.
+
+    This test asserts the chosen behavior: the function returns a real
+    ``np.uint64`` scalar (not a Dask array), proving the materialization ran.
+    A real Dask distributed client is injected into the singleton manager (no
+    mock of the gather/submit/compute path) so the full materialization chain
+    is exercised end-to-end.
+    """
+    pytest.importorskip("dask.distributed")
+    import dask.array as da
+    from dask.distributed import Client
+
+    from liom_toolkit.segmentation.stats import compute_mask_area
+    from liom_toolkit.utils.dask_client import dask_client_manager
+
+    client = Client(n_workers=1, threads_per_worker=1, dashboard_address=":0")
+    saved_client = dask_client_manager.client
+    dask_client_manager.client = client
+    try:
+        mask = da.from_array(np.array([[1, 0], [0, 1]], dtype=np.uint8), chunks=(2, 2))
+        result = compute_mask_area(mask)
+        # The function must return a materialized scalar, not a Dask array.
+        assert isinstance(result, np.uint64), f"expected np.uint64, got {type(result)}"
+        assert int(result) == 2
+    finally:
+        dask_client_manager.client = saved_client
+        dask_client_manager.close()

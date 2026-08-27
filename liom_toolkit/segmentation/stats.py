@@ -30,6 +30,44 @@ from liom_toolkit.utils.dask_client import dask_client_manager
 PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None — AGENTS §2)
 
 
+# Precomputed branching-point detection kernel + valid signature set (PERF-01b).
+# The inherited get_branching_points ran 5 structural elements x 4 rotations =
+# 20 ndi.binary_hit_or_miss calls. This single-kernel replacement encodes each
+# of the 20 valid 3x3 branching patterns as a unique integer signature: the 8
+# neighbor positions carry distinct bit weights and the signature is the sum of
+# weights at foreground positions (the center carries weight 0 -- it is always
+# foreground in a branching point). One ndi.convolve pass with the bit-weight
+# kernel produces the per-pixel neighbor signature; a foreground pixel whose
+# signature is in the valid set is a branching point. The result is array_equal
+# to the old 20-convolution result (numerical-equivalence regression test).
+_BRANCHING_KERNEL = np.array(
+    [[1, 2, 4], [8, 0, 16], [32, 64, 128]], dtype=np.int32
+)
+
+
+def _build_branching_signatures() -> np.ndarray:
+    """Build the sorted array of valid branching-point neighbor signatures.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted 1-D ``int32`` array of the 20 valid neighbor signatures.
+    """
+    base_selems = [
+        np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]),
+        np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]),
+        np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]),
+        np.array([[0, 1, 0], [1, 1, 0], [0, 0, 1]]),
+        np.array([[0, 0, 1], [1, 1, 1], [0, 1, 0]]),
+    ]
+    selems = [np.rot90(s, k=j) for s in base_selems for j in range(4)]
+    sigs = {int((s * _BRANCHING_KERNEL).sum()) for s in selems}
+    return np.array(sorted(sigs), dtype=np.int32)
+
+
+_BRANCHING_SIGNATURES = _build_branching_signatures()
+
+
 def compute_slice_metrics(
     output_dir: str,
     image: str,
@@ -363,7 +401,24 @@ def get_branching_point_count(
 
 
 def get_branching_points(skeleton: NDArray[np.bool_]) -> NDArray[np.bool_]:
-    """Get the branching points in a skeleton using predefined structural elements.
+    """Get the branching points in a skeleton using a single convolution pass.
+
+    Replaces the inherited 20-convolution implementation (5 structural
+    elements x 4 rotations = 20 ``ndi.binary_hit_or_miss`` calls OR-ed
+    together) with a single ``ndi.convolve`` pass over a bit-packed 3x3
+    neighbor-signature kernel, followed by a vectorized membership check
+    against the 20 valid branching-point signatures.
+
+    Each of the 20 valid 3x3 patterns is encoded as a unique integer
+    signature: the 8 neighbor positions carry distinct bit weights
+    (1, 2, 4, 8, 16, 32, 64, 128) and the signature is the sum of weights at
+    foreground positions (the center is always foreground in a branching
+    point, so it carries weight 0). A single convolution with the bit-weight
+    kernel produces the per-pixel neighbor signature; a foreground pixel
+    whose signature is in the valid set is a branching point. The result is
+    ``array_equal`` to the old 20-convolution result (gated by a
+    numerical-equivalence regression test asserting ``array_equal``, not
+    ``allclose`` -- branching-point detection is a boolean topology operation).
 
     Source:
     https://stackoverflow.com/questions/43037692/how-to-find-branch-point-from-binary-skeletonize-image
@@ -378,24 +433,10 @@ def get_branching_points(skeleton: NDArray[np.bool_]) -> NDArray[np.bool_]:
     NDArray[np.bool_]
         The branching points in the skeleton.
     """
-    # Setup structural elements for detecting branching points
-    selems = []
-    selems.extend(
-        (
-            np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]),
-            np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]),
-            np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]),
-            np.array([[0, 1, 0], [1, 1, 0], [0, 0, 1]]),
-            np.array([[0, 0, 1], [1, 1, 1], [0, 1, 0]]),
-        )
+    conv = ndi.convolve(
+        skeleton.astype(np.int32), _BRANCHING_KERNEL, mode="constant", cval=0
     )
-    selems = [np.rot90(selems[i], k=j) for i in range(5) for j in range(4)]
-
-    # Detect branching points
-    branches = np.zeros_like(skeleton, dtype=bool)
-    for selem in selems:
-        branches |= ndi.binary_hit_or_miss(skeleton, selem)
-    return branches
+    return np.isin(conv, _BRANCHING_SIGNATURES) & skeleton.astype(bool)
 
 
 def draw_branch_point_circles(
@@ -668,5 +709,9 @@ def compute_mask_area(mask: da.Array | Future[Any]) -> np.uint64:
     client = dask_client_manager.get_client()
     total_area = client.submit(da.sum, mask)
     total_area = client.gather(total_area)
+    # BOUNDARY-REQUIRED materialization: client.gather returns a 0-dimensional
+    # dask.array.Array (a scalar Dask array), NOT a Python scalar, so .compute()
+    # is required to materialize the scalar the function promises to return.
+    # Removing it would return a Dask array (wrong type) -- KEEP this .compute().
     result = total_area.compute()
     return np.uint64(result)
