@@ -435,23 +435,42 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             chunksize=100,
         )
 
-        valid_indices = np.array([i for i, is_valid in enumerate(results) if is_valid])
+        # ``results`` is one validity bit per GRID patch (length
+        # ``dataset_length`` == grid_product), so ``valid_grid`` and the
+        # invalid-patch sampling MUST stay in grid-index space
+        # (0..grid_product-1). The pre-fix code computed invalid patches from
+        # ``range(len(self))`` -- which is grid_product*4 when
+        # rotate_patches=True -- so the set difference included all rotation
+        # indices (grid_product..grid_product*4-1), and the subsequent
+        # ``valid_indices *= 4`` expansion multiplied those already-expanded
+        # dataset indices by 4 again, producing indices up to
+        # (grid_product*4-1)*4 -- far beyond the dataset length.
+        # ``__getitem__`` then called ``np.unravel_index(idx, grid_shape)``
+        # which silently wraps modularly, mapping to wrong grid patches
+        # (silent data corruption). Compute everything in grid-index space
+        # and expand once at the end.
+        grid_product = self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2]
+        valid_grid = np.array([i for i, is_valid in enumerate(results) if is_valid])
 
         # Add a percentage of the invalid patches to the valid patches so
-        # training data includes some empty patches but not too many.
-        all_indexes = range(len(self))
-        invalid_indexes = list(set(all_indexes) - set(valid_indices))
-        invalid_indexes = invalid_indexes[: int(len(invalid_indexes) * self.percentage_empty)]
-        valid_indices = np.concatenate([valid_indices, invalid_indexes])
-        valid_indices = np.sort(valid_indices)
+        # training data includes some empty patches but not too many. Use a
+        # sorted set difference so the sampled empty patches are reproducible
+        # across Python versions and data orderings (set iteration order is
+        # hash-based and not guaranteed to be stable across interpreters).
+        invalid_grid = sorted(set(range(grid_product)) - set(valid_grid.tolist()))
+        invalid_grid = invalid_grid[: int(len(invalid_grid) * self.percentage_empty)]
+        valid_grid = np.concatenate([valid_grid, invalid_grid])
+        valid_grid = np.sort(valid_grid)
 
         if self.rotate_patches:
-            valid_indices *= 4
-            # Insert the rotations
+            # Each grid patch occupies 4 consecutive dataset indices
+            # (4*grid_idx + 0..3); expand once, in grid-index space.
             valid_indices = np.concatenate(
-                [valid_indices, valid_indices + 1, valid_indices + 2, valid_indices + 3]
+                [valid_grid * 4, valid_grid * 4 + 1, valid_grid * 4 + 2, valid_grid * 4 + 3]
             )
             valid_indices = np.sort(valid_indices)
+        else:
+            valid_indices = valid_grid
         self.valid_indices = valid_indices
 
     def check_patch(self, patch: NDArray[np.generic]) -> bool:
