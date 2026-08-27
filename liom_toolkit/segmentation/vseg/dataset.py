@@ -1,11 +1,15 @@
+"""PyTorch Dataset classes for OME-Zarr vessel segmentation training."""
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 from multiprocessing import cpu_count
 
 import dask.array as da
 import numpy as np
 import torch
 import zarr
+from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from tqdm.contrib.concurrent import process_map
 
@@ -13,7 +17,7 @@ from .utils import apply_clahe
 
 
 def _level0_component(zarr_path: str, group_path: str = "") -> str:
-    """Resolve the level-0 (full-resolution) array component path from OME-Zarr multiscales metadata.
+    """Resolve the level-0 (full-resolution) array component path from multiscales metadata.
 
     NGFF v0.5 (zarr v3) names multiscale datasets ``s0``, ``s1``, ... while
     legacy NGFF v0.4 used ``0``, ``1``, ... Hardcoding either convention
@@ -21,23 +25,31 @@ def _level0_component(zarr_path: str, group_path: str = "") -> str:
     ``ome.multiscales`` (v0.5) or ``multiscales`` (v0.4) metadata and returns
     the first dataset's path so the reader follows whatever the writer used.
 
-    :param zarr_path: Path to the OME-Zarr store.
-    :param group_path: Optional subpath to a group whose multiscales metadata
-        should be read (e.g. ``"labels/training"`` for a label group). Empty
-        string reads the root image group.
-    :return: The component path for ``da.from_zarr(..., component=...)`` —
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store.
+    group_path : str
+        Optional subpath to a group whose multiscales metadata should be
+        read (e.g. ``"labels/training"`` for a label group). Empty string
+        reads the root image group.
+
+    Returns
+    -------
+    str
+        The component path for ``da.from_zarr(..., component=...)`` —
         ``"{group_path}/{level0_path}"`` (or just ``"{level0_path}"`` when
         ``group_path`` is empty).
-    :raises ValueError: If the group has no OME multiscales metadata.
+
+    Raises
+    ------
+    ValueError
+        If the group has no OME multiscales metadata.
     """
     root = zarr.open_group(zarr_path, mode="r")
     group = root if not group_path else root[group_path]
     ome = group.attrs.get("ome")
-    multiscales = (
-        ome["multiscales"]
-        if isinstance(ome, dict)
-        else group.attrs.get("multiscales")
-    )
+    multiscales = ome["multiscales"] if isinstance(ome, dict) else group.attrs.get("multiscales")
     if not multiscales:
         raise ValueError(
             f"No OME multiscales metadata found in {zarr_path}"
@@ -49,19 +61,19 @@ def _level0_component(zarr_path: str, group_path: str = "") -> str:
 
 
 class OmeZarrDataset(Dataset):
-    """
-    Dataset class for loading vascular data from a zarr file.
+    """Dataset class for loading vascular data from a zarr file.
+
     Can generalize to 2D when the first index of the patch_size is 1.
     """
 
     zarr_path: str
     data: da.Array
-    patch_size: tuple
+    patch_size: tuple[int, int, int]
     device: torch.device
     pre_process: bool
     normalise: bool
-    max_value: int
-    grid_shape: tuple
+    max_value: int | float
+    grid_shape: tuple[int, int, int]
     rotate_patches: bool
     # CLAHE parameters
     kernel_size: int = 10
@@ -70,32 +82,40 @@ class OmeZarrDataset(Dataset):
     def __init__(
         self,
         zarr_path: str,
-        patch_size: tuple = (32, 32, 32),
+        patch_size: tuple[int, int, int] = (32, 32, 32),
         device: str | torch.device = "cuda",
-        pre_process=True,
+        pre_process: bool = True,
         normalise: bool = True,
         normalisation_value: int | float = 65535,
         rotate_patches: bool = True,
-        channel=0,
-        z_range: tuple | None = None,
-    ):
-        """ "
-        Initialise the dataset. Creates pointers to the data but does not load anything yet.
+        channel: int = 0,
+        z_range: tuple[int, int] | None = None,
+    ) -> None:
+        """Initialise the dataset.
 
-        :param zarr_path: Path to the zarr file
-        :type zarr_path: str
-        :param patch_size: Size of the patches to extract
-        :type patch_size: tuple
-        :param device: Device to load the data on
-        :type device: str
-        :param pre_process: Whether to apply pre-processing (CLAHE) to the data
-        :type pre_process: bool
-        :param normalise: Whether to normalise the data
-        :type normalise: bool
-        :param normalisation_value: The value to use for normalisation
-        :type normalisation_value: int | float
-        :param rotate_patches: Whether to rotate the patches. Performs 4 rotations, so the dataset size is multiplied by 4.
-        :type rotate_patches: bool
+        Creates pointers to the data but does not load anything yet.
+
+        Parameters
+        ----------
+        zarr_path : str
+            Path to the zarr file.
+        patch_size : tuple[int, int, int]
+            Size of the patches to extract.
+        device : str | torch.device
+            Device to load the data on.
+        pre_process : bool
+            Whether to apply pre-processing (CLAHE) to the data.
+        normalise : bool
+            Whether to normalise the data.
+        normalisation_value : int | float
+            The value to use for normalisation.
+        rotate_patches : bool
+            Whether to rotate the patches. Performs 4 rotations, so the
+            dataset size is multiplied by 4.
+        channel : int
+            Channel index to select when the data has 4 dimensions.
+        z_range : tuple[int, int] | None
+            Optional ``(z_start, z_end)`` slice applied to the data.
         """
         self.zarr_path = zarr_path
         self.patch_size = patch_size
@@ -106,9 +126,7 @@ class OmeZarrDataset(Dataset):
         self.normalise = normalise
         self.max_value = normalisation_value
         self.rotate_patches = rotate_patches
-        self.data = da.from_zarr(
-            self.zarr_path, component=_level0_component(self.zarr_path)
-        )
+        self.data = da.from_zarr(self.zarr_path, component=_level0_component(self.zarr_path))
         if len(self.data.shape) == 4:
             self.data = self.data[channel]
 
@@ -126,19 +144,30 @@ class OmeZarrDataset(Dataset):
         )
 
     def __len__(self) -> int:
+        """Return the number of patches in the dataset (x4 when rotating).
+
+        Returns
+        -------
+        int
+            The number of patches (multiplied by 4 when ``rotate_patches`` is set).
+        """
         length = self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2]
         if self.rotate_patches:
             length *= 4
         return length
 
-    def __getitem__(self, idx) -> (torch.Tensor, torch.Tensor):
-        """
-        Load a patch from the dataset. The idx parameter is used to determine which patch to load.
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        """Load a patch from the dataset.
 
-        :param idx: Index of the patch to load
-        :type idx: int
-        :return: Tuple of the image and the corresponding label
-        :rtype: tuple(torch.Tensor, torch.Tensor)
+        Parameters
+        ----------
+        idx : int
+            Index of the patch to load.
+
+        Returns
+        -------
+        torch.Tensor
+            The loaded (and optionally normalised/pre-processed) patch tensor.
         """
         patch_image = self.load_patch(
             self.data, idx, self.pre_process, normalise=True, normalisation_value=self.max_value
@@ -146,11 +175,25 @@ class OmeZarrDataset(Dataset):
 
         return patch_image
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        """Iterate over patches in the dataset.
+
+        Yields
+        ------
+        torch.Tensor
+            Each patch tensor in the dataset.
+        """
         for i in range(len(self)):
             yield self[i]
 
-    def get_patch_coordinates(self, idx):
+    def get_patch_coordinates(self, idx: int) -> tuple[int, int, int, int, int, int]:
+        """Compute the ``(z1, z2, y1, y2, x1, x2)`` slice bounds for a grid patch index.
+
+        Returns
+        -------
+        tuple[int, int, int, int, int, int]
+            The ``(z1, z2, y1, y2, x1, x2)`` slice bounds.
+        """
         patch_idx = np.unravel_index(idx, self.grid_shape)
         z1 = patch_idx[0] * self.patch_size[0]
         z2 = (patch_idx[0] + 1) * self.patch_size[0]
@@ -162,12 +205,32 @@ class OmeZarrDataset(Dataset):
 
     def load_patch(
         self,
-        data,
-        idx,
-        pre_process=False,
+        data: da.Array,
+        idx: int,
+        pre_process: bool = False,
         normalise: bool = True,
         normalisation_value: int | float = 65535,
     ) -> torch.Tensor:
+        """Load and optionally rotate/normalise/pre-process a single patch.
+
+        Parameters
+        ----------
+        data : dask.array.Array
+            The dask array to slice the patch from.
+        idx : int
+            Dataset index of the patch to load.
+        pre_process : bool
+            Whether to apply CLAHE pre-processing.
+        normalise : bool
+            Whether to normalise the patch by ``normalisation_value``.
+        normalisation_value : int | float
+            Value to divide the patch by when normalising.
+
+        Returns
+        -------
+        torch.Tensor
+            The loaded patch as a float32 tensor on ``self.device``.
+        """
         # The index corresponds to the place in the grid, the rest is for the rotation
         if self.rotate_patches:
             idx = idx // 4
@@ -193,27 +256,42 @@ class OmeZarrDataset(Dataset):
         patch_data = torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
         return patch_data
 
-    def normalise_patch(self, patch, normalisation_value: int | float = 65535) -> torch.Tensor:
+    def normalise_patch(
+        self, patch: NDArray[np.generic], normalisation_value: int | float = 65535
+    ) -> NDArray[np.generic]:
+        """Divide the patch by ``normalisation_value``.
+
+        Returns
+        -------
+        NDArray[np.generic]
+            The normalised patch (dtype follows the input).
+        """
         patch = patch / normalisation_value
         return patch
 
-    def pre_process_patch(self, patch):
-        # Apply CLAHE to the patch
+    def pre_process_patch(self, patch: NDArray[np.generic]) -> NDArray[np.generic]:
+        """Apply CLAHE to the patch using the dataset's kernel size and clip limit.
+
+        Returns
+        -------
+        NDArray[np.generic]
+            The CLAHE-processed patch.
+        """
         new_patch = apply_clahe(patch, kernel_size=self.kernel_size, clip_limit=self.clip_limit)
 
         return new_patch
 
 
 class OmeZarrLabelDataSet(OmeZarrDataset):
-    """
-    Dataset class for loading vascular data from a zarr file. Includes labels.
+    """Dataset class for loading vascular data from a zarr file. Includes labels.
+
     Can generalize to 2D when the first index of the patch_size is 1.
     """
 
     label_data: da.Array
     normalise_label: bool
     max_label_value: int = 255
-    valid_indices: np.array
+    valid_indices: NDArray[np.int_]
     percentage_empty: float = 0.01
     filter_empty: bool = False
 
@@ -221,19 +299,19 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         self,
         zarr_path: str,
         label_node_name: str,
-        patch_size: tuple = (32, 32, 32),
-        device="cuda",
-        pre_process=True,
+        patch_size: tuple[int, int, int] = (32, 32, 32),
+        device: str | torch.device = "cuda",
+        pre_process: bool = True,
         normalise: bool = True,
         normalisation_value: int | float = 65535,
-        channel=0,
-        z_range: tuple | None = None,
+        channel: int = 0,
+        z_range: tuple[int, int] | None = None,
         normalise_label: bool = False,
         max_label_value: int = 255,
-        filter_empty=True,
-        rotate_patches=True,
+        filter_empty: bool = True,
+        rotate_patches: bool = True,
         empty_percentage: float = 0.01,
-    ):
+    ) -> None:
         super().__init__(
             zarr_path,
             patch_size,
@@ -248,9 +326,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         self.filter_empty = filter_empty
         self.label_data = da.from_zarr(
             self.zarr_path,
-            component=_level0_component(
-                self.zarr_path, group_path=f"labels/{label_node_name}"
-            ),
+            component=_level0_component(self.zarr_path, group_path=f"labels/{label_node_name}"),
         )
         if len(self.label_data.shape) == 4:
             self.label_data = self.label_data[channel]
@@ -266,13 +342,34 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             self.get_valid_indices()
 
     def __len__(self) -> int:
+        """Return the number of valid patches (filtered) or the full dataset length.
+
+        Returns
+        -------
+        int
+            The number of patches available for iteration.
+        """
         if hasattr(self, "valid_indices") and self.filter_empty:
             return len(self.valid_indices)
         else:
             # If not filtering empty patches, return the full length
             return super().__len__()
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load a (image, label) patch pair.
+
+        Parameters
+        ----------
+        idx : int
+            Dataset index of the patch to load.
+
+        Returns
+        -------
+        patch_image : torch.Tensor
+            The loaded image patch tensor.
+        patch_label : torch.Tensor
+            The loaded label patch tensor.
+        """
         patch_image = super().__getitem__(idx)
         patch_label = self.load_patch(
             self.label_data,
@@ -283,7 +380,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         )
         return patch_image, patch_label
 
-    def _process_patch(self, idx):
+    def _process_patch(self, idx: int) -> bool:
         """Classify one grid patch as valid for training.
 
         Defined as a method (not a closure inside ``get_valid_indices``) so
@@ -301,14 +398,27 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         maps 1:1 to a grid patch (no division in ``load_patch``), so
         ``self[idx * 4]`` would resolve to grid patch ``idx * 4`` and skip
         3 of every 4 grid patches -- use ``self[idx]`` instead.
+
+        Parameters
+        ----------
+        idx : int
+            Grid patch index to validate.
+
+        Returns
+        -------
+        bool
+            ``True`` if the patch is valid for training (non-empty).
         """
         patch_idx = idx * 4 if self.rotate_patches else idx
         patch = self[patch_idx][1]
         return bool(self.check_patch(patch))
 
-    def get_valid_indices(self):
-        """
-        Validate the patches in the dataset. This function is used to remove patches that are not suitable for training.
+    def get_valid_indices(self) -> None:
+        """Validate the patches in the dataset.
+
+        Used to remove patches that are not suitable for training. Populates
+        ``self.valid_indices`` with the dataset indices of patches kept for
+        training (valid patches plus a small percentage of empty patches).
         """
         # dataset_length is the number of GRID patches to validate. When
         # rotate_patches=True the dataset length is grid_product * 4 (each
@@ -319,10 +429,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         # is the pre-filter length because valid_indices is not set yet
         # (get_valid_indices runs during __init__ before valid_indices
         # exists, so __len__ falls through to super().__len__()).
-        if self.rotate_patches:
-            dataset_length = len(self) // 4
-        else:
-            dataset_length = len(self)
+        dataset_length = len(self) // 4 if self.rotate_patches else len(self)
 
         results = process_map(
             self._process_patch,
@@ -337,7 +444,8 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
 
         valid_indices = np.array([i for i, is_valid in enumerate(results) if is_valid])
 
-        # Add the precentage of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
+        # Add a percentage of the invalid patches to the valid patches so
+        # training data includes some empty patches but not too many.
         all_indexes = range(len(self))
         invalid_indexes = list(set(all_indexes) - set(valid_indices))
         invalid_indexes = invalid_indexes[: int(len(invalid_indexes) * self.percentage_empty)]
@@ -353,9 +461,13 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             valid_indices = np.sort(valid_indices)
         self.valid_indices = valid_indices
 
-    def check_patch(self, patch):
-        """
-        Check if the patch is valid for training.
+    def check_patch(self, patch: NDArray[np.generic]) -> bool:
+        """Check if the patch is valid for training (non-empty).
+
+        Returns
+        -------
+        bool
+            ``True`` if the patch has any non-zero pixel.
         """
         # Check if the patch is empty
         return patch.max() > 0

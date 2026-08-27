@@ -1,3 +1,5 @@
+"""Single-image and volume inference for the vessel segmentation U-Net."""
+
 from __future__ import annotations
 
 import os
@@ -8,12 +10,15 @@ import cv2
 import imageio.v3 as iio
 import numpy as np
 import zarr
+from numpy.typing import NDArray
 from skimage.color import gray2rgb, rgb2gray
 from tqdm.auto import tqdm
 
 from .utils import add_patch_to_empty_array, create_dir, numeric_filesort, process_image
 
 if TYPE_CHECKING:
+    import torch
+
     from .dataset import OmeZarrDataset
     from .model import VsegModel
 
@@ -23,43 +28,52 @@ def predict_one(
     img_path: str,
     save_path: str,
     dev: str = "cuda",
-    norm_param: tuple = (10, 0.05),
+    norm_param: tuple[float, float] = (10, 0.05),
     norm: bool = True,
     patching: bool = False,
-) -> np.ndarray:
-    """
-    Predict one image
+) -> NDArray[np.uint8]:
+    """Predict one image.
 
-    :param model: The model to use for prediction
-    :type model: VsegModel
-    :param img_path: The path to the image to predict
-    :type img_path: str
-    :param save_path: The path to save the results
-    :type save_path: str
-    :param stride: The stride of the patches
-    :type stride: int
-    :param width: The width of the patches
-    :type width: int
-    :param norm: When True (default), apply CLAHE via cv2.createCLAHE before
+    Parameters
+    ----------
+    model : VsegModel
+        The model to use for prediction.
+    img_path : str
+        The path to the image to predict.
+    save_path : str
+        The path to save the results.
+    dev : str
+        The device to use for prediction.
+    norm_param : tuple[float, float]
+        The parameters for the normalization: ``(kernel_size, clip_limit)``.
+    norm : bool
+        When True (default), apply CLAHE via cv2.createCLAHE before
         inference -- this preserves the shipped always-CLAHE behavior. When
         False, skip CLAHE and use only the min-max-scaled uint8 image. The
         default of True means callers that omit ``norm`` see no behavior
         change.
-    :type norm: bool
-    :param patching: When False (default), run the existing single full-image
-        pass (the only implemented path: stride equals the image height, one
-        patch ``{id}_0_0.png``). When True, raise NotImplementedError -- 2D
-        tiled inference is not implemented; use predict_volume for tiled
+    patching : bool
+        When False (default), run the existing single full-image pass (the
+        only implemented path: stride equals the image height, one patch
+        ``{id}_0_0.png``). When True, raise NotImplementedError -- 2D tiled
+        inference is not implemented; use predict_volume for tiled
         prediction. The explicit raise avoids silently returning
         plausible-shaped-but-wrong single-pass output when tiled inference
         was requested.
-    :type patching: bool
-    :param dev: The device to use for prediction
-    :type dev: str
-    :param norm_param: The parameters for the normalization. (kernel_size, clip_limit)
-    :type norm_param: tuple
-    :return: The predicted image
-    :rtype: np.ndarray
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        The predicted mask (uint8, 0 or 255).
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
+    NotImplementedError
+        If ``patching=True`` (2D tiled inference is not implemented).
+    ValueError
+        If the input image is all-zero (cannot normalise).
     """
     try:
         import torch
@@ -105,8 +119,7 @@ def predict_one(
     max_val = image.max()
     if max_val == 0:
         raise ValueError(
-            "predict_one: input image is all-zero; cannot normalize. "
-            "Check the input image path."
+            "predict_one: input image is all-zero; cannot normalize. Check the input image path."
         )
     image = (image / max_val * 255).astype(np.uint8)
     # Apply Adaptive Histogram Equalization (AHE) when norm is True (default).
@@ -136,7 +149,7 @@ def predict_one(
 
     x1 = 0
     y1 = 0
-    inference = np.zeros(processed_image.shape)
+    inference: NDArray[np.float64] = np.zeros(processed_image.shape)
 
     for x in test_x:
         image = iio.imread(x)
@@ -176,18 +189,24 @@ def predict_one(
 
 
 def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str) -> None:
-    """
-    Predict the volume
+    """Predict the volume.
 
-    :param model: The model to use for prediction
-    :type model: VsegModel
-    :param dataset: The dataset to use for prediction
-    :type dataset: OmeZarrDataset
-    :param zarr_location: The location of the zarr file
-    :type zarr_location: str
+    Parameters
+    ----------
+    model : VsegModel
+        The model to use for prediction.
+    dataset : OmeZarrDataset
+        The dataset to use for prediction.
+    zarr_location : str
+        The location of the zarr file.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
     try:
-        import torch  # noqa: F401 -- do_predict uses torch; guard gives actionable error
+        import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
     except ImportError as e:
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
@@ -211,16 +230,25 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y
 
 
-def do_predict(model: VsegModel, patch: torch.Tensor) -> np.ndarray:
-    """
-    Perform the prediction.
-    :param model: The model to use for prediction
-    :type model: VsegModel
-    :param patch: The patch to predict
-    :type patch: torch.Tensor
+def do_predict(model: VsegModel, patch: torch.Tensor) -> NDArray[np.uint8]:
+    """Perform the prediction.
 
-    :return: The predicted patch
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    model : VsegModel
+        The model to use for prediction.
+    patch : torch.Tensor
+        The patch to predict.
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        The predicted patch (uint8, 0 or 1).
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
     try:
         import torch

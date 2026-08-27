@@ -1,3 +1,5 @@
+"""Training loop, evaluation, and visualisation for the vessel segmentation U-Net."""
+
 from __future__ import annotations
 
 import os
@@ -5,17 +7,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 from skimage.color import gray2rgb, label2rgb
 from tqdm.auto import tqdm
 
 from .utils import calculate_metrics, create_dir
 
 if TYPE_CHECKING:
+    import torch
     from torch import device
-    from torch.utils.data import DataLoader, Subset
+    from torch.utils.data import DataLoader
 
-    from .dataset import OmeZarrLabelDataSet
-    from .loss import DiceBCELoss
     from .model import VsegModel
 
 
@@ -25,22 +27,32 @@ def train(
     optimizer: torch.optim.Optimizer,
     loss_fn: torch.nn.Module,
     device: torch.device,
-) -> (float, torch.Tensor, torch.Tensor, torch.Tensor):
-    """
-    Train the model for an epoch
+) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Train the model for an epoch.
 
-    :param model: The model to train
-    :type model: VsegModel
-    :param loader: The data loader
-    :type loader: torch.utils.data.DataLoader
-    :param optimizer: The optimizer
-    :type optimizer: torch.optim.Optimizer
-    :param loss_fn: The loss function
-    :type loss_fn: torch.nn.Module
-    :param device: The device to use for training
-    :type device: torch.device
-    :return: The loss, the true labels, the predicted labels, and the input
-    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor)
+    Parameters
+    ----------
+    model : VsegModel
+        The model to train.
+    loader : torch.utils.data.DataLoader
+        The data loader.
+    optimizer : torch.optim.Optimizer
+        The optimizer.
+    loss_fn : torch.nn.Module
+        The loss function.
+    device : torch.device
+        The device to use for training.
+
+    Returns
+    -------
+    epoch_loss : float
+        The mean epoch loss.
+    y : torch.Tensor
+        The true labels from the last batch.
+    y_pred : torch.Tensor
+        The predicted labels from the last batch.
+    x : torch.Tensor
+        The inputs from the last batch.
     """
     # Initialize epoch loss to 0
     epoch_loss = 0.0
@@ -66,20 +78,43 @@ def train(
 
 def evaluate(
     model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, device: torch.device
-) -> (float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float):
-    """
-    Evaluate the model for an epoch
+) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float]:
+    """Evaluate the model for an epoch.
 
-    :param model: The model to evaluate
-    :type model: VsegModel
-    :param loader: The data loader
-    :type loader: torch.utils.data.DataLoader
-    :param loss_fn: The loss function
-    :type loss_fn: torch.nn.Module
-    :param device: The device to use for evaluation
-    :type device: torch.device
-    :return: The loss, the true labels, the predicted labels, the input, and the metrics
-    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float)
+    Parameters
+    ----------
+    model : VsegModel
+        The model to evaluate.
+    loader : torch.utils.data.DataLoader
+        The data loader.
+    loss_fn : torch.nn.Module
+        The loss function.
+    device : torch.device
+        The device to use for evaluation.
+
+    Returns
+    -------
+    epoch_loss : float
+        The mean epoch loss.
+    y : torch.Tensor
+        The true labels from the last batch.
+    y_pred : torch.Tensor
+        The predicted labels from the last batch.
+    x : torch.Tensor
+        The inputs from the last batch.
+    f1 : float
+        The mean F1 score.
+    accuracy : float
+        The mean accuracy.
+    jaccard : float
+        The mean Jaccard score.
+    recall : float
+        The mean recall.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
     try:
         import torch
@@ -130,25 +165,29 @@ def evaluate(
 
 def create_images(
     x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_images: int = 4
-) -> list[np.ndarray]:
-    """
-    Create images for visualization
+) -> list[NDArray[np.generic]]:
+    """Create images for visualization.
 
-    :param x: The input tensor
-    :type x: torch.Tensor
-    :param y: The true labels
-    :type y: torch.Tensor
-    :param pred: The predicted labels
-    :type pred: torch.Tensor
-    :param num_images: The number of images to create
-    :type num_images: int
-    :return: The images
-    :rtype: List[np.ndarray]
+    Parameters
+    ----------
+    x : torch.Tensor
+        The input tensor.
+    y : torch.Tensor
+        The true labels.
+    pred : torch.Tensor
+        The predicted labels.
+    num_images : int
+        The number of images to create.
+
+    Returns
+    -------
+    list[NDArray[np.generic]]
+        The list of visualisation images (RGB composites from ``label2rgb``).
     """
     y_mask = y.cpu().detach().numpy()
     pred_mask = pred.cpu().detach().numpy()
     x = x.cpu().detach().numpy()
-    images = []
+    images: list[NDArray[np.generic]] = []
     num_images = min(num_images, x.shape[0])
     i = 0
     while len(images) < num_images:
@@ -159,7 +198,30 @@ def create_images(
     return images
 
 
-def mask_image(x, y_mask, pred_mask, i):
+def mask_image(
+    x: NDArray[np.generic],
+    y_mask: NDArray[np.generic],
+    pred_mask: NDArray[np.generic],
+    i: int,
+) -> NDArray[np.generic]:
+    """Overlay the ground-truth and predicted masks on a single input image.
+
+    Parameters
+    ----------
+    x : NDArray[np.generic]
+        The input image stack.
+    y_mask : NDArray[np.generic]
+        The ground-truth mask stack.
+    pred_mask : NDArray[np.generic]
+        The predicted mask stack.
+    i : int
+        The image index within the stacks.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The RGB-overlaid image (output of ``skimage.color.label2rgb``).
+    """
     img = x[i, :, :, :].squeeze()
     img = gray2rgb(img)
     y_mask = y_mask[i, :, :, :].squeeze()
@@ -193,7 +255,7 @@ def mask_image(x, y_mask, pred_mask, i):
 def train_model(
     dataset_file: str,
     node_name: str,
-    dev: device = None,
+    dev: device | None = None,
     output_train: str = "training",
     learning_rate: float = 0.003673,
     batch_size: int = 35,
@@ -203,32 +265,38 @@ def train_model(
     wandb_project: str = "vseg",
     pin_memory: bool = True,
 ) -> None:
-    """
-    Train the vessel segmentation model
+    """Train the vessel segmentation model.
 
-    :param dataset_file: The file to the dataset (zarr)
-    :type dataset_file: str
-    :param node_name: The name of the node in the zarr file
-    :type node_name: str
-    :param dev: The device to use for training
-    :type dev: str
-    :param output_train: The output directory for the training
-    :type output_train: str
-    :param learning_rate: The learning rate for the optimizer
-    :type learning_rate: float
-    :param batch_size: The batch size for training
-    :type batch_size: int
-    :param epochs: The number of epochs to train
-    :type epochs: int
-    :param wandb_mode: The mode for wandb
-    :type wandb_mode: str
-    :param wandb_project: The project for wandb. See wandb of LIOM for more details.
-    :type wandb_project: str
-    :param filter_empty_patches: Whether to filter empty patches
-    :type filter_empty_patches: bool
-    :param pin_memory: Whether to pin memory in the data loader. Speeds up for CUDA.
-    :type pin_memory: bool
-    :return: None
+    Parameters
+    ----------
+    dataset_file : str
+        The file to the dataset (zarr).
+    node_name : str
+        The name of the node in the zarr file.
+    dev : torch.device | None
+        The device to use for training. ``None`` resolves to ``torch.device("cuda")``
+        inside the function body (avoids a def-time ``torch.device`` call).
+    output_train : str
+        The output directory for the training.
+    learning_rate : float
+        The learning rate for the optimizer.
+    batch_size : int
+        The batch size for training.
+    epochs : int
+        The number of epochs to train.
+    wandb_mode : str
+        The mode for wandb.
+    wandb_project : str
+        The project for wandb. See wandb of LIOM for more details.
+    filter_empty_patches : bool
+        Whether to filter empty patches.
+    pin_memory : bool
+        Whether to pin memory in the data loader. Speeds up for CUDA.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch (or wandb) is not installed (re-raised with an actionable message).
     """
     try:
         import torch

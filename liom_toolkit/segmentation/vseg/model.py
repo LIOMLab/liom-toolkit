@@ -1,3 +1,5 @@
+"""U-Net PyTorch model for vessel segmentation."""
+
 from __future__ import annotations
 
 import pickle
@@ -8,11 +10,9 @@ import wandb
 
 
 class ConvBlock(nn.Module):
-    """
-    Convolutional block for the U-Net architecture
-    """
+    """Convolutional block for the U-Net architecture."""
 
-    def __init__(self, in_c, out_c):
+    def __init__(self, in_c: int, out_c: int) -> None:
         super().__init__()
 
         self.conv1 = nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
@@ -24,13 +24,17 @@ class ConvBlock(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the convolutional block
+        """Forward pass of the convolutional block.
 
-        :param inputs: The input tensor
-        :type inputs: torch.Tensor
-        :return: The output tensor
-        :rtype: torch.Tensor
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            The input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            The output tensor.
         """
         x = self.conv1(inputs)
         x = self.bn1(x)
@@ -43,24 +47,28 @@ class ConvBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    """
-    Encoder block for the U-Net architecture
-    """
+    """Encoder block for the U-Net architecture."""
 
-    def __init__(self, in_c, out_c):
+    def __init__(self, in_c: int, out_c: int) -> None:
         super().__init__()
 
         self.conv = ConvBlock(in_c, out_c)
         self.pool = nn.MaxPool2d((2, 2))
 
-    def forward(self, inputs: torch.Tensor) -> (torch.Tensor, torch.Tensor):
-        """
-        Forward pass of the encoder block
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass of the encoder block.
 
-        :param inputs: The input tensor
-        :type inputs: torch.Tensor
-        :return: The output tensor
-        :rtype: torch.Tensor
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            The input tensor.
+
+        Returns
+        -------
+        x : torch.Tensor
+            The convolved feature tensor (skip connection).
+        p : torch.Tensor
+            The pooled tensor passed to the next encoder stage.
         """
         x = self.conv(inputs)
         p = self.pool(x)
@@ -69,26 +77,28 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    """
-    Decoder block for the U-Net architecture
-    """
+    """Decoder block for the U-Net architecture."""
 
-    def __init__(self, in_c, out_c):
+    def __init__(self, in_c: int, out_c: int) -> None:
         super().__init__()
 
         self.up = nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2, padding=0)
         self.conv = ConvBlock(out_c + out_c, out_c)
 
     def forward(self, inputs: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the decoder block
+        """Forward pass of the decoder block.
 
-        :param inputs: The input tensor
-        :type inputs: torch.Tensor
-        :param skip: The skip tensor
-        :type skip: torch.Tensor
-        :return: The output tensor
-        :rtype: torch.Tensor
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            The input tensor (from the previous decoder/bottleneck stage).
+        skip : torch.Tensor
+            The skip tensor (from the matching encoder stage).
+
+        Returns
+        -------
+        torch.Tensor
+            The upsampled and convolved output tensor.
         """
         x = self.up(inputs)
         x = torch.cat([x, skip], axis=1)
@@ -98,16 +108,14 @@ class DecoderBlock(nn.Module):
 
 
 class VsegModel(nn.Module):
-    """
-    U-Net model for vessel segmentation
-    """
+    """U-Net model for vessel segmentation."""
 
     def __init__(
         self,
         pretrained: bool = False,
         pre_trained_project: str = "liom-lab/model-registry/Vessel Segmentation:latest",
         device: torch.device | None = None,
-    ):
+    ) -> None:
         super().__init__()
         if device is None:
             device = torch.device("cpu")
@@ -150,13 +158,17 @@ class VsegModel(nn.Module):
             self.to(device)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the U-Net model
+        """Forward pass of the U-Net model.
 
-        :param inputs: The input tensor
-        :type inputs: torch.Tensor
-        :return: The output tensor
-        :rtype: torch.Tensor
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            The input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            The output tensor (sigmoid-activated segmentation map).
         """
         s1, p1 = self.e1(inputs)
         s2, p2 = self.e2(p1)
