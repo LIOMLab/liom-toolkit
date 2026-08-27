@@ -146,7 +146,12 @@ def predict_one(
     """ Load dataset """
     test_x = numeric_filesort(f"{save_path}/patches", folder="images")
 
-    n_patches_by_row = (processed_image.shape[1] - W) / stride + 1
+    # Wrap in int(...) so the ``y1 % n_patches_by_row`` modulo below is
+    # integer arithmetic with no float rounding. This locks the tiling-path
+    # arithmetic for the future patching=True implementation (currently
+    # raises NotImplementedError); a float modulo would silently round wrong
+    # on non-evenly-divisible dimensions.
+    n_patches_by_row = int((processed_image.shape[1] - W) / stride + 1)
 
     x1 = 0
     y1 = 0

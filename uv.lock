@@ -1352,6 +1352,7 @@ dependencies = [
     { name = "requests" },
     { name = "scikit-image" },
     { name = "simpleitk" },
+    { name = "tifffile" },
     { name = "tqdm" },
     { name = "zarr" },
 ]
@@ -1420,6 +1421,7 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.26" },
     { name = "scikit-learn", marker = "extra == 'ai'" },
     { name = "simpleitk" },
+    { name = "tifffile", specifier = ">=2024.0" },
     { name = "timm", marker = "extra == 'ai'" },
     { name = "torch", marker = "extra == 'ai'" },
     { name = "torchvision", marker = "extra == 'ai'" },

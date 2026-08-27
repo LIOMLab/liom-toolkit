@@ -23,11 +23,16 @@ mocking of zarr/ome-zarr) per AGENTS.md §5 and the codebase testing map.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pytest
+import tifffile
 import zarr
 
 from liom_toolkit.conversion.conversion import save_zarr
 from liom_toolkit.utils.io import (
+    extract_zarr_to_image,
     generate_axes_dict,
     generate_label_color_dict_mask,
     load_node_by_name,
@@ -231,3 +236,74 @@ def test_generate_label_color_dict_mask_structure():
     for entry in color_dict:
         assert "rgba" in entry
         assert len(entry["rgba"]) == 4
+
+
+def _make_synthetic_zarr(path: str, shape=(4, 8, 8)) -> np.ndarray:
+    """Write a tiny single-channel zarr volume and return the source array.
+
+    The volume has a bright cube so per-slice PNGs are non-constant (the
+    ``convert_to_png_for_saving`` constant-image branch returns all-zero,
+    which would still round-trip but is a weaker assertion).
+    """
+    arr = np.zeros(shape, dtype=np.uint16)
+    arr[1:3, 2:6, 2:6] = 1000
+    save_zarr(arr, path, scales=(6.5, 6.5, 6.5), chunks=shape)
+    return arr
+
+
+def test_extract_zarr_to_image_tiff_round_trip(tmp_path):
+    """extract_zarr_to_image(format='tiff') writes a single multi-page TIFF.
+
+    The default format writes one multi-page TIFF (one page per Z slice) via
+    ``tifffile.imwrite``; ``tifffile.imread`` reads it back with the expected
+    shape. The previous name ``extract_zarr_to_png`` wrote per-slice PNGs
+    only; the rename + ``format`` param adds the TIFF default with a PNG
+    escape hatch.
+    """
+    zpath = str(tmp_path / "vol.zarr")
+    _make_synthetic_zarr(zpath, shape=(4, 8, 8))
+    target = str(tmp_path / "out_tiff")
+    tiff_path = str(Path(target) / "extracted.tiff")
+
+    extract_zarr_to_image(zpath, target, channel=0, format="tiff")
+
+    assert Path(tiff_path).exists()
+    back = tifffile.imread(tiff_path)
+    # Multi-page TIFF: one page per Z slice -> shape (Z, Y, X).
+    assert back.shape == (4, 8, 8)
+    # The TIFF pages hold the normalized-to-uint8 slices (convert_to_png_for_saving
+    # min-max normalizes each slice to [0, 255]). Assert the bright block is
+    # present in the middle slices and absent at the edges.
+    assert back[0].max() == 0  # slice 0 is all-zero (no bright block)
+    assert back[1].max() == 255  # slice 1 has the bright block
+
+
+def test_extract_zarr_to_image_png_escape_hatch(tmp_path):
+    """extract_zarr_to_image(format='png') writes per-slice PNGs (escape hatch).
+
+    The PNG escape hatch preserves PNG consumers after the TIFF default
+    switch. One PNG per Z slice is written to the target directory.
+    """
+    zpath = str(tmp_path / "vol_png.zarr")
+    _make_synthetic_zarr(zpath, shape=(4, 8, 8))
+    target = str(tmp_path / "out_png")
+
+    extract_zarr_to_image(zpath, target, channel=0, format="png")
+
+    target_dir = Path(target)
+    for z in range(4):
+        assert (target_dir / f"{z}.png").exists()
+
+
+def test_extract_zarr_to_image_unsupported_format_raises(tmp_path):
+    """extract_zarr_to_image(format='unsupported') raises ValueError.
+
+    An unsupported format string must raise ``ValueError`` (never silently
+    fall back to a default or write no output — AGENTS §2 no-silent-wrong-data).
+    """
+    zpath = str(tmp_path / "vol_err.zarr")
+    _make_synthetic_zarr(zpath, shape=(4, 8, 8))
+    target = str(tmp_path / "out_err")
+
+    with pytest.raises(ValueError):
+        extract_zarr_to_image(zpath, target, channel=0, format="unsupported")

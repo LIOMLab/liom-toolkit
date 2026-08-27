@@ -13,7 +13,7 @@ from .dask_client import (
 )
 from .io import (
     create_and_write_mask,
-    extract_zarr_to_png,
+    extract_zarr_to_image,
     load_node_by_name,
     load_zarr,
     save_atlas_to_zarr,
@@ -37,7 +37,7 @@ __all__ = [
     "create_and_write_mask",
     "dask_client_manager",
     "download_allen_template",
-    "extract_zarr_to_png",
+    "extract_zarr_to_image",
     "load_node_by_name",
     "load_zarr",
     "save_atlas_to_zarr",

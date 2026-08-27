@@ -36,6 +36,7 @@ dependencies = [
     'opencv-python',
     'natsort',
     "openpyxl>=3.1",
+    "tifffile>=2024.0",
 ]
 
 classifiers = [

@@ -9,6 +9,7 @@ from typing import Any
 import dask.array as da
 import imageio.v3 as iio
 import numpy as np
+import tifffile
 import zarr
 from numpy.typing import NDArray
 from ome_zarr.dask_utils import resize as dask_resize
@@ -563,17 +564,36 @@ def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
     return None
 
 
-def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
-    """Extract a zarr file to a directory of PNG images.
+def extract_zarr_to_image(
+    zarr_file: str,
+    target_dir: str,
+    channel: int,
+    format: str = "tiff",  # ruff: ignore[builtin-argument-shadowing] - matches the user-facing API name
+) -> None:
+    """Extract a zarr volume to image files (multi-page TIFF by default, or per-slice PNGs).
 
     Parameters
     ----------
     zarr_file : str
         The zarr file to extract.
     target_dir : str
-        The directory to save the PNG images to.
+        The directory to save the extracted images to. For ``format="tiff"``
+        a single multi-page TIFF ``extracted.tiff`` is written inside this
+        directory; for ``format="png"`` one PNG per Z slice (``{z}.png``)
+        is written.
     channel : int
-        The channel to extract.
+        The channel to extract (used when the volume is 4D).
+    format : str
+        Output format: ``"tiff"`` (default) writes a single multi-page TIFF
+        via ``tifffile.imwrite`` (one page per Z slice — IO-efficient for
+        downstream tools that read multi-page TIFFs); ``"png"`` writes
+        per-slice PNGs via ``imageio`` (escape hatch for PNG consumers).
+        Any other value raises ``ValueError``.
+
+    Raises
+    ------
+    ValueError
+        If ``format`` is not ``"tiff"`` or ``"png"``.
     """
     node = load_zarr(zarr_file)[0]
     volume = node.data[0]
@@ -590,7 +610,24 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
 
     create_directory(Path(target_dir), overwrite=True)
 
-    for z in tqdm(range(volume.shape[0])):
-        image = volume[z, :, :]
-        image = convert_to_png_for_saving(image)
-        iio.imwrite(f"{target_dir}/{z!s}.png", image)
+    if format == "tiff":
+        # Normalize each slice to uint8 (the TIFF pages hold displayable
+        # images, matching the per-slice PNG normalization), then write a
+        # single multi-page TIFF (one page per Z slice).
+        pages = np.stack(
+            [convert_to_png_for_saving(volume[z, :, :]) for z in range(volume.shape[0])]
+        )
+        tifffile.imwrite(
+            str(Path(target_dir) / "extracted.tiff"),
+            pages,
+            photometric="minisblack",
+        )
+    elif format == "png":
+        for z in tqdm(range(volume.shape[0])):
+            image = volume[z, :, :]
+            image = convert_to_png_for_saving(image)
+            iio.imwrite(f"{target_dir}/{z!s}.png", image)
+    else:
+        raise ValueError(
+            f"Unsupported format: {format!r}. Use 'tiff' or 'png'."
+        )

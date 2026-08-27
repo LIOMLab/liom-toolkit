@@ -168,8 +168,9 @@ def test_convert_hdf5_to_zarr_no_use_memmap_succeeds(tmp_path):
 def test_convert_nifti_to_zarr_round_trip(tmp_path):
     """convert_nifti_to_zarr round-trips a real NIfTI via nib.load.
 
-    No Dask client is involved — ``convert_nifti_to_zarr`` uses
-    ``da.from_array(nib.load(...).get_fdata())`` directly.
+    No Dask client is involved — ``convert_nifti_to_zarr`` loads the NIfTI
+    data array directly via ``np.asanyarray(nib.load(...).dataobj)``, which
+    preserves the stored dtype (uint16 stays uint16 — no float64 upcast).
     """
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
     arr[4:12, 4:12, 4:12] = 1000
@@ -182,9 +183,50 @@ def test_convert_nifti_to_zarr_round_trip(tmp_path):
     nodes = load_zarr(zpath)
     assert np.array_equal(np.asarray(nodes[0].data[0]), arr)
     assert len(nodes[0].data) == 5
-    # NOTE: nibabel.get_fdata() returns float64, so the level-0 dtype is
-    # float64 (not uint16). This test asserts data-value equality only and
-    # intentionally does NOT assert dtype == np.uint16 for the NIfTI path.
+    # The dtype is preserved from the stored NIfTI (uint16 stays uint16) —
+    # np.asanyarray(ni_img.dataobj) does NOT upcast to float64 the way
+    # get_fdata() does.
+    assert nodes[0].data[0].dtype == np.uint16
+
+
+def test_convert_nifti_to_zarr_preserves_dtype(tmp_path):
+    """convert_nifti_to_zarr preserves the input NIfTI's stored dtype.
+
+    A uint16 NIfTI must produce a uint16 zarr — NOT float64. The previous
+    ``get_fdata()`` call upcast every integer dtype to float64 (4x storage
+    inflation + dtype loss); ``np.asanyarray(ni_img.dataobj)`` preserves the
+    stored dtype exactly. Fails RED against the current source because the
+    function still calls ``get_fdata()``.
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    npath = str(tmp_path / "synth_uint16.nii.gz")
+    nib.save(nib.Nifti1Image(arr, affine=np.eye(4)), npath)
+
+    zpath = str(tmp_path / "nifti_uint16.zarr")
+    convert_nifti_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+
+    nodes = load_zarr(zpath)
+    assert nodes[0].data[0].dtype == np.uint16
+
+
+def test_convert_nifti_to_zarr_no_float64_upcast(tmp_path):
+    """convert_nifti_to_zarr does NOT upcast integer NIfTI to float64.
+
+    Regression guard for the ``get_fdata()`` upcast: a uint16 input must
+    produce a uint16 zarr, never float64. Fails RED against the current
+    source because ``get_fdata()`` always returns float64.
+    """
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    npath = str(tmp_path / "synth_no_upcast.nii.gz")
+    nib.save(nib.Nifti1Image(arr, affine=np.eye(4)), npath)
+
+    zpath = str(tmp_path / "nifti_no_upcast.zarr")
+    convert_nifti_to_zarr(npath, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+
+    nodes = load_zarr(zpath)
+    assert nodes[0].data[0].dtype != np.float64
 
 
 def test_convert_nrrd_to_zarr_round_trip(tmp_path):

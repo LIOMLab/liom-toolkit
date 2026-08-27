@@ -260,13 +260,15 @@ def convert_nifti_to_zarr(
     """
     logger.info("Loading...")
     ni_img = nib.load(nifti_file)
-    # nib.load returns FileBasedImage; get_fdata is defined on SpatialImage
-    # subclasses. Access it via getattr to satisfy the type checker without
-    # changing runtime behavior.
-    get_fdata = getattr(ni_img, "get_fdata", None)
-    if get_fdata is None:
+    # Access the data array directly via ``dataobj`` instead of ``get_fdata()``.
+    # ``get_fdata()`` upcasts every integer dtype to float64 (4x storage
+    # inflation + dtype loss); ``np.asanyarray(ni_img.dataobj)`` preserves the
+    # stored dtype exactly (uint16 stays uint16). This is the nibabel
+    # maintainer-recommended way to load data without an unwanted cast.
+    data_obj = getattr(ni_img, "dataobj", None)
+    if data_obj is None:
         raise ValueError(f"Loaded NIfTI file is not a valid image: {nifti_file}")
-    data = da.from_array(np.asarray(get_fdata()))
+    data = da.from_array(np.asanyarray(data_obj))
     if transpose:
         data = da.transpose(data, (2, 1, 0))
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
