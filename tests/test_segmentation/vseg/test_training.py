@@ -52,3 +52,14 @@ def test_train_model_no_liom_lab_hardcoded() -> None:
         "training.py must not hardcode the 'liom-lab' wandb entity — "
         "the toolkit is lab-config-free per PROJECT.md core value"
     )
+
+
+def test_training_main_block_deleted() -> None:
+    """The broken ``if __name__ == '__main__':`` block is deleted from
+    training.py — the liom-train-model console script is the real CLI
+    (the old block had empty-string placeholders that crashed on invocation)."""
+    source = inspect.getsource(training_mod)
+    assert "__main__" not in source, (
+        "training.py must NOT have an `if __name__ == '__main__':` block — "
+        "the liom-train-model console script replaces it"
+    )

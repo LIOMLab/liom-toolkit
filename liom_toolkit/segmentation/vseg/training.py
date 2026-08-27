@@ -480,15 +480,3 @@ def train_model(
 
     final_loss = pd.DataFrame(data=[train_losses, val_losses]).T
     final_loss.to_csv("final_metrics.csv", encoding="utf-8", index=False)
-
-
-if __name__ == "__main__":
-    # Hardcoded for wandb sweeps
-    import torch
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset_dir = ""
-    output = ""
-    node_name = ""
-
-    train_model(dataset_file=dataset_dir, dev=device, output_train=output, node_name=node_name)
