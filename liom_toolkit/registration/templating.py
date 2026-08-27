@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -16,6 +17,8 @@ from liom_toolkit.utils.ants import load_ants_image_from_node
 
 if TYPE_CHECKING:
     from ants.core.ants_image import ANTsImage
+
+logger = logging.getLogger(__name__)
 
 
 def create_template(
@@ -113,7 +116,7 @@ def create_template(
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
-    print("Creating template...")
+    logger.info("Creating template...")
     if init_with_template:
         template = build_template(
             template_volume,
@@ -392,7 +395,7 @@ def build_template(
             ants.write_transform(avgaffine, afffn)
 
             if L == 2:
-                print(wavg.abs().mean())
+                logger.debug("wavg.abs().mean() = %s", wavg.abs().mean())
                 wscl = (-1.0) * gradient_step
                 wavg = wavg * wscl
                 wavgA = ants.apply_transforms(

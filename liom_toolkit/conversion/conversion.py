@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 import warnings
 from pathlib import Path
@@ -34,6 +35,8 @@ from liom_toolkit.utils.io import (
     validate_n_levels,
 )
 from liom_toolkit.utils.zarr_writer import create_directory
+
+logger = logging.getLogger(__name__)
 
 
 def load_hdf5(hdf5_file: str) -> da.Array:
@@ -99,11 +102,11 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
     """
     data = load_hdf5(hdf5_file)
 
-    print("Saving...")
+    logger.info("Saving...")
     data = data.compute()
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
     nib.save(ni_img, nifti_file)
-    print("Done!")
+    logger.info("Done!")
 
 
 def save_zarr(
@@ -147,7 +150,7 @@ def save_zarr(
     # stay unchanged.
     axis_names = [ax["name"] for ax in axes]
 
-    print("Saving...")
+    logger.info("Saving...")
     # Symlink-aware directory creation with overwrite=True: a second call
     # into an existing zarr store directory shutil.rmtree's the store then
     # recreates it before the zarr write proceeds (zarr stores are
@@ -201,7 +204,7 @@ def save_zarr(
             storage_options={"chunks": chunks},
             scaler=None,
         )
-    print("Done!")
+    logger.info("Done!")
 
 
 def convert_hdf5_to_zarr(
@@ -255,7 +258,7 @@ def convert_nifti_to_zarr(
     ValueError
         If the loaded NIfTI file is not a valid image.
     """
-    print("Loading...")
+    logger.info("Loading...")
     ni_img = nib.load(nifti_file)
     # nib.load returns FileBasedImage; get_fdata is defined on SpatialImage
     # subclasses. Access it via getattr to satisfy the type checker without
@@ -288,7 +291,7 @@ def convert_nrrd_to_zarr(
     chunks : tuple[int, int, int]
         The chunk size to use in the zarr file.
     """
-    print("Loading...")
+    logger.info("Loading...")
     data, _header = nrrd.read(nrrd_file)
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from .model import VsegModel
+
+logger = logging.getLogger(__name__)
 
 
 def train(
@@ -448,7 +451,7 @@ def train_model(
             }
         )
 
-    print(f"Finished Training: Best Epoch = {best_epoch}")
+    logger.info("Finished Training: Best Epoch = %s", best_epoch)
     artifact = wandb.Artifact("model", type="model")
     artifact.add_file(f"{checkpoint_path}.latest.pth")
     run.log_artifact(artifact)

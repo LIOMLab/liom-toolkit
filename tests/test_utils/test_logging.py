@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 
+import numpy as np
 import pytest
 
 import liom_toolkit
@@ -118,3 +119,36 @@ def test_configure_logging_exported() -> None:
     """liom_toolkit.configure_logging is callable and re-exported from the package."""
     assert hasattr(liom_toolkit, "configure_logging")
     assert callable(liom_toolkit.configure_logging)
+
+
+# --- print→logger sweep behavior tests (LOG-01) ---------------------------
+#
+# The full print-free enforcement is the ruff T20 hard-gate (dropped in the
+# CLI task). These caplog tests verify the sweep actually wired module-level
+# loggers into the domain functions that previously used print(). Only
+# core-dep-only functions are exercised here; the templating debug print
+# (ants extra) and the training finished message (torch extra) are gated on
+# optional deps and verified by the T20 gate + grep audit.
+
+
+def test_volume_segmentation_logs_stage(caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray) -> None:
+    """segment_3d emits 'Segmenting 3D volume...' at INFO on its module logger."""
+    from liom_toolkit.segmentation.volume_segmentation import segment_3d
+
+    with caplog.at_level(logging.INFO, logger="liom_toolkit.segmentation.volume_segmentation"):
+        segment_3d(synthetic_volume, k=3, fill_holes=False)
+    messages = [r.getMessage() for r in caplog.records]
+    assert "Segmenting 3D volume..." in messages
+    stage_records = [r for r in caplog.records if r.getMessage() == "Segmenting 3D volume..."]
+    assert all(r.levelno == logging.INFO for r in stage_records)
+    assert all(r.name == "liom_toolkit.segmentation.volume_segmentation" for r in stage_records)
+
+
+def test_volume_segmentation_logs_threshold_stage(caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray) -> None:
+    """segment_3d emits the 'Thresholding image...' stage announcement at INFO."""
+    from liom_toolkit.segmentation.volume_segmentation import segment_3d
+
+    with caplog.at_level(logging.INFO, logger="liom_toolkit.segmentation.volume_segmentation"):
+        segment_3d(synthetic_volume, k=3, fill_holes=False)
+    messages = [r.getMessage() for r in caplog.records]
+    assert "Thresholding image..." in messages

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import SimpleITK as sitk
 from numpy.typing import NDArray
 from scipy.ndimage import binary_fill_holes
 
 from liom_toolkit.segmentation import remove_small_structures
+
+logger = logging.getLogger(__name__)
 
 
 def segment_3d(
@@ -40,7 +44,7 @@ def segment_3d(
     NDArray[np.generic]
         The segmented mask.
     """
-    print("Segmenting 3D volume...")
+    logger.info("Segmenting 3D volume...")
     vol_p = np.copy(volume)
     if use_log:
         vol_p[volume > 0] = np.log(vol_p[volume > 0])
@@ -49,7 +53,7 @@ def segment_3d(
     img = sitk.GetImageFromArray(vol_p)
     img = sitk.Median(img, [k, k, k])
 
-    print("Thresholding image...")
+    logger.info("Thresholding image...")
     # Segmenting using an Otsu threshold
     if threshold_method == "otsu":
         marker_img = ~sitk.OtsuThreshold(img)
@@ -58,11 +62,11 @@ def segment_3d(
     else:
         marker_img = ~sitk.OtsuThreshold(img)
 
-    print("Applying watershed operations...")
+    logger.info("Applying watershed operations...")
     # Using a watershed algorithm to optimize the mask
     ws = sitk.MorphologicalWatershedFromMarkers(img, marker_img)
 
-    print("Separating foreground and background...")
+    logger.info("Separating foreground and background...")
     # Separating into foreground / background
     seg = sitk.ConnectedComponent(ws != ws[0, 0, 0])
 
@@ -70,11 +74,11 @@ def segment_3d(
 
     # Filling holes and returning the mask
     if fill_holes:
-        print("Filling holes...")
+        logger.info("Filling holes...")
         # Fill holes in the mask
         mask = fill_holes_2d_3d(mask)
 
-    print("Removing small structures...")
+    logger.info("Removing small structures...")
     # Remove small objects
     return remove_small_structures(vol_p, mask)
 
