@@ -8,7 +8,16 @@ from torch import nn
 
 
 class DiceLoss(nn.Module):
-    """Dice loss function."""
+    """Dice loss function.
+
+    Expects ``inputs`` to be PROBABILITIES in ``[0, 1]`` (sigmoid already
+    applied), matching :class:`DiceBCELoss` and the package's own
+    :class:`~liom_toolkit.segmentation.vseg.model.VsegModel`, whose
+    ``forward`` applies ``nn.Sigmoid()``. Applying ``torch.sigmoid`` here
+    as well would compute the loss on ``sigmoid(sigmoid(logits))`` --
+    wrong gradients and wrong loss value. If you have raw logits, apply
+    sigmoid before passing them in.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -19,7 +28,9 @@ class DiceLoss(nn.Module):
         Parameters
         ----------
         inputs : torch.Tensor
-            Input tensor (logits).
+            Input tensor (probabilities in ``[0, 1]`` -- sigmoid already
+            applied). Raw logits must be sigmoided by the caller before
+            passing them in.
         targets : torch.Tensor
             Target tensor.
         smooth : int
@@ -30,8 +41,6 @@ class DiceLoss(nn.Module):
         torch.Tensor
             The Dice loss.
         """
-        inputs = torch.sigmoid(inputs)
-
         inputs = inputs.view(-1)
         targets = targets.view(-1)
 
