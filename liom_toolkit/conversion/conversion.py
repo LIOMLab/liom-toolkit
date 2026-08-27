@@ -357,71 +357,74 @@ def create_full_zarr_volume(
         raise ImportError(
             "Please install ANTsPy to create the full zarr volume of the LIOM toolkit."
         ) from e
-    temp_dir = tempfile.TemporaryDirectory()
-    resolution_level = 2
+    # Use a context manager so the temp directory is cleaned up even if any
+    # step between creation and cleanup raises (multichannel creation, mask
+    # creation, atlas alignment, atlas save). The pre-fix code called
+    # temp_dir.cleanup() only on the success path, leaking on disk on error.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        resolution_level = 2
 
-    pbar = tqdm(total=5, desc="Creating zarr volume")
-    pbar.set_postfix({"step": "Creating multichannel zarr"})
-    create_multichannel_zarr(auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks)
-    pbar.update(1)
+        pbar = tqdm(total=5, desc="Creating zarr volume")
+        pbar.set_postfix({"step": "Creating multichannel zarr"})
+        create_multichannel_zarr(auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks)
+        pbar.update(1)
 
-    pbar.set_postfix({"step": "Creating temporary mask"})
-    # Load image for image information
-    nodes = load_zarr(zarr_file)
-    target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
-    # Create the temporary mask
-    mask = create_mask_from_zarr(zarr_file, resolution_level)
-    mask = mask.astype("uint32")
-    mask = ants.from_numpy(mask)
-    mask.set_direction(target_image.direction)
-    mask.set_spacing(target_image.spacing)
-    mask.set_origin(target_image.origin)
+        pbar.set_postfix({"step": "Creating temporary mask"})
+        # Load image for image information
+        nodes = load_zarr(zarr_file)
+        target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
+        # Create the temporary mask
+        mask = create_mask_from_zarr(zarr_file, resolution_level)
+        mask = mask.astype("uint32")
+        mask = ants.from_numpy(mask)
+        mask.set_direction(target_image.direction)
+        mask.set_spacing(target_image.spacing)
+        mask.set_origin(target_image.origin)
 
-    pbar.update(1)
+        pbar.update(1)
 
-    pbar.set_postfix({"step": "Aligning annotations to volume"})
-    # Align the annotations to the volume
-    nodes = load_zarr(zarr_file)
-    target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
-    template = ants.image_read(template_path)
+        pbar.set_postfix({"step": "Aligning annotations to volume"})
+        # Align the annotations to the volume
+        nodes = load_zarr(zarr_file)
+        target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
+        template = ants.image_read(template_path)
 
-    # Shared atlas resolution: the download and the align call MUST use the
-    # same resolution so the downloaded atlas matches the annotation volume
-    # produced by align_annotations_to_volume. A single local constant makes
-    # the invariant explicit instead of relying on two coincidentally-coupled
-    # literals; exposing it as a public parameter is a future API change.
-    atlas_resolution = 25
-    if not use_custom_atlas:
-        base_atlas, _ = download_allen_atlas(
-            temp_dir.name, resolution=atlas_resolution, keep_nrrd=False
+        # Shared atlas resolution: the download and the align call MUST use the
+        # same resolution so the downloaded atlas matches the annotation volume
+        # produced by align_annotations_to_volume. A single local constant makes
+        # the invariant explicit instead of relying on two coincidentally-coupled
+        # literals; exposing it as a public parameter is a future API change.
+        atlas_resolution = 25
+        if not use_custom_atlas:
+            base_atlas, _ = download_allen_atlas(
+                temp_dir, resolution=atlas_resolution, keep_nrrd=False
+            )
+        else:
+            base_atlas = ants.image_read(atlas_path)
+
+        atlas = align_annotations_to_volume(
+            target_volume=target_image,
+            mask=mask,
+            template=template,
+            atlas=base_atlas,
+            resolution=atlas_resolution,
+            keep_intermediary=False,
+            data_dir=temp_dir,
         )
-    else:
-        base_atlas = ants.image_read(atlas_path)
 
-    atlas = align_annotations_to_volume(
-        target_volume=target_image,
-        mask=mask,
-        template=template,
-        atlas=base_atlas,
-        resolution=atlas_resolution,
-        keep_intermediary=False,
-        data_dir=temp_dir.name,
-    )
+        # Reorient the atlas to the same orientation as the target image
+        atlas = ants.reorient_image2(atlas, target_image.orientation)
 
-    # Reorient the atlas to the same orientation as the target image
-    atlas = ants.reorient_image2(atlas, target_image.orientation)
+        # Resize the atlas to full size
+        atlas_target_shape = nodes[0].data[0].shape
+        if len(atlas_target_shape) == 4:
+            atlas_target_shape = atlas_target_shape[1:]
+        atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
+        atlas_resized = da.transpose(atlas, (2, 1, 0))
+        atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
-    # Resize the atlas to full size
-    atlas_target_shape = nodes[0].data[0].shape
-    if len(atlas_target_shape) == 4:
-        atlas_target_shape = atlas_target_shape[1:]
-    atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
-    atlas_resized = da.transpose(atlas, (2, 1, 0))
-    atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
-
-    save_atlas_to_zarr(zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0)
-    temp_dir.cleanup()
-    pbar.update(1)
+        save_atlas_to_zarr(zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0)
+        pbar.update(1)
 
     # Creating final mask
     pbar.set_postfix({"step": "Creating final mask"})
