@@ -238,9 +238,6 @@ def create_mask_from_zarr(
         image = image[0, :, :, :]
     image = image.compute()
     return segment_3d(image, fill_holes=fill_holes)
-    # Compare first dimension to see if transpose is needed
-    # if mask.shape[0] != image.shape[0]:
-    #     mask = np.transpose(mask, (2, 1, 0))
 
 
 def save_label_to_zarr(
