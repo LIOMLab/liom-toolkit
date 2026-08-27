@@ -1441,7 +1441,7 @@ dev = [
     { name = "sphinx" },
     { name = "sphinx-rtd-theme" },
     { name = "sphinxcontrib-apidoc" },
-    { name = "ty", specifier = ">=0.0.74" },
+    { name = "ty", specifier = "==0.0.74" },
     { name = "types-opencv-python", specifier = ">=1.0.11" },
     { name = "types-tqdm" },
 ]
