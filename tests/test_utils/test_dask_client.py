@@ -163,11 +163,11 @@ def test_context_manager_exception_calls_close(monkeypatch):
     """An exception inside the with-block still triggers ``close()`` (finally semantics)."""
     _install_dask_mocks(monkeypatch)
     mgr = DaskClientManager()
+    mgr.set_client("")
+    assert mgr.client is not None
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with mgr:
-            mgr.set_client("")
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"), mgr:
+        raise RuntimeError("boom")
 
     assert mgr.client is None
     assert mgr.cluster is None
@@ -184,7 +184,7 @@ def test_set_client_threads_n_workers(monkeypatch):
 
 
 def test_get_client_threads_n_workers(monkeypatch):
-    """``get_client("", n_workers=3)`` creates a local cluster with ``n_workers=3`` and returns the client."""
+    """``get_client("", n_workers=3)`` creates a local cluster and returns the client."""
     fake_cluster_cls, fake_client_cls = _install_dask_mocks(monkeypatch)
     mgr = DaskClientManager()
 

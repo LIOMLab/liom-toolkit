@@ -8,12 +8,26 @@ from dask.distributed import Client, LocalCluster
 
 
 class DaskClientManager:
-    """Singleton manager for a Dask distributed client (local cluster or remote)."""
+    """Singleton manager for a Dask distributed client (local cluster or remote).
+
+    Supports use as a context manager so the client and cluster are reliably
+    released on exit::
+
+        with DaskClientManager() as mgr:
+            mgr.set_client(n_workers=4)
+            ...
+
+    The ``n_workers`` parameter (on ``set_client`` / ``get_client``) defaults
+    to ``min(cpu_count() - 1, 8)`` when ``None`` — the cap prevents unbounded
+    worker spawning on high-core machines. An explicit ``n_workers < 1``
+    raises ``ValueError`` rather than silently spawning zero workers.
+    """
 
     def __init__(self) -> None:
         self.client: Client | None = None
+        self.cluster: LocalCluster | None = None
 
-    def get_client(self, address: str = "") -> Client:
+    def get_client(self, address: str = "", n_workers: int | None = None) -> Client:
         """Get the client to a local cluster or a cluster.
 
         Implicitly sets the client when not yet initialized. Defaults to a
@@ -23,6 +37,10 @@ class DaskClientManager:
         ----------
         address : str
             The address of the cluster.
+        n_workers : int, optional
+            Number of workers for the local cluster. Ignored when connecting
+            to a remote scheduler (``address`` non-empty). Defaults to
+            ``min(cpu_count() - 1, 8)`` when ``None``.
 
         Returns
         -------
@@ -35,7 +53,7 @@ class DaskClientManager:
             If the client could not be initialized after the setup attempt.
         """
         if self.client is None and address == "":
-            self.__create_local_cluster__()
+            self.__create_local_cluster__(n_workers)
         elif self.client is None and address != "":
             self.__connect_to_cluster__(address)
         if self.client is None:
@@ -52,7 +70,7 @@ class DaskClientManager:
         n_workers : int, optional
             Number of workers for the local cluster. Ignored when connecting
             to a remote scheduler (``address`` non-empty). Defaults to
-            ``cpu_count() - 1`` when ``None`` and a local cluster is created.
+            ``min(cpu_count() - 1, 8)`` when ``None``.
         """
         if self.client is None and address == "":
             self.__create_local_cluster__(n_workers)
@@ -60,19 +78,29 @@ class DaskClientManager:
             self.__connect_to_cluster__(address)
 
     def __create_local_cluster__(self, n_workers: int | None = None) -> None:
-        """Create a local cluster with the number of cores - 1.
+        """Create a local cluster.
 
         Parameters
         ----------
         n_workers : int, optional
-            Number of workers. Defaults to ``cpu_count() - 1`` when ``None``.
+            Number of workers. Defaults to ``min(cpu_count() - 1, 8)`` when
+            ``None`` (the cap prevents OOM on high-core machines). An explicit
+            value less than 1 raises ``ValueError``.
+
+        Raises
+        ------
+        ValueError
+            If ``n_workers`` resolves to a value less than 1 (covers the
+            ``cpu_count() == 1`` edge where ``cpu_count() - 1 == 0``).
         """
         if self.client is not None:
             return
         if n_workers is None:
-            n_workers = multiprocessing.cpu_count() - 1
-        cluster = LocalCluster(n_workers=n_workers, threads_per_worker=1)
-        self.client = cluster.get_client()
+            n_workers = min(multiprocessing.cpu_count() - 1, 8)
+        if n_workers < 1:
+            raise ValueError(f"n_workers must be >= 1, got {n_workers}")
+        self.cluster = LocalCluster(n_workers=n_workers, threads_per_worker=1)
+        self.client = Client(self.cluster)
 
     def __connect_to_cluster__(self, address: str) -> None:
         """Connect to a cluster.
@@ -85,6 +113,39 @@ class DaskClientManager:
         if self.client is not None:
             return
         self.client = Client(address)
+
+    def close(self) -> None:
+        """Close the client and cluster, releasing worker processes.
+
+        Idempotent: safe to call when no client/cluster was ever created, and
+        safe to call more than once. The client is closed before the cluster
+        so in-flight tasks are drained before the scheduler shuts down.
+        """
+        if self.client is not None:
+            self.client.close()
+            self.client = None
+        if self.cluster is not None:
+            self.cluster.close()
+            self.cluster = None
+
+    def __enter__(self) -> DaskClientManager:
+        """Enter the context manager.
+
+        Returns
+        -------
+        DaskClientManager
+            ``self``, so the caller can access the manager inside the block.
+        """
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Exit the context manager, closing the client and cluster.
+
+        Called on both normal exit and exception. Does not suppress
+        exceptions — ``*exc_info`` is captured only so the signature matches
+        the context-manager protocol.
+        """
+        self.close()
 
 
 # Create a global Dask client manager. Can be interpreted as a singleton.
