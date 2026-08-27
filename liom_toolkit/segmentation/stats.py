@@ -1,3 +1,5 @@
+"""Per-region vessel morphometric statistics and Allen atlas region filtering."""
+
 from __future__ import annotations
 
 import math
@@ -10,6 +12,7 @@ import pandas as pd
 import PIL.Image
 import scipy.ndimage as ndi
 from dask.distributed import Future
+from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import distance_transform_edt
 from skimage import measure
 from skimage.color import gray2rgb
@@ -27,30 +30,19 @@ PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None â
 
 def compute_slice_metrics(
     output_dir: str,
-    image: np.ndarray,
-    mask: np.ndarray,
-    vessel_mask: np.ndarray,
-    region_map: np.ndarray,
-    vessel_exclude: np.ndarray,
+    image: str,
+    mask: ArrayLike,
+    vessel_mask: ArrayLike,
+    region_map: ArrayLike,
+    vessel_exclude: ArrayLike,
     voxel_size: float = 0.65,
 ) -> None:
-    """
-    Compute the metrics for a brain slice. Save the results to disk.
+    """Compute the metrics for a brain slice and save the results to disk.
 
-    :param output_dir: The directory to save the output to
-    :type output_dir: str
-    :param image: The image of the brain slice
-    :type image: np.ndarray
-    :param mask: The mask of the tissue in the brain slice
-    :type mask: np.ndarray
-    :param vessel_mask: The mask of the vessels in the brain slice
-    :type vessel_mask: np.ndarray
-    :param region_map: The map of the regions in the brain slice
-    :type region_map: np.ndarray
-    :param vessel_exclude: The mask of the vessels to exclude from the analysis
-    :type vessel_exclude: np.ndarray
-    :param voxel_size: The size of the voxels in the image
-    :type voxel_size: float
+    ``image`` is a string label (filename/identifier) used in the output
+    DataFrame and progress messages, not an image array. The actual image
+    arrays are ``mask``, ``vessel_mask``, ``region_map``, and
+    ``vessel_exclude``.
 
     Vessel-free regions: regions with no vessels yield a row with vessel
     density = 0.0, vessel area = 0.0, and branching points = 0, but the
@@ -58,8 +50,30 @@ def compute_slice_metrics(
     because the mean diameter of an empty vessel set is undefined. The
     omitted diameter row is itself a publishable 'no vessels detected'
     signal, not a silent gap.
-    """
 
+    Parameters
+    ----------
+    output_dir : str
+        The directory to save the output to.
+    image : str
+        The label (filename/identifier) of the brain slice, used in the
+        output DataFrame and progress messages.
+    mask : ArrayLike
+        The mask of the tissue in the brain slice.
+    vessel_mask : ArrayLike
+        The mask of the vessels in the brain slice.
+    region_map : ArrayLike
+        The map of the regions in the brain slice.
+    vessel_exclude : ArrayLike
+        The mask of the vessels to exclude from the analysis.
+    voxel_size : float
+        The size of the voxels in the image.
+
+    Notes
+    -----
+    ``ValueError`` propagates from :func:`calculate_regional_density` when a
+    region has zero area (bad region mask, caller error).
+    """
     # Setup output directory (overwrite-safe via the symlink-aware
     # create_directory helper from utils.zarr_writer: a second call into an
     # existing output_dir shutil.rmtree's the directory then recreates it,
@@ -152,9 +166,7 @@ def compute_slice_metrics(
     # mask and explicitly excluded vessels -- making the total density
     # higher than the sum of per-region densities (a data inconsistency
     # in the same output DataFrame).
-    tissue_area, vessel_area, vessel_density = calculate_density(
-        full_vessel_mask, mask, voxel_size
-    )
+    tissue_area, vessel_area, vessel_density = calculate_density(full_vessel_mask, mask, voxel_size)
     branching_points_count, skeleton, branching_points = get_branching_point_count(
         vessel_mask, output_dir
     )
@@ -210,19 +222,23 @@ def compute_slice_metrics(
 
 
 def get_vessel_region(
-    regions: np.ndarray, region_index: int, vessel_mask: np.ndarray
-) -> np.ndarray:
-    """
-    Get the vessels in a region.
+    regions: ArrayLike, region_index: int, vessel_mask: ArrayLike
+) -> NDArray[np.generic]:
+    """Get the vessels in a region.
 
-    :param regions: The regions of the tissue mask.
-    :type regions: np.ndarray
-    :param region_index: The index of the region.
-    :type region_index: int
-    :param vessel_mask: The mask of the vessels.
-    :type vessel_mask: np.ndarray
-    :return: The vessel within the masked region.
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    regions : ArrayLike
+        The regions of the tissue mask.
+    region_index : int
+        The index of the region.
+    vessel_mask : ArrayLike
+        The mask of the vessels.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The vessel within the masked region.
     """
     region = regions == region_index + 1
     region = region * vessel_mask
@@ -230,53 +246,51 @@ def get_vessel_region(
 
 
 def calculate_regional_density(
-    region: np.ndarray,
+    region: ArrayLike,
     region_index: int,
     props_list: list[RegionProperties],
     output_dir: str,
     voxel_size: float = 0.65,
 ) -> tuple[float, float, float]:
-    """
-    Calculates the density of vessels in a region
+    """Calculate the density of vessels in a region.
 
-    :param region: The region to calculate the density of.
-    :type region: np.ndarray
-    :param region_index: The computational index of the region.
-    :type region_index: int
-    :param props_list: The list of properties of the regions.
-    :type props_list: list[RegionProperties]
-    :param output_dir: The directory to save the region mask to.
-    :type output_dir: str
-    :param voxel_size: The size of the voxels in the image.
-    :type voxel_size: float
-    :return: The area of the vessels, the area of the region, and the density of the vessels in a specific region.
-    :rtype: tuple[float, float, float]
+    Parameters
+    ----------
+    region : ArrayLike
+        The region to calculate the density of.
+    region_index : int
+        The computational index of the region.
+    props_list : list[RegionProperties]
+        The list of properties of the regions.
+    output_dir : str
+        The directory to save the region mask to.
+    voxel_size : float
+        The size of the voxels in the image.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        The area of the vessels, the area of the region, and the density of
+        the vessels in a specific region.
+
+    Raises
+    ------
+    ValueError
+        If the region has zero area (bad region mask, caller error).
     """
     vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
     if total_area == 0:
-        raise ValueError(
-            "Empty region: regionprops area is 0 (bad region mask, caller error)"
-        )
+        raise ValueError("Empty region: regionprops area is 0 (bad region mask, caller error)")
     iio.imwrite(output_dir + str(region_index) + ".tif", region.astype(np.uint8))
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
 
 def calculate_density(
-    vessel_mask: np.ndarray, mask: np.ndarray, voxel_size: float = 0.65
+    vessel_mask: ArrayLike, mask: ArrayLike, voxel_size: float = 0.65
 ) -> tuple[float, float, float]:
-    """
-    Calculates the areas of the tissue and vessel to compute the density of vessels in a mask.
-
-    :param vessel_mask: The mask of the vessels.
-    :type vessel_mask: np.ndarray
-    :param mask: The mask of the tissue.
-    :type mask: np.ndarray
-    :param voxel_size: The size of the voxels in the image.
-    :type voxel_size: float
-    :return: The area of the tissue, the area of the vessels, and the density of the vessels.
-    :rtype: tuple[float, float, float]
+    """Calculate the areas of the tissue and vessel to compute vessel density in a mask.
 
     Empty-result contract:
 
@@ -286,32 +300,54 @@ def calculate_density(
     * Empty tissue mask (``mask.sum() == 0``) raises ``ValueError`` -- an
       empty tissue mask is a bad region mask and a caller error, not a
       valid result.
+
+    Parameters
+    ----------
+    vessel_mask : ArrayLike
+        The mask of the vessels.
+    mask : ArrayLike
+        The mask of the tissue.
+    voxel_size : float
+        The size of the voxels in the image.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        The area of the tissue, the area of the vessels, and the density of
+        the vessels.
+
+    Raises
+    ------
+    ValueError
+        If the tissue mask is empty (``mask.sum() == 0``).
     """
     tissue_area = mask.sum() * math.pow(voxel_size, 2)
     if tissue_area == 0:
-        raise ValueError(
-            "Empty tissue mask: mask.sum() == 0 (bad region mask, caller error)"
-        )
+        raise ValueError("Empty tissue mask: mask.sum() == 0 (bad region mask, caller error)")
     vessel_area = vessel_mask.sum() * math.pow(voxel_size, 2)
     vessel_density = vessel_area / tissue_area
     return tissue_area, vessel_area, vessel_density
 
 
 def get_branching_point_count(
-    vessel_mask: np.ndarray, output_dir: str, filename: str = "skeleton.tif"
-) -> tuple[int, np.ndarray, np.ndarray]:
-    """
-    Get the number of branching points in a vessel mask.
+    vessel_mask: ArrayLike, output_dir: str, filename: str = "skeleton.tif"
+) -> tuple[int, NDArray[np.bool_], NDArray[np.bool_]]:
+    """Get the number of branching points in a vessel mask.
 
-    :param vessel_mask: The mask of the vessels.
-    :type vessel_mask: np.ndarray
-    :param output_dir: The directory to save the skeleton to.
-    :type output_dir: str
-    :param filename: The filename to save the skeleton to.
-    :type filename: str
-    :return: The number of branching points in the vessel mask, the skeleton of the vessel mask,
-            and the location of the branching points.
-    :rtype: tuple[int, np.ndarray, np.ndarray]
+    Parameters
+    ----------
+    vessel_mask : ArrayLike
+        The mask of the vessels.
+    output_dir : str
+        The directory to save the skeleton to.
+    filename : str
+        The filename to save the skeleton to.
+
+    Returns
+    -------
+    tuple[int, NDArray[np.bool_], NDArray[np.bool_]]
+        The number of branching points in the vessel mask, the skeleton of
+        the vessel mask, and the location of the branching points.
     """
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
@@ -320,15 +356,21 @@ def get_branching_point_count(
     return points_count, skeleton, branching_points
 
 
-def get_branching_points(skeleton: np.ndarray) -> np.ndarray:
-    """
-    Get the branching points in a skeleton using predefined structural elements
-    Source: https://stackoverflow.com/questions/43037692/how-to-find-branch-point-from-binary-skeletonize-image
+def get_branching_points(skeleton: ArrayLike) -> NDArray[np.bool_]:
+    """Get the branching points in a skeleton using predefined structural elements.
 
-    :param skeleton: The skeleton of the vessels.
-    :type skeleton: np.ndarray
-    :return: The branching points in the skeleton.
-    :rtype: np.ndarray
+    Source:
+    https://stackoverflow.com/questions/43037692/how-to-find-branch-point-from-binary-skeletonize-image
+
+    Parameters
+    ----------
+    skeleton : ArrayLike
+        The skeleton of the vessels.
+
+    Returns
+    -------
+    NDArray[np.bool_]
+        The branching points in the skeleton.
     """
     # Setup structural elements for detecting branching points
     selems = []
@@ -347,24 +389,23 @@ def get_branching_points(skeleton: np.ndarray) -> np.ndarray:
 
 
 def draw_branch_point_circles(
-    skeleton: np.ndarray,
-    branching_points: np.ndarray,
+    skeleton: ArrayLike,
+    branching_points: ArrayLike,
     output_dir: str,
     filename: str = "skeleton_circled.png",
 ) -> None:
-    """
-    Draw circles around the branching points in a skeleton
+    """Draw circles around the branching points in a skeleton and save to disk.
 
-    :param skeleton: The skeleton of the vessels.
-    :type skeleton: np.ndarray
-    :param branching_points: The location of the branching points.
-    :type branching_points: np.ndarray
-    :param output_dir: The directory to save the skeleton to.
-    :type output_dir: str
-    :param filename: The filename to save the skeleton to.
-    :type filename: str
-    :return: The circled branching point in the skeleton.
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    skeleton : ArrayLike
+        The skeleton of the vessels.
+    branching_points : ArrayLike
+        The location of the branching points.
+    output_dir : str
+        The directory to save the skeleton to.
+    filename : str
+        The filename to save the skeleton to.
     """
     circled_skeleton = gray2rgb(skeleton.astype(np.uint8))
     points_to_draw = np.argwhere(branching_points)
@@ -377,19 +418,9 @@ def draw_branch_point_circles(
 
 
 def compute_average_diameter(
-    mask: np.ndarray, skeleton: np.ndarray, voxel_size: float = 0.65
+    mask: ArrayLike, skeleton: ArrayLike, voxel_size: float = 0.65
 ) -> float:
-    """
-    Compute the average diameter of the vessels in a mask
-
-    :param mask: The vessel mask.
-    :type mask: np.ndarray
-    :param skeleton: The skeleton of the vessels.
-    :type skeleton: np.ndarray
-    :param voxel_size: The size of the voxels in the image.
-    :type voxel_size: float
-    :return: The average diameter of the vessels in the mask.
-    :rtype: float
+    """Compute the average diameter of the vessels in a mask.
 
     Empty-result contract:
 
@@ -401,6 +432,26 @@ def compute_average_diameter(
       BEFORE ``np.mean`` so no NaN + RuntimeWarning can escape.
     * Empty tissue mask raises ``ValueError`` -- mean diameter is undefined
       when there is no tissue.
+
+    Parameters
+    ----------
+    mask : ArrayLike
+        The vessel mask.
+    skeleton : ArrayLike
+        The skeleton of the vessels.
+    voxel_size : float
+        The size of the voxels in the image.
+
+    Returns
+    -------
+    float
+        The average diameter of the vessels in the mask.
+
+    Raises
+    ------
+    ValueError
+        If the vessel mask is empty or no positive radii are found in the
+        skeleton.
     """
     if mask.sum() == 0:
         raise ValueError("Empty tissue mask: mean diameter is undefined")
@@ -416,16 +467,17 @@ def compute_average_diameter(
     return mean_diameter * voxel_size
 
 
-def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -> None:
-    """
-    Create and save a heatmap of the vessel density in a brain slice and save it to disk.
+def create_heatmap(image: ArrayLike, output_dir: str, square_size: int = 150) -> None:
+    """Create and save a heatmap of the vessel density in a brain slice.
 
-    :param image: The image of the brain slice.
-    :type image: np.ndarray
-    :param output_dir: The directory to save the heatmap to.
-    :type output_dir: str
-    :param square_size: The size of the squares in the heatmap
-    :type square_size: int
+    Parameters
+    ----------
+    image : ArrayLike
+        The image of the brain slice.
+    output_dir : str
+        The directory to save the heatmap to.
+    square_size : int
+        The size of the squares in the heatmap.
     """
     # Overwrite-safe output directory creation (same create_directory helper
     # as compute_slice_metrics above; function-scope import avoids a circular
@@ -470,17 +522,23 @@ def create_heatmap(image: np.ndarray, output_dir: str, square_size: int = 150) -
     iio.imwrite(output_dir + "heatmap.tif", heatmap)
 
 
-def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
-    """
-    Generate a list of itk ids for a given region. Will reconstruct the structure tree and get the descendants
-    contained within the region
+def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]:
+    """Generate a list of itk ids for a given region.
 
-    :param region: The region to get the ids for.
-    :type region: str
-    :param data_dir: The directory where the atlas and structure tree are saved. Optional.
-    :type data_dir: str
-    :return: The list of itk ids for the region and its descendants.
-    :rtype: list[int]
+    Reconstructs the structure tree and gets the descendants contained
+    within the region.
+
+    Parameters
+    ----------
+    region : str
+        The region to get the ids for.
+    data_dir : str
+        The directory where the atlas and structure tree are saved. Optional.
+
+    Returns
+    -------
+    list[int]
+        The list of itk ids for the region and its descendants.
     """
     # Setup temporary directory if not given
     if data_dir == "":
@@ -510,15 +568,19 @@ def generate_itk_id_list_of_region(region: str, data_dir="") -> list[int]:
 
 
 def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.Array:
-    """
-    Create a filter image based on the region ids.
+    """Create a filter image based on the region ids.
 
-    :param atlas: The atlas containing the region ids.
-    :type atlas: da.Array | Future
-    :param region_ids: The region ids to filter.
-    :type region_ids: list[int]
-    :return: The filter image.
-    :rtype: da.Array
+    Parameters
+    ----------
+    atlas : da.Array | Future
+        The atlas containing the region ids.
+    region_ids : list[int]
+        The region ids to filter.
+
+    Returns
+    -------
+    da.Array
+        The filter image.
     """
     client = dask_client_manager.get_client()
     filter_image = client.submit(da.isin, atlas, region_ids)
@@ -527,15 +589,19 @@ def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.A
 
 
 def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> da.Array:
-    """
-    Filter an image to a region based on a filter.
+    """Filter an image to a region based on a filter.
 
-    :param image_filter: The filter to apply.
-    :type image_filter: da.Array
-    :param data: The data to filter.
-    :type data: da.Array | Future
-    :return: The filtered image.
-    :rtype: da.Array
+    Parameters
+    ----------
+    image_filter : da.Array
+        The filter to apply.
+    data : da.Array | Future
+        The data to filter.
+
+    Returns
+    -------
+    da.Array
+        The filtered image.
     """
     client = dask_client_manager.get_client()
     filtered_image = client.submit(da.where, image_filter, data, 0)
@@ -544,13 +610,17 @@ def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> d
 
 
 def compute_mask_area(mask: da.Array | Future) -> np.uint64:
-    """
-    Compute the area of a mask. Sums the binary masks.
+    """Compute the area of a mask by summing the binary mask values.
 
-    :param mask: The mask to compute the area of.
-    :type mask: da.Array | Future
-    :return: The area of the mask.
-    :rtype: np.uint64
+    Parameters
+    ----------
+    mask : da.Array | Future
+        The mask to compute the area of.
+
+    Returns
+    -------
+    np.uint64
+        The area of the mask.
     """
     client = dask_client_manager.get_client()
     total_area = client.submit(da.sum, mask)

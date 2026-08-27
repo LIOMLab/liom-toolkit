@@ -1,35 +1,44 @@
+"""Classical 3D brain mask segmentation via SimpleITK watershed."""
+
 from __future__ import annotations
 
 import numpy as np
 import SimpleITK as sitk
+from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import binary_fill_holes
 
 from liom_toolkit.segmentation import remove_small_structures
 
 
 def segment_3d(
-    volume: np.ndarray,
+    volume: ArrayLike,
     k: int = 5,
     use_log: bool = True,
     threshold_method: str = "otsu",
-    fill_holes=True,
-) -> np.ndarray:
-    """
-    Segment a 3D brain volume using a watershed algorithm.
-    Source: https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
+    fill_holes: bool = True,
+) -> NDArray[np.generic]:
+    """Segment a 3D brain volume using a watershed algorithm.
 
-    :param volume: The volume to segment.
-    :type volume: ants.ANTsImage
-    :param k: The size of the median filter.
-    :type k: int
-    :param use_log: Whether to use the log of the volume.
-    :type use_log: bool
-    :param threshold_method: The threshold method to use. Either "otsu" or "triangle".
-    :type threshold_method: str
-    :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
-    :type fill_holes: bool
-    :return: The segmented mask
-    :rtype: np.ndarray
+    Source:
+    https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
+
+    Parameters
+    ----------
+    volume : ArrayLike
+        The volume to segment.
+    k : int
+        The size of the median filter.
+    use_log : bool
+        Whether to use the log of the volume.
+    threshold_method : str
+        The threshold method to use. Either "otsu" or "triangle".
+    fill_holes : bool
+        Whether to fill holes in the mask. Useful for brain segmentation.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The segmented mask.
     """
     print("Segmenting 3D volume...")
     vol_p = np.copy(volume)
@@ -72,15 +81,21 @@ def segment_3d(
     return mask
 
 
-def fill_holes_2d_3d(mask: np.ndarray) -> np.ndarray:
-    """
-    Fill holes in a 2D and 3D mask.
-    Source: https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
+def fill_holes_2d_3d(mask: ArrayLike) -> NDArray[np.bool_]:
+    """Fill holes in a 2D and 3D mask.
 
-    :param mask: The mask to fill holes in.
-    :type mask: np.ndarray
-    :return: The mask with holes filled.
-    :rtype: np.ndarray
+    Source:
+    https://github.com/linum-uqam/sbh-reconstruction/blob/51271c84347afccb21483cfd3fcbde77d537929c/slicercode/segmentation/brainMask.py
+
+    Parameters
+    ----------
+    mask : ArrayLike
+        The mask to fill holes in.
+
+    Returns
+    -------
+    NDArray[np.bool_]
+        The mask with holes filled.
     """
     # Filling holes and returning the mask
     mask = binary_fill_holes(mask)
