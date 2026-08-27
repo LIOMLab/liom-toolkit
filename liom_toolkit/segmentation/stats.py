@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-import os
 import tempfile
+from pathlib import Path
 from typing import Any
 
 import dask.array as da
@@ -82,8 +82,6 @@ def compute_slice_metrics(
     # eliminating the FileExistsError race on re-run. Function-scope import
     # avoids a circular import with utils.zarr_writer at module load time,
     # matching the conversion.py:save_zarr pattern.)
-    from pathlib import Path
-
     from liom_toolkit.utils.zarr_writer import create_directory
 
     create_directory(Path(output_dir), overwrite=True)
@@ -219,15 +217,15 @@ def compute_slice_metrics(
     # rescale), and the explicit astype is identical output with no warning
     # and clearer intent (we are narrowing a small-integer mask, not
     # rescaling a float image).
-    iio.imwrite(os.path.join(output_dir, "regions.png"), regions.astype(np.uint8))
-    iio.imwrite(os.path.join(output_dir, "vessel_exclude.png"), vessel_exclude.astype(np.uint8))
-    iio.imwrite(os.path.join(output_dir, "_complete_mask.png"), mask.astype(np.uint8))
-    iio.imwrite(os.path.join(output_dir, "vessels.png"), vessel_mask.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / "regions.png"), regions.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / "vessel_exclude.png"), vessel_exclude.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / "_complete_mask.png"), mask.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / "vessels.png"), vessel_mask.astype(np.uint8))
 
     # Save data
     entry = pd.DataFrame.from_dict(total_entry)
     df = pd.concat([df, entry])
-    df.to_excel(os.path.join(output_dir, "regions.xlsx"), index=False)
+    df.to_excel(str(Path(output_dir) / "regions.xlsx"), index=False)
 
 
 def get_vessel_region(
@@ -290,7 +288,7 @@ def calculate_regional_density(
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
     if total_area == 0:
         raise ValueError("Empty region: regionprops area is 0 (bad region mask, caller error)")
-    iio.imwrite(os.path.join(output_dir, f"{region_index}.tif"), region.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / f"{region_index}.tif"), region.astype(np.uint8))
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
@@ -360,7 +358,7 @@ def get_branching_point_count(
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
     points_count = branching_points.sum()
-    iio.imwrite(os.path.join(output_dir, filename), skeleton.astype(np.uint8))
+    iio.imwrite(str(Path(output_dir) / filename), skeleton.astype(np.uint8))
     return points_count, skeleton, branching_points
 
 
@@ -425,7 +423,7 @@ def draw_branch_point_circles(
         circy, circx = circle_perimeter(point[0], point[1], 7, shape=skeleton.shape)
         circled_skeleton[circy, circx] = (220, 20, 20)
 
-    iio.imwrite(os.path.join(output_dir, filename), circled_skeleton)
+    iio.imwrite(str(Path(output_dir) / filename), circled_skeleton)
     del circled_skeleton
 
 
@@ -494,8 +492,6 @@ def create_heatmap(image: ArrayLike, output_dir: str, square_size: int = 150) ->
     # Overwrite-safe output directory creation (same create_directory helper
     # as compute_slice_metrics above; function-scope import avoids a circular
     # import with utils.zarr_writer at module load time).
-    from pathlib import Path
-
     from liom_toolkit.utils.zarr_writer import create_directory
 
     create_directory(Path(output_dir), overwrite=True)
@@ -531,7 +527,7 @@ def create_heatmap(image: ArrayLike, output_dir: str, square_size: int = 150) ->
     heatmap = heatmap.astype(np.uint16)
     heatmap = heatmap.astype(float)
     heatmap = heatmap / (square_size**2)
-    iio.imwrite(os.path.join(output_dir, "heatmap.tif"), heatmap)
+    iio.imwrite(str(Path(output_dir) / "heatmap.tif"), heatmap)
 
 
 def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]:

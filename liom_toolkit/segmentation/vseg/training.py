@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -454,7 +454,7 @@ def train_model(
     run.log_artifact(artifact)
 
     # For sweeps
-    torch.save(model.state_dict(), os.path.join(wandb.run.dir, "model.pt"))
+    torch.save(model.state_dict(), str(Path(wandb.run.dir) / "model.pt"))
     run.finish()
 
     final_loss = pd.DataFrame(data=[train_losses, val_losses]).T

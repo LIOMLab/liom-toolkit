@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import pathlib
 import tempfile
 from typing import TYPE_CHECKING, Any
 
@@ -328,8 +328,8 @@ def align_brain_region_to_atlas(
     pbar = tqdm(total=3, desc="Aligning region mask", leave=True, unit="step", position=0)
 
     # Create the data directory if it does not exist
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if not pathlib.Path(data_dir).exists():
+        pathlib.Path(data_dir).mkdir(parents=True)
 
     # Construct the reference space cache
     rs = construct_reference_space(data_dir=data_dir, resolution=resolution)
@@ -458,8 +458,8 @@ def align_annotations_to_volume(
     pbar = tqdm(total=2, desc="Aligning annotation", leave=True, unit="step", position=0)
 
     # Create the data directory if it does not exist
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if not pathlib.Path(data_dir).exists():
+        pathlib.Path(data_dir).mkdir(parents=True)
     # Start registration process
     pbar.set_description("Starting registration process")
     # Register the volume to the template

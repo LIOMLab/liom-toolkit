@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
@@ -93,11 +93,10 @@ def predict_one(
 
     device = torch.device(dev)
 
-    # Use os.path.basename + os.path.splitext instead of split('/') and
-    # replace('.png', ''): the split is platform-specific (fails on Windows
-    # backslashes) and replace strips all '.png' occurrences, not just the
-    # extension.
-    image_id = os.path.splitext(os.path.basename(img_path))[0]
+    # Use Path.stem instead of split('/') and replace('.png', ''): the split
+    # is platform-specific (fails on Windows backslashes) and replace strips
+    # all '.png' occurrences, not just the extension.
+    image_id = Path(img_path).stem
 
     overlap = W - stride
 
@@ -105,7 +104,7 @@ def predict_one(
     create_dir(f"{save_path}/patches")
     # Remove images if exists
     patches_images_dir = f"{save_path}/patches/images/"
-    if os.path.exists(patches_images_dir):
+    if Path(patches_images_dir).exists():
         shutil.rmtree(patches_images_dir)
     create_dir(f"{save_path}/patches/images/")
 
@@ -141,7 +140,7 @@ def predict_one(
     saved_image = gray2rgb(processed_image)
     saved_image = (saved_image / saved_image.max() * 255).astype(np.uint8)
     img_name = f"{image_id}_0_0.png"
-    image_path = os.path.join(save_path, "patches", "images", img_name)
+    image_path = str(Path(save_path) / "patches" / "images" / img_name)
     iio.imwrite(image_path, saved_image)
 
     """ Load dataset """

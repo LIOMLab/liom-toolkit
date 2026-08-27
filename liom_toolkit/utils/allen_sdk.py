@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import json
 import operator
-import os
+import pathlib
 import tempfile
 from typing import TYPE_CHECKING, Any
 
@@ -404,7 +404,7 @@ def download_allen_atlas(
 
     # Remove nrrd file if unwanted
     if not keep_nrrd:
-        os.remove(nrrd_file)
+        pathlib.Path(nrrd_file).unlink()
 
     return ants_image, metadata
 
@@ -450,7 +450,7 @@ def download_allen_template(
     nrrd_file = f"{data_dir}/allen_template_{resolution}.nrrd"
 
     # Downloading the template (cache check)
-    if not os.path.exists(nrrd_file):
+    if not pathlib.Path(nrrd_file).exists():
         _download_nrrd(_TEMPLATE_URL.format(res=resolution), nrrd_file)
     vol, _header = nrrd.read(nrrd_file)
 
@@ -458,7 +458,7 @@ def download_allen_template(
 
     # Remove nrrd file if unwanted
     if not keep_nrrd:
-        os.remove(nrrd_file)
+        pathlib.Path(nrrd_file).unlink()
 
     return ants_image
 
@@ -544,15 +544,15 @@ def construct_reference_space(
 
     # Download annotation NRRD (cache check — never fall back to a silent default)
     nrrd_file = f"{data_dir}/allen_atlas_{resolution}.nrrd"
-    if not os.path.exists(nrrd_file):
+    if not pathlib.Path(nrrd_file).exists():
         _download_nrrd(_ANNOTATION_URL.format(res=resolution), nrrd_file)
     annotation, _header = nrrd.read(nrrd_file)
 
     # Download structure tree (cache check — never fall back to a silent default)
     tree_file = f"{data_dir}/structure_tree.json"
-    if not os.path.exists(tree_file):
+    if not pathlib.Path(tree_file).exists():
         _download_structure_tree(tree_file)
-    with open(tree_file, encoding="utf-8") as f:
+    with pathlib.Path(tree_file).open(encoding="utf-8") as f:
         tree_data = json.load(f)
     # The cached file may be the raw ``msg`` list (allensdk's cache format and
     # the committed regression fixture, and the format this module's own
@@ -600,14 +600,14 @@ def _download_nrrd(url: str, dest: str) -> None:
     try:
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
-            with open(tmp, "wb") as f:
+            with pathlib.Path(tmp).open("wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-        os.replace(tmp, dest)  # atomic on POSIX and Windows
+        pathlib.Path(tmp).replace(dest)  # atomic on POSIX and Windows
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if pathlib.Path(tmp).exists():
+            pathlib.Path(tmp).unlink()
         raise
 
 
@@ -637,12 +637,12 @@ def _download_structure_tree(dest: str) -> list[dict[str, Any]]:
     msg = payload["msg"]
     tmp = dest + ".partial"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with pathlib.Path(tmp).open("w", encoding="utf-8") as f:
             json.dump(msg, f)
-        os.replace(tmp, dest)
+        pathlib.Path(tmp).replace(dest)
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if pathlib.Path(tmp).exists():
+            pathlib.Path(tmp).unlink()
         raise
     return _flatten_structure_tree(msg)
 

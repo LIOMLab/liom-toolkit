@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-import os
+from pathlib import Path
 
 import imageio.v3 as iio
 import matplotlib.pyplot as plt
@@ -79,20 +79,20 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
     ids: list[str] = []
 
     for images in img_list:
-        # Use os.path.basename + os.path.splitext instead of split('/') and
+        # Use Path.stem and Path.parent.name instead of split('/') and
         # replace('.png', ''): the split is platform-specific (fails on
         # Windows backslashes) and replace strips all '.png' occurrences,
         # not just the extension. The acquisition is the parent directory
         # name (one level up from the image file).
-        image_id = os.path.splitext(os.path.basename(images))[0]
+        image_id = Path(images).stem
         ids.append(image_id)
-        acquisition = os.path.basename(os.path.dirname(images))
+        acquisition = Path(images).parent.name
 
         inference = predict_one(
             model=model, img_path=images, save_path=save_path, norm=True, dev=device, patching=False
         )
 
-        mask_path = os.path.splitext(images)[0] + "_mask.png"
+        mask_path = str(Path(images).with_suffix("")) + "_mask.png"
         mask = iio.imread(mask_path)
 
         # comparison image. Guard the divide-by-zero on an all-zero mask
@@ -147,7 +147,7 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
     jaccard_list = ["jaccard", *jaccard, jaccard_mean]
     cldice_list = ["clDice", *cldice, cldice_mean]
 
-    with open(f"{save_path}/validationmetrics.csv", encoding="utf-8", mode="w") as f:
+    with Path(f"{save_path}/validationmetrics.csv").open(encoding="utf-8", mode="w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(headings)
         csvwriter.writerow(accuracy_list)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -195,11 +195,11 @@ def pre_register_brain(
         fixed=template, moving=mask, transformlist=image_reg_transform["fwdtransforms"]
     )
     if save_pre_reg:
-        pre_reg_dir = os.path.join(output_dir, "pre_registered") if output_dir else "pre_registered"
-        if not os.path.exists(pre_reg_dir):
-            os.makedirs(pre_reg_dir)
-        ants.image_write(image_reg, os.path.join(pre_reg_dir, f"{brain}_pre_reg.nii.gz"))
-        ants.image_write(mask_reg, os.path.join(pre_reg_dir, f"{brain}_pre_reg_mask.nii.gz"))
+        pre_reg_dir = str(Path(output_dir) / "pre_registered") if output_dir else "pre_registered"
+        if not Path(pre_reg_dir).exists():
+            Path(pre_reg_dir).mkdir(parents=True)
+        ants.image_write(image_reg, str(Path(pre_reg_dir) / f"{brain}_pre_reg.nii.gz"))
+        ants.image_write(mask_reg, str(Path(pre_reg_dir) / f"{brain}_pre_reg_mask.nii.gz"))
     return image_reg, mask_reg
 
 
@@ -315,13 +315,13 @@ def build_template(
     # Write progress files under work_dir rather than a CWD-relative
     # template_progress/ directory, which would litter the caller's working
     # directory (commonly the repo root in notebooks).
-    progress_dir = os.path.join(work_dir, "template_progress")
-    if save_progress and not os.path.exists(progress_dir):
-        os.makedirs(progress_dir)
+    progress_dir = str(Path(work_dir) / "template_progress")
+    if save_progress and not Path(progress_dir).exists():
+        Path(progress_dir).mkdir(parents=True)
 
     def make_outprefix(k: int) -> str:
-        os.makedirs(os.path.join(work_dir, f"img{k:04d}"), exist_ok=True)
-        return os.path.join(work_dir, f"img{k:04d}", "out")
+        (Path(work_dir) / f"img{k:04d}").mkdir(exist_ok=True, parents=True)
+        return str(Path(work_dir) / f"img{k:04d}" / "out")
 
     # Wrap the body in try/finally so the mkdtemp work_dir is removed on
     # every exit path, not just the success path. Without this, any
@@ -377,15 +377,15 @@ def build_template(
                     # available to the affine-averaging block below.
                     if i < iterations - 1 and remove_temp_output:
                         for fwd_transform in w1["fwdtransforms"]:
-                            os.remove(fwd_transform)
+                            Path(fwd_transform).unlink()
                         for inv_transform in w1["invtransforms"]:
-                            os.remove(inv_transform)
+                            Path(inv_transform).unlink()
 
             if useNoRigid:
                 avgaffine = ants.average_affine_transform_no_rigid(affinelist)
             else:
                 avgaffine = ants.average_affine_transform(affinelist)
-            afffn = os.path.join(work_dir, "avgAffine.mat")
+            afffn = str(Path(work_dir) / "avgAffine.mat")
             ants.write_transform(avgaffine, afffn)
 
             if L == 2:
@@ -399,7 +399,7 @@ def build_template(
                     transformlist=afffn,
                     whichtoinvert=[1],
                 )
-                wavgfn = os.path.join(work_dir, "avgWarp.nii.gz")
+                wavgfn = str(Path(work_dir) / "avgWarp.nii.gz")
                 iio.image_write(wavgA, wavgfn)
                 xavg = ants.apply_transforms(
                     fixed=xavgNew,
@@ -419,7 +419,7 @@ def build_template(
                     1.0 - blending_weight
                 )
             if save_progress:
-                iio.image_write(xavg, os.path.join(progress_dir, f"template_{i}.nii.gz"))
+                iio.image_write(xavg, str(Path(progress_dir) / f"template_{i}.nii.gz"))
 
         return xavg
     finally:

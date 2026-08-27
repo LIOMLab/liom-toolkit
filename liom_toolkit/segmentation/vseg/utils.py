@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import os
-from glob import glob
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import imageio.v3 as iio
@@ -29,8 +28,8 @@ def create_dir(path: str) -> None:
     path : str
         The path to create.
     """
-    if not os.path.exists(path):
-        os.makedirs(path)
+    if not Path(path).exists():
+        Path(path).mkdir(parents=True)
 
 
 def calculate_metrics(y_true: ArrayLike, y_pred: ArrayLike) -> list[float]:
@@ -140,7 +139,7 @@ def numeric_filesort(path: str, folder: str = "images", extension: str = "png") 
     list[str]
         The sorted list of filenames.
     """
-    test = sorted(glob(f"{path}/{folder}/*{extension}"))
+    test = sorted(str(p) for p in Path(path, folder).glob(f"*{extension}"))
     return natsort.natsorted(test, reverse=False)
 
 

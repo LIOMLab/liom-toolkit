@@ -309,11 +309,6 @@ ignore = [
     "N806",
     "N803",
     "N812",
-    # PTH: flake8-use-pathlib. The codebase uses os.path throughout;
-    # migrating to pathlib is a refactor deferred to a future phase (not a
-    # correctness concern). Suppressing the whole PTH family avoids
-    # sprinkling per-file ignores across every module.
-    "PTH",
     # TID252: relative-imports. The project uses relative imports within
     # the package by convention (idiomatic for a library).
     "TID252",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import pathlib
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -34,8 +34,8 @@ def clean_dir(directory: str) -> None:
     directory : str
         The directory to clean.
     """
-    if os.path.exists(directory + ".DS_Store"):
-        os.remove(directory + ".DS_Store")
+    if pathlib.Path(directory + ".DS_Store").exists():
+        pathlib.Path(directory + ".DS_Store").unlink()
 
 
 def convert_to_png_for_saving(img: ArrayLike) -> NDArray[np.uint8]:
