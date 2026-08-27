@@ -1,3 +1,5 @@
+"""Format conversion subpackage: HDF5/NIfTI/NRRD -> OME-Zarr."""
+
 from __future__ import annotations
 
 from .conversion import (

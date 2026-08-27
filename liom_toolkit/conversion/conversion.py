@@ -1,8 +1,9 @@
+"""Format conversion helpers: HDF5/NIfTI/NRRD -> OME-Zarr."""
+
 from __future__ import annotations
 
 import tempfile
 import warnings
-
 from pathlib import Path
 
 import dask.array as da
@@ -12,9 +13,9 @@ import nrrd
 import numpy as np
 import zarr
 from natsort import natsorted
+from numpy.typing import ArrayLike
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
-from ome_zarr.scale import ArrayLike
 from tqdm.auto import tqdm
 
 from liom_toolkit.utils.dask_client import dask_client_manager
@@ -36,8 +37,7 @@ from liom_toolkit.utils.zarr_writer import create_directory
 
 
 def load_hdf5(hdf5_file: str) -> da.Array:
-    """
-    Load the data from a HDF5 file into a Dask array.
+    """Load the data from a HDF5 file into a Dask array.
 
     Each dataset is eagerly materialized to a numpy array inside the
     context-managed ``with h5py.File(...)`` block (so the OS file descriptor
@@ -47,10 +47,15 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     safe for process-based Dask clusters (an ``h5py.Dataset`` is not reliably
     picklable across processes).
 
-    :param hdf5_file: The HDF5 file to load.
-    :type hdf5_file: str
-    :return: The stacked channel data from the HDF5 file.
-    :rtype: da.Array
+    Parameters
+    ----------
+    hdf5_file : str
+        The HDF5 file to load.
+
+    Returns
+    -------
+    da.Array
+        The stacked channel data from the HDF5 file.
     """
     client = dask_client_manager.get_client()
 
@@ -77,13 +82,14 @@ def load_hdf5(hdf5_file: str) -> da.Array:
 
 
 def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
-    """
-    Convert a HDF5 file to a NIFTI file.
+    """Convert a HDF5 file to a NIFTI file.
 
-    :param hdf5_file: Path to the HDF5 file.
-    :type hdf5_file: str
-    :param nifti_file: Path to the NIFTI file.
-    :type nifti_file: str
+    Parameters
+    ----------
+    hdf5_file : str
+        Path to the HDF5 file.
+    nifti_file : str
+        Path to the NIFTI file.
     """
     data = load_hdf5(hdf5_file)
 
@@ -97,24 +103,30 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
 def save_zarr(
     data: ArrayLike,
     zarr_file: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
     unit: str = "micrometer",
 ) -> None:
-    """
-    Save a numpy array to a zarr file.
+    """Save a numpy array to a zarr file.
 
-    :param data: The data to save.
-    :type data: np.ndarray
-    :param zarr_file: The zarr file to save to.
-    :type zarr_file: str
-    :param scales: The resolution of the image, in z y x order.
-    :type scales: tuple
-    :param chunks: The chunk size to use.
-    :type chunks: tuple
-    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
+    Parameters
+    ----------
+    data : ArrayLike
+        The data to save.
+    zarr_file : str
+        The zarr file to save to.
+    scales : tuple[float, float, float]
+        The resolution of the image, in z y x order.
+    chunks : tuple[int, int, int]
+        The chunk size to use.
+    unit : str
+        The NGFF UDUNITS-2 length unit the ``scales`` are expressed
         in. Defaults to ``"micrometer"`` to preserve existing callers.
-    :type unit: str
+
+    Raises
+    ------
+    ValueError
+        If ``unit`` is not a NGFF UDUNITS-2 length unit.
     """
     if unit not in _NGFF_LENGTH_UNITS:
         raise ValueError(
@@ -186,20 +198,21 @@ def save_zarr(
 def convert_hdf5_to_zarr(
     hdf5_file: str,
     zarr_file: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
 ) -> None:
-    """
-    Convert a HDF5 file from the lightsheet microscope to a zarr file.
+    """Convert a HDF5 file from the lightsheet microscope to a zarr file.
 
-    :param hdf5_file: Path to the HDF5 file.
-    :type hdf5_file: str
-    :param zarr_file: Path to the zarr file.
-    :type zarr_file: str
-    :param scales: The resolution of the image, in z y x order.
-    :type scales: tuple
-    :param chunks: The chunk size to use.
-    :type chunks: tuple
+    Parameters
+    ----------
+    hdf5_file : str
+        Path to the HDF5 file.
+    zarr_file : str
+        Path to the zarr file.
+    scales : tuple[float, float, float]
+        The resolution of the image, in z y x order.
+    chunks : tuple[int, int, int]
+        The chunk size to use.
     """
     data = load_hdf5(hdf5_file)
 
@@ -209,23 +222,24 @@ def convert_hdf5_to_zarr(
 def convert_nifti_to_zarr(
     nifti_file: str,
     zarr_file: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
     transpose: bool = False,
 ) -> None:
-    """
-    Convert a NIFTI file to a zarr file.
+    """Convert a NIFTI file to a zarr file.
 
-    :param nifti_file: The NIFTI file to convert.
-    :type nifti_file: str
-    :param zarr_file: The zarr file to save to.
-    :type zarr_file: str
-    :param scales: The resolution of the image, in z y x order.
-    :type scales: tuple
-    :param chunks: The chunk size to use in the zarr file.
-    :type chunks: tuple
-    :param transpose: Whether to transpose the data or not.
-    :type transpose: bool
+    Parameters
+    ----------
+    nifti_file : str
+        The NIFTI file to convert.
+    zarr_file : str
+        The zarr file to save to.
+    scales : tuple[float, float, float]
+        The resolution of the image, in z y x order.
+    chunks : tuple[int, int, int]
+        The chunk size to use in the zarr file.
+    transpose : bool
+        Whether to transpose the data or not.
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
@@ -236,19 +250,23 @@ def convert_nifti_to_zarr(
 
 
 def convert_nrrd_to_zarr(
-    nrrd_file: str, zarr_file: str, scales: tuple = (6.5, 6.5, 6.5), chunks: tuple = (128, 128, 128)
+    nrrd_file: str,
+    zarr_file: str,
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
 ) -> None:
-    """
-    Convert a NRRD file to a zarr file.
+    """Convert a NRRD file to a zarr file.
 
-    :param nrrd_file: The NRRD file to convert.
-    :type nrrd_file: str
-    :param zarr_file: The zarr file to save.
-    :type zarr_file: str
-    :param scales: The resolution of the image, in z y x order.
-    :type scales: tuple
-    :param chunks: The chunk size to use in the zarr file.
-    :type chunks: tuple
+    Parameters
+    ----------
+    nrrd_file : str
+        The NRRD file to convert.
+    zarr_file : str
+        The zarr file to save.
+    scales : tuple[float, float, float]
+        The resolution of the image, in z y x order.
+    chunks : tuple[int, int, int]
+        The chunk size to use in the zarr file.
     """
     print("Loading...")
     data, _header = nrrd.read(nrrd_file)
@@ -259,23 +277,23 @@ def create_multichannel_zarr(
     auto_fluo_file: str,
     vascular_file: str,
     zarr_file: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
 ) -> None:
-    """
-    Create a multichannel zarr file from the auto-fluorescence and vascular data.
+    """Create a multichannel zarr file from the auto-fluorescence and vascular data.
 
-    :param auto_fluo_file: The path to the auto-fluorescence hdf5 file.
-    :type auto_fluo_file: str
-    :param vascular_file: The path to the vascular hdf5 file.
-    :type vascular_file: str
-    :param zarr_file: The path to the zarr file to save the volume to.
-    :type zarr_file: str
-    :param scales: The physical resolution of the volume per axis.
-    :type scales: tuple
-    :param chunks: The chunk size to use for the volume.
-    :type chunks: tuple
-    :return:
+    Parameters
+    ----------
+    auto_fluo_file : str
+        The path to the auto-fluorescence hdf5 file.
+    vascular_file : str
+        The path to the vascular hdf5 file.
+    zarr_file : str
+        The path to the zarr file to save the volume to.
+    scales : tuple[float, float, float]
+        The physical resolution of the volume per axis.
+    chunks : tuple[int, int, int]
+        The chunk size to use for the volume.
     """
     client = dask_client_manager.get_client()
     # Extract data from the hdf5 files
@@ -297,30 +315,39 @@ def create_full_zarr_volume(
     zarr_file: str,
     template_path: str,
     atlas_path: str,
-    use_custom_atlas=True,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    use_custom_atlas: bool = True,
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
 ) -> None:
-    """
-    Create a full zarr volume from the auto-fluorescence and vascular data. The annotations will be aligned to the
-    auto-fluorescence data and saved to the zarr file. The mask will also be created and saved to the zarr file.
+    """Create a full zarr volume from the auto-fluorescence and vascular data.
 
-    :param auto_fluo_file: The path to the auto-fluorescence hdf5 file.
-    :type auto_fluo_file: str
-    :param vascular_file: The path to the vascular hdf5 file.
-    :type vascular_file: str
-    :param zarr_file: The path to the zarr file to save the volume to.
-    :type zarr_file: str
-    :param template_path: The path to the template to align the annotations to.
-    :type template_path: str
-    :param atlas_path: The path to the atlas to use for the annotations.
-    :type atlas_path: str
-    :param use_custom_atlas: Whether to use a custom atlas or not.
-    :type use_custom_atlas: bool
-    :param scales: The physical resolution of the volume per axis.
-    :type scales: tuple
-    :param chunks: The chunk size to use for the volume.
-    :type chunks: tuple
+    The annotations will be aligned to the auto-fluorescence data and saved
+    to the zarr file. The mask will also be created and saved to the zarr
+    file.
+
+    Parameters
+    ----------
+    auto_fluo_file : str
+        The path to the auto-fluorescence hdf5 file.
+    vascular_file : str
+        The path to the vascular hdf5 file.
+    zarr_file : str
+        The path to the zarr file to save the volume to.
+    template_path : str
+        The path to the template to align the annotations to.
+    atlas_path : str
+        The path to the atlas to use for the annotations.
+    use_custom_atlas : bool
+        Whether to use a custom atlas or not.
+    scales : tuple[float, float, float]
+        The physical resolution of the volume per axis.
+    chunks : tuple[int, int, int]
+        The chunk size to use for the volume.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
     try:
         import ants
@@ -394,9 +421,7 @@ def create_full_zarr_volume(
     atlas_resized = da.transpose(atlas, (2, 1, 0))
     atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
-    save_atlas_to_zarr(
-        zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0
-    )
+    save_atlas_to_zarr(zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0)
     temp_dir.cleanup()
     pbar.update(1)
 
