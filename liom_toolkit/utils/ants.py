@@ -1,3 +1,5 @@
+"""Dask/zarr to ANTsImage bridge (ants is lazy-imported)."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,21 +18,36 @@ def convert_dask_to_ants(
     dask_array: da.Array,
     node: Node,
     resolution_level: int = 2,
-    volume_direction: tuple = ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]),
+    volume_direction: tuple[
+        tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]
+    ] = (
+        (1.0, 0.0, 0.0),
+        (0.0, 0.0, -1.0),
+        (0.0, -1.0, 0.0),
+    ),
 ) -> ANTsImage:
-    """
-    Convert a dask array to an ANTs image.
+    """Convert a dask array to an ANTs image.
 
-    :param dask_array: The dask array to convert.
-    :type dask_array: da.Array
-    :param node: The zarr node corresponding to the image.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :param volume_direction: The direction of the volume.
-    :type volume_direction: tuple
-    :return: The converted ANTs image.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    dask_array : da.Array
+        The dask array to convert.
+    node : Node
+        The zarr node corresponding to the image.
+    resolution_level : int
+        The resolution level to load.
+    volume_direction : tuple[tuple[float, float, float], ...]
+        The direction of the volume (3x3 row-major direction matrix).
+
+    Returns
+    -------
+    ANTsImage
+        The converted ANTs image.
+
+    Raises
+    ------
+    ImportError
+        If ``ants`` (ANTsPy) is not installed.
     """
     try:
         import ants
@@ -58,21 +75,30 @@ def convert_dask_to_ants(
     return ants_image
 
 
-def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel=0) -> ANTsImage:
-    """
-    Load an ANTs image from a zarr node.
+def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel: int = 0) -> ANTsImage:
+    """Load an ANTs image from a zarr node.
 
-    :param node: The zarr node to load.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :param channel: The channel to load.
-    :type channel: int
-    :return: The loaded ANTs image.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    node : Node
+        The zarr node to load.
+    resolution_level : int
+        The resolution level to load.
+    channel : int
+        The channel to load.
+
+    Returns
+    -------
+    ANTsImage
+        The loaded ANTs image.
+
+    Raises
+    ------
+    ImportError
+        If ``ants`` (ANTsPy) is not installed.
     """
     try:
-        import ants  # noqa: F401 -- imported for the actionable error; convert_dask_to_ants re-imports
+        import ants  # ruff: ignore[unused-import] -- imported for the actionable error; convert_dask_to_ants re-imports
     except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the ants utility functions of the LIOM toolkit."

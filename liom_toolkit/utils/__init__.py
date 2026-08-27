@@ -1,3 +1,5 @@
+"""Cross-cutting utilities: OME-Zarr IO, Dask client, ANTs bridge, Allen atlas, streaming writer."""
+
 from __future__ import annotations
 
 from .allen_sdk import (
@@ -41,23 +43,27 @@ from .zarr_writer import (
 )
 
 __all__ = [
-    # allen_sdk
+    "AnalysisOmeZarrWriter",
+    "DaskClientManager",
+    "OmeZarrWriter",
+    "build_scale_factors",
+    "clean_dir",
     "construct_reference_space",
     "convert_allen_nrrd_to_ants",
+    "convert_to_png_for_saving",
+    "create_and_write_mask",
+    "create_directory",
+    "create_mask_from_zarr",
+    "create_transformation_dict",
+    "dask_client_manager",
     "download_allen_atlas",
     "download_allen_template",
-    "generate_label_color_dict_allen",
-    "load_allen_template",
-    # dask_client
-    "DaskClientManager",
-    "dask_client_manager",
-    # io
-    "build_scale_factors",
-    "create_and_write_mask",
-    "create_mask_from_zarr",
     "extract_zarr_to_png",
+    "fix_even",
     "generate_axes_dict",
+    "generate_label_color_dict_allen",
     "generate_label_color_dict_mask",
+    "load_allen_template",
     "load_node_by_name",
     "load_omero_channels",
     "load_zarr",
@@ -66,13 +72,4 @@ __all__ = [
     "save_atlas_to_zarr",
     "save_label_to_zarr",
     "validate_n_levels",
-    # utils
-    "clean_dir",
-    "convert_to_png_for_saving",
-    "fix_even",
-    # zarr_writer
-    "AnalysisOmeZarrWriter",
-    "OmeZarrWriter",
-    "create_directory",
-    "create_transformation_dict",
 ]

@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import shutil
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import dask.array as da
 import numpy as np
 import zarr
+from numpy.typing import ArrayLike, DTypeLike, NDArray
 from ome_zarr.dask_utils import resize as da_resize
 from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
@@ -39,8 +40,8 @@ from ome_zarr.io import parse_url
 from .io import _NGFF_LENGTH_UNITS, generate_axes_dict, validate_n_levels
 
 __all__ = [
-    "OmeZarrWriter",
     "AnalysisOmeZarrWriter",
+    "OmeZarrWriter",
     "create_directory",
     "create_transformation_dict",
 ]
@@ -54,16 +55,27 @@ def create_directory(store_path: Path, overwrite: bool = False) -> Path:
     symlinks, so handle them separately (unlink the link only; the link's
     target is NOT deleted).
 
-    :param store_path: Path to the directory to create.
-    :param overwrite: If True, remove an existing directory/symlink at
-        *store_path* before creating a fresh one. If False and the path
-        exists, raise ``FileExistsError``.
-    :raises FileExistsError: When *store_path* exists (as a real directory or
-        a symlink) and ``overwrite=False``. ``FileExistsError`` is the
-        stdlib-correct exception for "path already exists" (NOT
-        ``ValueError`` — and never ``assert``, which is stripped under
-        ``python -O``).
-    :return: The created directory path.
+    Parameters
+    ----------
+    store_path : Path
+        Path to the directory to create.
+    overwrite : bool
+        If True, remove an existing directory/symlink at *store_path* before
+        creating a fresh one. If False and the path exists, raise
+        ``FileExistsError``.
+
+    Returns
+    -------
+    Path
+        The created directory path.
+
+    Raises
+    ------
+    FileExistsError
+        When *store_path* exists (as a real directory or a symlink) and
+        ``overwrite=False``. ``FileExistsError`` is the stdlib-correct
+        exception for "path already exists" (NOT ``ValueError`` — and never
+        ``assert``, which is stripped under ``python -O``).
     """
     directory = Path(store_path)
     if directory.is_symlink():
@@ -81,8 +93,7 @@ def create_directory(store_path: Path, overwrite: bool = False) -> Path:
             shutil.rmtree(directory)
         else:
             raise FileExistsError(
-                f"Directory {directory.as_posix()} already exists. "
-                "Set overwrite=True to overwrite."
+                f"Directory {directory.as_posix()} already exists. Set overwrite=True to overwrite."
             )
     directory.mkdir(parents=True)
     return directory
@@ -115,16 +126,30 @@ def create_transformation_dict(
     coordinates are mislabeled. This helper takes ``ndims`` explicitly and
     branches on it so the scale list length always matches the axes length.
 
-    :param n_levels: Number of levels (INCLUDING L0). Returns ``n_levels``
-        entries. Must be >= 1 (0 would produce a multiscales metadata with
-        zero datasets — invalid NGFF).
-    :param voxel_size: ``(z, y, x)`` base voxel size in ``unit``.
-    :param ndims: 3 or 4 — selects whether a channel element is prepended.
-    :param downscale_factor: Per-level Y/X downsample factor (default 2).
-    :return: A list of ``n_levels`` ``[{"type":"scale","scale":[...]}]``
-        entries, one per pyramid level (L0 first).
-    :raises ValueError: If ``ndims`` is not 3 or 4, ``voxel_size`` is not a
-        3-element sequence, or ``n_levels`` is < 1.
+    Parameters
+    ----------
+    n_levels : int
+        Number of levels (INCLUDING L0). Returns ``n_levels`` entries. Must
+        be >= 1 (0 would produce a multiscales metadata with zero datasets —
+        invalid NGFF).
+    voxel_size : Sequence[float]
+        ``(z, y, x)`` base voxel size in ``unit``.
+    ndims : int
+        3 or 4 — selects whether a channel element is prepended.
+    downscale_factor : int
+        Per-level Y/X downsample factor (default 2).
+
+    Returns
+    -------
+    list[list[dict]]
+        A list of ``n_levels`` ``[{"type":"scale","scale":[...]}]`` entries,
+        one per pyramid level (L0 first).
+
+    Raises
+    ------
+    ValueError
+        If ``ndims`` is not 3 or 4, ``voxel_size`` is not a 3-element
+        sequence, or ``n_levels`` is < 1.
     """
     if ndims not in (3, 4):
         raise ValueError(f"ndims must be 3 or 4, got {ndims!r}.")
@@ -181,7 +206,7 @@ class OmeZarrWriter:
         )
         writer[:, z_idx, :, :] = frame        # per-frame streaming write
         writer.finalize(
-            res=[stack_step_um, pixel_y_um, pixel_x_um],  # µm (z, y, x)
+            res=[stack_step_um, pixel_y_um, pixel_x_um],  # μm (z, y, x)
             n_levels=4,
             omero_channels=[{"label": "555 nm", "color": "00FF00", ...}],
         )
@@ -198,7 +223,7 @@ class OmeZarrWriter:
         store_path: str,
         shape: tuple[int, ...],
         chunk_shape: tuple[int, ...],
-        dtype,
+        dtype: DTypeLike,
         overwrite: bool = True,
         downscale_factor: int = 2,
         unit: str = "micrometer",
@@ -206,32 +231,46 @@ class OmeZarrWriter:
     ) -> None:
         """Pre-allocate the level-0 zarr array for streaming writes.
 
-        :param store_path: Filesystem path to the output zarr group. This MUST
-            be a plain filesystem path, NOT a ``file://`` URL — passing a
-            ``file://`` URL would orphan-create a literal ``file:/...``
-            directory in the CWD (``Path("file:///tmp/x.zarr")`` is parsed as
-            the relative path ``file:/tmp/x.zarr``) while ``parse_url`` opens
-            the real store at the URL's path, leaving the two out of sync.
-            Use ``liom_toolkit.utils.io.load_zarr`` (which goes through
+        Parameters
+        ----------
+        store_path : str
+            Filesystem path to the output zarr group. This MUST be a plain
+            filesystem path, NOT a ``file://`` URL — passing a ``file://``
+            URL would orphan-create a literal ``file:/...`` directory in the
+            CWD (``Path("file:///tmp/x.zarr")`` is parsed as the relative
+            path ``file:/tmp/x.zarr``) while ``parse_url`` opens the real
+            store at the URL's path, leaving the two out of sync. Use
+            ``liom_toolkit.utils.io.load_zarr`` (which goes through
             ``parse_url``) to read URL-located stores.
-        :param shape: Shape of the dataset. Expected ordering is
-            ``(c, z, y, x)`` for 4D or ``(z, y, x)`` for 3D.
-        :param chunk_shape: Chunk size on disk. One plane per chunk
-            (``(1, 1, y, x)`` for 4D) is the streaming-friendly default.
-        :param dtype: Data type of the dataset.
-        :param overwrite: If True, remove an existing directory/symlink at
-            *store_path* before creating a fresh one. If False and the path
-            exists, raise ``FileExistsError`` (no silent clobber).
-        :param downscale_factor: Per-level Y/X downsample factor (default 2).
-            Must be >= 2 (a factor of 0 crashes with ``ZeroDivisionError``, 1
-            produces duplicate pyramid levels, and a negative factor produces
-            negative scales).
-        :param unit: NGFF UDUNITS-2 length unit for the spatial axes
-            (default ``"micrometer"``, repo convention — NOT linumpy's mm).
-        :param shards: Shard shape (``None`` for no sharding).
-        :raises ValueError: If ``unit`` is not a known NGFF length unit,
-            ``shape`` is not 3D or 4D, ``store_path`` is a ``file://`` URL,
-            or ``downscale_factor`` is < 2.
+        shape : tuple[int, ...]
+            Shape of the dataset. Expected ordering is ``(c, z, y, x)`` for
+            4D or ``(z, y, x)`` for 3D.
+        chunk_shape : tuple[int, ...]
+            Chunk size on disk. One plane per chunk (``(1, 1, y, x)`` for 4D)
+            is the streaming-friendly default.
+        dtype : DTypeLike
+            Data type of the dataset.
+        overwrite : bool
+            If True, remove an existing directory/symlink at *store_path*
+            before creating a fresh one. If False and the path exists, raise
+            ``FileExistsError`` (no silent clobber).
+        downscale_factor : int
+            Per-level Y/X downsample factor (default 2). Must be >= 2 (a
+            factor of 0 crashes with ``ZeroDivisionError``, 1 produces
+            duplicate pyramid levels, and a negative factor produces negative
+            scales).
+        unit : str
+            NGFF UDUNITS-2 length unit for the spatial axes (default
+            ``"micrometer"``, repo convention — NOT linumpy's mm).
+        shards : tuple[int, ...] | None
+            Shard shape (``None`` for no sharding).
+
+        Raises
+        ------
+        ValueError
+            If ``unit`` is not a known NGFF length unit, ``shape`` is not 3D
+            or 4D, ``store_path`` is a ``file://`` URL, or
+            ``downscale_factor`` is < 2.
         """
         if unit not in _NGFF_LENGTH_UNITS:
             raise ValueError(
@@ -294,16 +333,34 @@ class OmeZarrWriter:
             dimension_names=[ax["name"] for ax in self.axes],
         )
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key: tuple[slice | int, ...] | slice | int, value: ArrayLike) -> None:
         """Write *value* at *key* into the pre-allocated level-0 array.
 
         This is the per-frame streaming write path — the caller never has to
         hold the full volume in RAM.
+
+        Parameters
+        ----------
+        key : tuple[slice | int, ...] | slice | int
+            Index/key passed through to the level-0 zarr array.
+        value : ArrayLike
+            The frame (or stack of frames) to write at *key*.
         """
         self.root["0"][key] = value
 
-    def __getitem__(self, key):
-        """Read a slice from the level-0 array (cheap read-back)."""
+    def __getitem__(self, key: tuple[slice | int, ...] | slice | int) -> NDArray[np.generic]:
+        """Read a slice from the level-0 array (cheap read-back).
+
+        Parameters
+        ----------
+        key : tuple[slice | int, ...] | slice | int
+            Index/key passed through to the level-0 zarr array.
+
+        Returns
+        -------
+        NDArray[np.generic]
+            The materialised slice (dtype follows the level-0 array).
+        """
         return self.root["0"][key]
 
     @property
@@ -337,20 +394,29 @@ class OmeZarrWriter:
         ``"omero"`` sub-key (NGFF v0.5 — omero MUST be nested inside the
         ``metadata=`` kwarg, NOT passed as a separate ``omero=`` kwarg).
 
-        :param res: ``(z, y, x)`` base voxel size in ``unit`` (µm by default).
-        :param n_levels: Number of downsample levels (excluding L0). Clamped
-            by ``validate_n_levels`` to what the Y/X shapes can support.
-        :param omero_channels: Optional list of omero channel dicts
-            (``{"label", "color" (6-char hex, no #), "active", "wavelength",
-            "window": {"min","max","start","end"}}``). Written to
+        Parameters
+        ----------
+        res : Sequence[float]
+            ``(z, y, x)`` base voxel size in ``unit`` (μm by default).
+        n_levels : int
+            Number of downsample levels (excluding L0). Clamped by
+            ``validate_n_levels`` to what the Y/X shapes can support.
+        omero_channels : list[dict] | None
+            Optional list of omero channel dicts (``{"label", "color"
+            (6-char hex, no #), "active", "wavelength", "window":
+            {"min","max","start","end"}}``). Written to
             ``root.attrs["ome"]["omero"]["channels"]`` by the ome-zarr writer.
-        :raises ValueError: If ``res`` is not a 3-element sequence or any
-            element is not positive (a negative/zero voxel size is meaningless
-            and would silently produce wrong physical coordinates —
-            AGENTS.md §2).
-        :raises RuntimeError: If :meth:`finalize` has already been called on
-            this writer (finalize is single-call — a second call would crash
-            with zarr's ``ContainsArrayError`` when re-creating level "1").
+
+        Raises
+        ------
+        ValueError
+            If ``res`` is not a 3-element sequence or any element is not
+            positive (a negative/zero voxel size is meaningless and would
+            silently produce wrong physical coordinates — AGENTS.md §2).
+        RuntimeError
+            If :meth:`finalize` has already been called on this writer
+            (finalize is single-call — a second call would crash with zarr's
+            ``ContainsArrayError`` when re-creating level "1").
         """
         if self._finalized:
             raise RuntimeError(
@@ -448,7 +514,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
     Subclass of :class:`OmeZarrWriter` — inherits the pre-allocate + L0
     streaming write path. Use :meth:`finalize_with_resolutions` (instead of
     :meth:`OmeZarrWriter.finalize`) to build a pyramid at specific target
-    resolutions (e.g. 10/25/50/100 µm) optimized for downstream analysis.
+    resolutions (e.g. 10/25/50/100 μm) optimized for downstream analysis.
 
     **Diverges from linumpy (per the repo's correctness rules):** linumpy's
     ``AnalysisOmeZarrWriter`` *replaces* L0 with a downsampled target-res
@@ -481,7 +547,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         )
         writer[:, z_idx, :, :] = frame        # raw frames into L0
         writer.finalize_with_resolutions(
-            base_res=(6.5, 6.5, 6.5),        # µm (z, y, x) at L0
+            base_res=(6.5, 6.5, 6.5),        # μm (z, y, x) at L0
             target_resolutions_um=(10, 25, 50, 100),
             make_isotropic=True,
         )
@@ -516,23 +582,33 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         ratio preserved) — recording the target_um there would be the
         silent-wrong-coordinate failure mode.
 
-        :param base_res: ``(z, y, x)`` base voxel size in µm at L0.
-        :param target_resolutions_um: Target resolutions in µm (default
-            ``(10, 25, 50, 100)``). Targets that would upscale any dim are
-            dropped (see above).
-        :param make_isotropic: If True (default), each dim is scaled
-            independently to reach the target resolution (isotropic output
-            voxels, aspect ratio changes). If False, all dims scale uniformly
-            by ``target_um / min(base_res)`` (aspect ratio preserved,
+        Parameters
+        ----------
+        base_res : tuple[float, float, float]
+            ``(z, y, x)`` base voxel size in μm at L0.
+        target_resolutions_um : tuple[float, ...]
+            Target resolutions in μm (default ``(10, 25, 50, 100)``). Targets
+            that would upscale any dim are dropped (see above).
+        make_isotropic : bool
+            If True (default), each dim is scaled independently to reach the
+            target resolution (isotropic output voxels, aspect ratio
+            changes). If False, all dims scale uniformly by
+            ``target_um / min(base_res)`` (aspect ratio preserved,
             anisotropic output voxels).
-        :param omero_channels: Optional omero channel dicts (same shape as
+        omero_channels : list[dict] | None
+            Optional omero channel dicts (same shape as
             :meth:`OmeZarrWriter.finalize`).
-        :raises ValueError: If ``base_res`` is not a 3-element sequence or
-            any element is not positive (a negative/zero base voxel is
-            meaningless and would crash on ``target_um / b`` or silently
-            produce wrong physical coordinates — AGENTS.md §2).
-        :raises RuntimeError: If :meth:`finalize_with_resolutions` (or
-            :meth:`finalize`) has already been called on this writer.
+
+        Raises
+        ------
+        ValueError
+            If ``base_res`` is not a 3-element sequence or any element is not
+            positive (a negative/zero base voxel is meaningless and would
+            crash on ``target_um / b`` or silently produce wrong physical
+            coordinates — AGENTS.md §2).
+        RuntimeError
+            If :meth:`finalize_with_resolutions` (or :meth:`finalize`) has
+            already been called on this writer.
         """
         if self._finalized:
             raise RuntimeError(
@@ -590,9 +666,9 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             else:
                 u = target_um / min_base
                 sf = [u, u, u]
-            target_shape_3d = [max(1, int(s / f)) for s, f in zip(spatial_shape, sf)]
+            target_shape_3d = [max(1, int(s / f)) for s, f in zip(spatial_shape, sf, strict=True)]
             # ACTUAL per-dim voxel at this level — NOT target_um.
-            target_voxel = [b * f for b, f in zip(base_res, sf)]
+            target_voxel = [b * f for b, f in zip(base_res, sf, strict=True)]
 
             full_target_shape = (
                 (self.shape[0], *target_shape_3d) if self.ndim == 4 else tuple(target_shape_3d)

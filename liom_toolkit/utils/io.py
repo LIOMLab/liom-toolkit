@@ -1,3 +1,5 @@
+"""OME-Zarr read/write helpers, masks, labels, and PNG extraction."""
+
 from __future__ import annotations
 
 import warnings
@@ -7,10 +9,10 @@ import dask.array as da
 import imageio.v3 as iio
 import numpy as np
 import zarr
+from numpy.typing import ArrayLike, NDArray
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
-from ome_zarr.scale import ArrayLike
 from tqdm.auto import tqdm
 
 from .utils import convert_to_png_for_saving
@@ -33,44 +35,56 @@ _DEFAULT_N_LEVELS = 4
 
 
 def load_zarr(zarr_file: str) -> list[Node]:
-    """
-    Load a zarr file to an ANTs image.
+    """Load a zarr file to an ANTs image.
 
-    :param zarr_file: The zarr file to load.
-    :type zarr_file: str
-    :return: The loaded zarr file.
-    :rtype: list[Node]
+    Parameters
+    ----------
+    zarr_file : str
+        The zarr file to load.
+
+    Returns
+    -------
+    list[Node]
+        The loaded zarr file.
     """
     reader = Reader(parse_url(zarr_file))
     nodes = list(reader())
     return nodes
 
 
-def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.array:
-    """
-    Load a zarr file to an ANTs image. Loads one channel at a time.
+def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.Array:
+    """Load a zarr file to an ANTs image. Loads one channel at a time.
 
-    :param node: The zarr node to load.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :return: The image.
-    :rtype: da.array
+    Parameters
+    ----------
+    node : Node
+        The zarr node to load.
+    resolution_level : int
+        The resolution level to load.
+
+    Returns
+    -------
+    da.Array
+        The image.
     """
     volume = node.data[resolution_level]
     return volume
 
 
-def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> dict:
-    """
-    Load a zarr file to an ANTs image.
+def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> list[float]:
+    """Load a zarr file to an ANTs image.
 
-    :param node: The zarr node to load.
-    :type node: Node
-    :param resolution_level: The resolution level to load.
-    :type resolution_level: int
-    :return: The coordinate transform matching the resolution level.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    node : Node
+        The zarr node to load.
+    resolution_level : int
+        The resolution level to load.
+
+    Returns
+    -------
+    list[float]
+        The coordinate transform matching the resolution level.
     """
     transform = node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
     return transform
@@ -90,8 +104,15 @@ def load_omero_channels(zarr_file: str) -> list[dict] | None:
     AGENTS.md §2 "no silent data loss" principle inverted on the read side —
     a missing optional key surfaces as None, not a crash).
 
-    :param zarr_file: Path or ``file://`` URL to the OME-Zarr group.
-    :return: The ``omero.channels`` list of channel dicts, or ``None`` when
+    Parameters
+    ----------
+    zarr_file : str
+        Path or ``file://`` URL to the OME-Zarr group.
+
+    Returns
+    -------
+    list[dict] | None
+        The ``omero.channels`` list of channel dicts, or ``None`` when
         the file has no ``ome`` / ``omero`` / ``omero.channels`` metadata.
     """
     root = zarr.open(zarr_file, mode="r")
@@ -110,29 +131,29 @@ def load_omero_channels(zarr_file: str) -> list[dict] | None:
 def save_atlas_to_zarr(
     zarr_file: str,
     atlas: ArrayLike,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
     resolution_level: int = 0,
     unit: str = "micrometer",
 ) -> None:
-    """
-    Save an atlas to a zarr file inside the labels group.
+    """Save an atlas to a zarr file inside the labels group.
 
-    :param zarr_file: The zarr file to save the atlas to.
-    :type zarr_file: str
-    :param atlas: The atlas to save.
-    :type atlas: ArrayLike
-    :param scales: The scales to use for the atlas.
-    :type scales: tuple
-    :param chunks: The chunks to use for the atlas.
-    :type chunks: tuple
-    :param resolution_level: The resolution level of the *input* atlas (the
-        writer upscales it to the main image's full-res shape before
-        ``write_labels`` downsamples).
-    :type resolution_level: int
-    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
-        in. Defaults to ``"micrometer"`` to preserve existing callers.
-    :type unit: str
+    Parameters
+    ----------
+    zarr_file : str
+        The zarr file to save the atlas to.
+    atlas : ArrayLike
+        The atlas to save.
+    scales : tuple[float, float, float]
+        The scales to use for the atlas.
+    chunks : tuple[int, int, int]
+        The chunks to use for the atlas.
+    resolution_level : int
+        The resolution level of the *input* atlas (the writer upscales it to
+        the main image's full-res shape before ``write_labels`` downsamples).
+    unit : str
+        The NGFF UDUNITS-2 length unit the ``scales`` are expressed in.
+        Defaults to ``"micrometer"`` to preserve existing callers.
     """
     from .allen_sdk import generate_label_color_dict_allen
 
@@ -151,30 +172,31 @@ def save_atlas_to_zarr(
 
 def create_and_write_mask(
     zarr_file: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
     resolution_level: int = 0,
-    fill_holes=True,
+    fill_holes: bool = True,
     unit: str = "micrometer",
 ) -> None:
-    """
-    Create a mask for a zarr file and write it to disk inside the labels group.
+    """Create a mask for a zarr file and write it to disk inside the labels group.
 
-    :param zarr_file: The zarr file to create a mask for.
-    :type zarr_file: str
-    :param scales: The scales to use for the mask.
-    :type scales: tuple.
-    :param chunks: The chunks to use for the mask
-    :type chunks: tuple
-    :param resolution_level: The resolution level of the mask.
-    :type resolution_level: int
-    :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
-    :type fill_holes: bool
-    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
-        in. Defaults to ``"micrometer"`` to preserve existing callers, and is
+    Parameters
+    ----------
+    zarr_file : str
+        The zarr file to create a mask for.
+    scales : tuple[float, float, float]
+        The scales to use for the mask.
+    chunks : tuple[int, int, int]
+        The chunks to use for the mask.
+    resolution_level : int
+        The resolution level of the mask.
+    fill_holes : bool
+        Whether to fill holes in the mask. Useful for brain segmentation.
+    unit : str
+        The NGFF UDUNITS-2 length unit the ``scales`` are expressed in.
+        Defaults to ``"micrometer"`` to preserve existing callers, and is
         forwarded to :func:`save_label_to_zarr` (matching
         :func:`save_atlas_to_zarr`, which already threads ``unit`` through).
-    :type unit: str
     """
     mask = create_mask_from_zarr(zarr_file, resolution_level, fill_holes=fill_holes)
     mask = mask.astype("int8")
@@ -191,18 +213,24 @@ def create_and_write_mask(
     )
 
 
-def create_mask_from_zarr(zarr_file: str, resolution_level: int = 0, fill_holes=True) -> np.ndarray:
-    """
-    Create a brain mask from a zarr file.
+def create_mask_from_zarr(
+    zarr_file: str, resolution_level: int = 0, fill_holes: bool = True
+) -> NDArray[np.generic]:
+    """Create a brain mask from a zarr file.
 
-    :param zarr_file: The zarr file to create a mask for.
-    :type zarr_file: str
-    :param resolution_level: The resolution level of the mask.
-    :type resolution_level: int
-    :param fill_holes: Whether to fill holes in the mask. Useful for brain segmentation.
-    :type fill_holes: bool
-    :return: The mask
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    zarr_file : str
+        The zarr file to create a mask for.
+    resolution_level : int
+        The resolution level of the mask.
+    fill_holes : bool
+        Whether to fill holes in the mask. Useful for brain segmentation.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The mask.
     """
     from liom_toolkit.segmentation import segment_3d
 
@@ -223,36 +251,41 @@ def save_label_to_zarr(
     zarr_file: str,
     color_dict: list[dict],
     name: str,
-    scales: tuple = (6.5, 6.5, 6.5),
-    chunks: tuple = (128, 128, 128),
+    scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    chunks: tuple[int, int, int] = (128, 128, 128),
     resolution_level: int = 0,
     unit: str = "micrometer",
 ) -> None:
-    """
-    Save a mask to a zarr file inside the labels group.
+    """Save a mask to a zarr file inside the labels group.
 
-    :param label: The mask to save.
-    :type label: np.ndarray
-    :param zarr_file: The zarr file to save the mask to.
-    :type zarr_file: str
-    :param color_dict: The color dictionary to use for the mask.
-    :type color_dict: list[dict]
-    :param scales: The scales to use for the mask.
-    :type scales: tuple
-    :param chunks: The chunks to use for the mask.
-    :type chunks: tuple
-    :param name: The name of the mask.
-    :type name: str
-    :param resolution_level: The resolution level of the *input* label. When
-        greater than 0 the writer upscales the label to the main image's
-        full-res (level-0) shape — read from the same ``zarr_file`` — using
-        nearest-neighbor resize (``order=0``) so integer label values are
-        never interpolated. ``write_image`` then downsamples with
-        ``method=Methods.NEAREST``.
-    :type resolution_level: int
-    :param unit: The NGFF UDUNITS-2 length unit the ``scales`` are expressed
-        in. Defaults to ``"micrometer"`` to preserve existing callers.
-    :type unit: str
+    Parameters
+    ----------
+    label : ArrayLike
+        The mask to save.
+    zarr_file : str
+        The zarr file to save the mask to.
+    color_dict : list[dict]
+        The color dictionary to use for the mask.
+    scales : tuple[float, float, float]
+        The scales to use for the mask.
+    chunks : tuple[int, int, int]
+        The chunks to use for the mask.
+    name : str
+        The name of the mask.
+    resolution_level : int
+        The resolution level of the *input* label. When greater than 0 the
+        writer upscales the label to the main image's full-res (level-0)
+        shape — read from the same ``zarr_file`` — using nearest-neighbor
+        resize (``order=0``) so integer label values are never interpolated.
+        ``write_image`` then downsamples with ``method=Methods.NEAREST``.
+    unit : str
+        The NGFF UDUNITS-2 length unit the ``scales`` are expressed in.
+        Defaults to ``"micrometer"`` to preserve existing callers.
+
+    Raises
+    ------
+    ValueError
+        If ``unit`` is not a known NGFF length unit.
     """
     if unit not in _NGFF_LENGTH_UNITS:
         raise ValueError(f"Unsupported unit {unit!r}; use a NGFF UDUNITS-2 length unit.")
@@ -336,11 +369,14 @@ def save_label_to_zarr(
 
 
 def generate_label_color_dict_mask() -> list[dict]:
-    """
-    Generate a label color dictionary for the mask. Black is background, white is foreground.
+    """Generate a label color dictionary for the mask.
 
-    :return: The label color dictionary.
-    :rtype: list[dict]
+    Black is background, white is foreground.
+
+    Returns
+    -------
+    list[dict]
+        The label color dictionary.
     """
     label_colors = [
         {"label-value": 0, "rgba": [0, 0, 0, 0]},
@@ -367,14 +403,24 @@ def validate_n_levels(
     guarantees by construction that the deepest downsampled-axis shape stays
     >= 1 pixel.
 
-    :param n_levels: The requested number of downsample levels.
-    :param shape: The shape of the level-0 array.
-    :param axes: The axis names matching ``shape`` (e.g. ``["z","y","x"]``).
-    :param downscale_factor: Per-level downsample factor (default 2). The
-        clamp uses ``log_{factor}`` so a non-2 factor is honored — e.g. for
-        factor=3 and shape ``(16,16)``, ``log_3(16) = 2`` allows 2 levels
+    Parameters
+    ----------
+    n_levels : int
+        The requested number of downsample levels.
+    shape : tuple[int, ...]
+        The shape of the level-0 array.
+    axes : list[str]
+        The axis names matching ``shape`` (e.g. ``["z","y","x"]``).
+    downscale_factor : int
+        Per-level downsample factor (default 2). The clamp uses
+        ``log_{factor}`` so a non-2 factor is honored — e.g. for factor=3
+        and shape ``(16,16)``, ``log_3(16) = 2`` allows 2 levels
         (16 -> 5 -> 1), not the 4 that ``log_2(16)`` would wrongly allow.
-    :return: The clamped number of downsample levels (<= ``n_levels``).
+
+    Returns
+    -------
+    int
+        The clamped number of downsample levels (<= ``n_levels``).
     """
     binding_shape = [shape[i] for i, ax in enumerate(axes) if ax in _DOWNSAMPLE_AXES]
     if not binding_shape:
@@ -384,7 +430,9 @@ def validate_n_levels(
     # (e.g. shape (1,4,1,1) with factor=2 — Y/X are both 1), no levels are
     # possible — return 0 rather than crashing on ``min()`` of an empty
     # iterable (the docstring already promises this).
-    shrinkable = [int(np.log(s) / np.log(downscale_factor)) for s in binding_shape if s >= downscale_factor]
+    shrinkable = [
+        int(np.log(s) / np.log(downscale_factor)) for s in binding_shape if s >= downscale_factor
+    ]
     if not shrinkable:
         return 0
     max_levels = min(shrinkable)
@@ -392,24 +440,27 @@ def validate_n_levels(
 
 
 def build_scale_factors(n_levels: int, axes: list[str]) -> list[dict[str, int]]:
-    """
-    Build the cumulative dict-form ``scale_factors`` list for ``write_image`` /
-    ``write_labels``.
+    """Build the cumulative dict-form ``scale_factors`` list for ``write_image`` / ``write_labels``.
 
     Each level ``i`` entry is the cumulative downsample factor *relative to the
     base* (NOT relative to the previous level): level 0 of the pyramid is the
-    base, level 1 is ``2**1``× downsampled, level 2 is ``2**2``×, etc. ome-zarr's
+    base, level 1 is ``2**1``x downsampled, level 2 is ``2**2``x, etc. ome-zarr's
     ``_build_pyramid`` interprets each dict entry this way; passing a repeated
-    list (``[{y:2,x:2}] * n``) would clamp the pyramid at ×2 — see RESEARCH
+    list (``[{y:2,x:2}] * n``) would clamp the pyramid at x2 — see RESEARCH
     Pitfall 1. Axes not in :data:`_DOWNSAMPLE_AXES` (e.g. ``"z"``, ``"c"``)
     get factor 1 (no downsampling).
 
-    :param n_levels: The number of downsample levels (excluding the base).
-    :type n_levels: int
-    :param axes: The axis names (e.g. ``["z","y","x"]``).
-    :type axes: list[str]
-    :return: A list of ``n_levels`` per-axis factor dicts.
-    :rtype: list[dict[str, int]]
+    Parameters
+    ----------
+    n_levels : int
+        The number of downsample levels (excluding the base).
+    axes : list[str]
+        The axis names (e.g. ``["z","y","x"]``).
+
+    Returns
+    -------
+    list[dict[str, int]]
+        A list of ``n_levels`` per-axis factor dicts.
     """
     return [
         {ax: (2 ** (i + 1) if ax in _DOWNSAMPLE_AXES else 1) for ax in axes}
@@ -418,8 +469,7 @@ def build_scale_factors(n_levels: int, axes: list[str]) -> list[dict[str, int]]:
 
 
 def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
-    """
-    Generate the NGFF v0.5 full dict-form axes list for the zarr file.
+    """Generate the NGFF v0.5 full dict-form axes list for the zarr file.
 
     Returns axes in ``(c, z, y, x)`` order (channel prepended for 4D only).
     The channel axis dict carries only ``name`` and ``type`` (NO ``unit`` key
@@ -433,18 +483,27 @@ def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
     ``validate_n_levels`` / ``build_scale_factors``, which take name lists)
     derive it via ``[ax["name"] for ax in axes]``.
 
-    :param dimensions: The number of dimensions in the image (3 or 4).
-    :type dimensions: int
-    :param unit: The NGFF UDUNITS-2 length unit for the spatial axes.
-        Defaults to ``"micrometer"`` to preserve existing callers.
-    :type unit: str
-    :raises ValueError: If ``unit`` is not a known NGFF length unit, or
-        ``dimensions`` is not 3 or 4. (Uses ``raise ValueError``, never
-        ``assert`` — ``assert`` is stripped under ``python -O``.)
-    :return: The dict-form axes list, e.g.
+    Parameters
+    ----------
+    dimensions : int
+        The number of dimensions in the image (3 or 4).
+    unit : str
+        The NGFF UDUNITS-2 length unit for the spatial axes. Defaults to
+        ``"micrometer"`` to preserve existing callers.
+
+    Returns
+    -------
+    list[dict]
+        The dict-form axes list, e.g.
         ``[{"name":"z","type":"space","unit":"micrometer"}, ...]`` for 3D or
         ``[{"name":"c","type":"channel"}, {"name":"z",...}, ...]`` for 4D.
-    :rtype: list[dict]
+
+    Raises
+    ------
+    ValueError
+        If ``unit`` is not a known NGFF length unit, or ``dimensions`` is not
+        3 or 4. (Uses ``raise ValueError``, never ``assert`` — ``assert`` is
+        stripped under ``python -O``.)
     """
     if dimensions not in (3, 4):
         raise ValueError(f"dimensions must be 3 or 4, got {dimensions!r}.")
@@ -466,15 +525,19 @@ def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
 
 
 def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
-    """
-    Load a node by name from a zarr file. Returns None if the node is not found.
+    """Load a node by name from a zarr file. Returns None if the node is not found.
 
-    :param nodes: The nodes to search through.
-    :type nodes: list[Node]
-    :param name: The name of the node to load.
-    :type name: str
-    :return: The loaded node.
-    :rtype: Node | None
+    Parameters
+    ----------
+    nodes : list[Node]
+        The nodes to search through.
+    name : str
+        The name of the node to load.
+
+    Returns
+    -------
+    Node | None
+        The loaded node, or ``None`` when no node matches ``name``.
     """
     for node in nodes:
         # Check for empy dict
@@ -487,16 +550,16 @@ def load_node_by_name(nodes: list[Node], name: str) -> Node | None:
 
 
 def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
-    """
-    Extract a zarr file to a directory of PNG images.
+    """Extract a zarr file to a directory of PNG images.
 
-    :param zarr_file: The zarr file to extract.
-    :type zarr_file: str
-    :param target_dir: The directory to save the PNG images to.
-    :type target_dir: str
-    :param channel: The channel to extract.
-    :type channel: int
-    :return: None
+    Parameters
+    ----------
+    zarr_file : str
+        The zarr file to extract.
+    target_dir : str
+        The directory to save the PNG images to.
+    channel : int
+        The channel to extract.
     """
     node = load_zarr(zarr_file)[0]
     volume = node.data[0]

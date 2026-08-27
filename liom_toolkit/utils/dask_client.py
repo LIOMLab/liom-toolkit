@@ -1,3 +1,5 @@
+"""Dask distributed client manager (singleton)."""
+
 from __future__ import annotations
 
 import multiprocessing
@@ -6,17 +8,26 @@ from dask.distributed import Client, LocalCluster
 
 
 class DaskClientManager:
-    def __init__(self):
-        self.client = None
+    """Singleton manager for a Dask distributed client (local cluster or remote)."""
 
-    def get_client(self, address=""):
-        """
-        Get the client to a local cluster or a cluster. Implicitly sets the client when not yet initialized. Defaults to
+    def __init__(self) -> None:
+        self.client: Client | None = None
+
+    def get_client(self, address: str = "") -> Client:
+        """Get the client to a local cluster or a cluster.
+
+        Implicitly sets the client when not yet initialized. Defaults to a
         local cluster, but will connect when given an address.
 
-        :param address: The address of the cluster
-        :type address: str
-        :return: The client
+        Parameters
+        ----------
+        address : str
+            The address of the cluster.
+
+        Returns
+        -------
+        Client
+            The dask distributed client.
         """
         if self.client is None and address == "":
             self.__create_local_cluster__()
@@ -24,34 +35,34 @@ class DaskClientManager:
             self.__connect_to_cluster__(address)
         return self.client
 
-    def set_client(self, address=""):
-        """
-        Set the client to a local cluster or a cluster. Explicit function.
+    def set_client(self, address: str = "") -> None:
+        """Set the client to a local cluster or a cluster. Explicit function.
 
-        :param address: The address of the cluster
-        :type address: str
+        Parameters
+        ----------
+        address : str
+            The address of the cluster.
         """
         if self.client is None and address == "":
             self.__create_local_cluster__()
         elif self.client is None and address != "":
             self.__connect_to_cluster__(address)
 
-    def __create_local_cluster__(self):
-        """
-        Create a local cluster with the number of cores - 1
-        """
+    def __create_local_cluster__(self) -> None:
+        """Create a local cluster with the number of cores - 1."""
         if self.client is not None:
             return
         cores = multiprocessing.cpu_count() - 1
         cluster = LocalCluster(n_workers=cores, threads_per_worker=1)
         self.client = cluster.get_client()
 
-    def __connect_to_cluster__(self, address):
-        """
-        Connect to a cluster
+    def __connect_to_cluster__(self, address: str) -> None:
+        """Connect to a cluster.
 
-        :param address: The address of the cluster
-        :type address: str
+        Parameters
+        ----------
+        address : str
+            The address of the cluster.
         """
         if self.client is not None:
             return

@@ -26,7 +26,7 @@ structure list in API ``graph_order``):
 The hex→RGB conversion happens earlier, at download/clean time:
 allensdk's ``clean_structures`` maps ``color_hex_triplet`` →
 ``StructureTree.hex_to_rgb`` and renames the field to ``rgb_triplet`` before
-caching the flat list. The committed 25µm regression fixture
+caching the flat list. The committed 25μm regression fixture
 (``structure_tree.json``) is this post-clean flat list — each node carries
 ``rgb_triplet`` (a list of 3 ints), not ``color_hex_triplet``. The rewrite's
 read path (``_flatten_structure_tree`` + ``_build_structure_metadata``)
@@ -42,14 +42,14 @@ the caches are interchangeable. (allensdk itself fetches structures via an
 RMA ``OntologiesApi.get_structures_with_sets`` query ordered by
 ``structures.graph_order``; the static-file endpoint plus ``graph_order``
 sort produces an equivalent flat list for the rewrite's own caches. The
-25µm regression test exercises only the read path against the committed
+25μm regression test exercises only the read path against the committed
 allensdk-cached fixture, so it is independent of this endpoint choice.)
 
 Endpoint and tampering surface
 ------------------------------
 The structure-tree JSON endpoint is plain HTTP (no HTTPS variant exists on the
 static-file server). The CCF2017 content has been frozen since 2020, and the
-25µm regression fixture in ``tests/test_utils/fixtures/allen_itksnap_25um/``
+25μm regression fixture in ``tests/test_utils/fixtures/allen_itksnap_25um/``
 catches any divergence from the known-good ``allensdk`` output, which is the
 mitigation for the HTTP tampering surface.
 """
@@ -65,6 +65,7 @@ import nrrd
 import numpy as np
 import pandas as pd
 import requests
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from ants.core.ants_image import ANTsImage
@@ -74,7 +75,8 @@ if TYPE_CHECKING:
 # URL constants — canonical Allen Institute CCFv3 download endpoints.
 #   annotation NRRDs:  https://download.alleninstitute.org/.../annotation/ccf_2017/annotation_{res}.nrrd
 #   template NRRDs:    https://download.alleninstitute.org/.../average_template/average_template_{res}.nrrd
-#   structure tree:    http://api.brain-map.org/api/v2/structure_graph_download/1.json (static file, nested children)
+#   structure tree:    http://api.brain-map.org/api/v2/structure_graph_download/1.json
+#                     (static file, nested children)
 # The ``current-release`` path segment is effectively "latest"; CCF2017 content
 # has been frozen since 2020. The structure-tree endpoint is HTTP-only (no HTTPS
 # variant on the static-file server) — see module docstring.
@@ -100,8 +102,15 @@ def _hex_to_rgb(hex_color: str) -> list[int]:
     characters before parsing, matching allensdk's padding behavior for the
     edge-case nodes in the Allen structure tree.
 
-    :param hex_color: Hex color string (e.g. ``"019393"`` or ``"#019393"``).
-    :return: List of 3 ints in ``[0, 255]`` — ``[R, G, B]``.
+    Parameters
+    ----------
+    hex_color : str
+        Hex color string (e.g. ``"019393"`` or ``"#019393"``).
+
+    Returns
+    -------
+    list[int]
+        List of 3 ints in ``[0, 255]`` — ``[R, G, B]``.
     """
     hex_color = hex_color.lstrip("#")
     hex_color = hex_color.zfill(6)
@@ -114,7 +123,7 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
     Handles two on-disk formats:
 
     1. **Flat list** (allensdk's cache format, and the format committed in the
-       25µm regression fixture): each node already has ``rgb_triplet`` (a list
+       25μm regression fixture): each node already has ``rgb_triplet`` (a list
        of 3 ints) and no ``children`` key. allensdk's ``clean_structures``
        converts the raw API ``color_hex_triplet`` hex string into
        ``rgb_triplet`` before caching, and ``export_label_description`` reads
@@ -134,10 +143,17 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
     All original node fields (``id``, ``acronym``, ``name``,
     ``structure_id_path``, etc.) are preserved.
 
-    :param msg: The ``msg`` array from the structure-tree JSON — either a flat
-        list of node dicts (cache format) or a list of root nodes whose
+    Parameters
+    ----------
+    msg : list[dict]
+        The ``msg`` array from the structure-tree JSON — either a flat list
+        of node dicts (cache format) or a list of root nodes whose
         ``children`` cascade (nested download format).
-    :return: Flat list of node dicts with ``rgb_triplet`` attached.
+
+    Returns
+    -------
+    list[dict]
+        Flat list of node dicts with ``rgb_triplet`` attached.
     """
     # Detect format: nested if any node carries a 'children' key.
     is_nested = any("children" in node for node in msg)
@@ -180,9 +196,22 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
     ``structures`` (i.e. JSON ``msg`` order preserved by
     ``_flatten_structure_tree``).
 
-    :param structures: Flat list of structure dicts (with ``rgb_triplet``
-        attached) from ``_flatten_structure_tree``.
-    :return: pandas DataFrame with the 8 columns in the exact ITK-SNAP order.
+    Parameters
+    ----------
+    structures : list[dict]
+        Flat list of structure dicts (with ``rgb_triplet`` attached) from
+        ``_flatten_structure_tree``.
+
+    Returns
+    -------
+    pd.DataFrame
+        pandas DataFrame with the 8 columns in the exact ITK-SNAP order.
+
+    Raises
+    ------
+    ValueError
+        If ``structures`` is empty (the download may have failed or the cache
+        is corrupt).
     """
     if not structures:
         raise ValueError(
@@ -207,10 +236,10 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
 
 
 def _remap_to_id_type(
-    annotation: np.ndarray,
+    annotation: NDArray[np.generic],
     label_description: pd.DataFrame,
-    id_type=np.uint16,
-) -> tuple[np.ndarray, pd.DataFrame]:
+    id_type: type = np.uint16,
+) -> tuple[NDArray[np.generic], pd.DataFrame]:
     """Remap annotation-volume voxels and DataFrame IDX to fit ``id_type``.
 
     Mirrors ``allensdk.core.reference_space.ReferenceSpace.export_itksnap_labels``
@@ -221,11 +250,19 @@ def _remap_to_id_type(
     ``IDX`` — the volume+IDX consistency invariant). When no ``IDX`` exceeds the
     max, both are returned unchanged.
 
-    :param annotation: The annotation volume (uint32 from ``nrrd.read``).
-    :param label_description: The 8-column DataFrame from
-        ``_build_structure_metadata``.
-    :param id_type: numpy dtype to fit into (default ``np.uint16``).
-    :return: ``(new_annotation, new_label_description)`` — remapped if any IDX
+    Parameters
+    ----------
+    annotation : NDArray[np.generic]
+        The annotation volume (uint32 from ``nrrd.read``).
+    label_description : pd.DataFrame
+        The 8-column DataFrame from ``_build_structure_metadata``.
+    id_type : type
+        numpy dtype to fit into (default ``np.uint16``).
+
+    Returns
+    -------
+    tuple[NDArray[np.generic], pd.DataFrame]
+        ``(new_annotation, new_label_description)`` — remapped if any IDX
         exceeds ``id_type`` max, else unchanged.
     """
     if np.any(label_description["IDX"].values > np.iinfo(id_type).max):
@@ -258,17 +295,26 @@ def _remap_to_id_type(
 
 
 def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTsImage:
-    """
-    Load the allen template and set the resolution and direction (PIR).
+    """Load the allen template and set the resolution and direction (PIR).
 
-    :param atlas_file: The file to load.
-    :type atlas_file: str
-    :param resolution: The resolution to set.
-    :type resolution: int
-    :param padding: Whether to pad the atlas or not.
-    :type padding: bool
-    :return: The loaded template.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    atlas_file : str
+        The file to load.
+    resolution : int
+        The resolution to set.
+    padding : bool
+        Whether to pad the atlas or not.
+
+    Returns
+    -------
+    ANTsImage
+        The loaded template.
+
+    Raises
+    ------
+    ImportError
+        If ``ants`` (ANTsPy) is not installed.
     """
     try:
         import ants
@@ -291,11 +337,12 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTs
 
 
 def generate_label_color_dict_allen() -> list[dict]:
-    """
-    Generate a label color dictionary for the allen atlas.
+    """Generate a label color dictionary for the allen atlas.
 
-    :return: The label color dictionary.
-    :rtype: list[dict]
+    Returns
+    -------
+    list[dict]
+        The label color dictionary.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         _annotation, meta = download_allen_atlas(tmpdir, resolution=25, keep_nrrd=False)
@@ -306,7 +353,12 @@ def generate_label_color_dict_allen() -> list[dict]:
             color_dict.append(
                 {
                     "label-value": row[1]["IDX"],
-                    "rgba": [row[1]["-R-"], row[1]["-G-"], row[1]["-B-"], (int(row[1]["-A-"] * 255))],
+                    "rgba": [
+                        row[1]["-R-"],
+                        row[1]["-G-"],
+                        row[1]["-B-"],
+                        (int(row[1]["-A-"] * 255)),
+                    ],
                 }
             )
 
@@ -315,18 +367,27 @@ def generate_label_color_dict_allen() -> list[dict]:
 
 def download_allen_atlas(
     data_dir: str, resolution: int = 25, keep_nrrd: bool = False
-) -> (ANTsImage, pd.DataFrame):
-    """
-    Download the allen mouse brain atlas and reorient it to RAS+.
+) -> tuple[ANTsImage, pd.DataFrame]:
+    """Download the allen mouse brain atlas and reorient it to RAS+.
 
-    :param data_dir: The directory to save the atlas to.
-    :type data_dir: str
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :param resolution: int
-    :param keep_nrrd: Whether to keep the nrrd file or not.
-    :param keep_nrrd: bool
-    :return: The atlas as an ants image.
-    :rtype:(ANTsImage, pd.DataFrame)
+    Parameters
+    ----------
+    data_dir : str
+        The directory to save the atlas to.
+    resolution : int
+        The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns.
+    keep_nrrd : bool
+        Whether to keep the nrrd file or not.
+
+    Returns
+    -------
+    tuple[ANTsImage, pd.DataFrame]
+        The atlas as an ants image and the ITK-SNAP label metadata DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If ``resolution`` is not one of 10, 25, 50, or 100.
     """
     if int(resolution) not in _VALID_RESOLUTIONS:
         raise ValueError(
@@ -352,24 +413,34 @@ def download_allen_atlas(
 
 
 def download_allen_template(
-    data_dir: str, resolution: int = 25, keep_nrrd: bool = False, rsc=None
+    data_dir: str, resolution: int = 25, keep_nrrd: bool = False, rsc: object | None = None
 ) -> ANTsImage:
-    """
-    Download the allen mouse brain template in RAS+ orientation.
+    """Download the allen mouse brain template in RAS+ orientation.
 
     The ``rsc`` parameter is kept for backward-signature compatibility but is
     ignored — the former allensdk cache class is gone and this function
     downloads the template NRRD directly from the Allen Institute endpoint.
 
-    :param data_dir: The directory to save the template to.
-    :type data_dir: str
-    :param resolution: The template resolution in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :param keep_nrrd: Whether to keep the nrrd file or not.
-    :type keep_nrrd: bool
-    :param rsc: Unused, kept for signature compatibility.
-    :return: The template as an ants image.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    data_dir : str
+        The directory to save the template to.
+    resolution : int
+        The template resolution in micron. Must be 10, 25, 50 or 100 microns.
+    keep_nrrd : bool
+        Whether to keep the nrrd file or not.
+    rsc : object | None
+        Unused, kept for signature compatibility.
+
+    Returns
+    -------
+    ANTsImage
+        The template as an ants image.
+
+    Raises
+    ------
+    ValueError
+        If ``resolution`` is not one of 10, 25, 50, or 100.
     """
     # Check the resolution
     if int(resolution) not in _VALID_RESOLUTIONS:
@@ -395,16 +466,27 @@ def download_allen_template(
     return ants_image
 
 
-def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsImage:
-    """
-    Convert a nrrd file form the Allen reference spaces to an ants image. The returned image will be in RAS+ orientation.
+def convert_allen_nrrd_to_ants(volume: NDArray[np.generic], resolution: float) -> ANTsImage:
+    """Convert a nrrd file form the Allen reference spaces to an ants image.
 
-    :param volume: The already loaded nrrd file.
-    :type volume: np.ndarray
-    :param resolution: The resolution of the nrrd file in millimeters.
-    :type resolution: float
-    :return: The converted image.
-    :rtype: ANTsImage
+    The returned image will be in RAS+ orientation.
+
+    Parameters
+    ----------
+    volume : NDArray[np.generic]
+        The already loaded nrrd file.
+    resolution : float
+        The resolution of the nrrd file in millimeters.
+
+    Returns
+    -------
+    ANTsImage
+        The converted image.
+
+    Raises
+    ------
+    ImportError
+        If ``ants`` (ANTsPy) is not installed.
     """
     try:
         import ants
@@ -426,25 +508,35 @@ def convert_allen_nrrd_to_ants(volume: np.ndarray, resolution: float) -> ANTsIma
 def construct_reference_space(
     data_dir: str, resolution: int = 25, reference_space_key: str = "annotation/ccf_2017"
 ) -> _ReferenceSpace:
-    """
-    Construct a reference space for the Allen brain atlas. Will use the 2017 adult version of the atlas.
+    """Construct a reference space for the Allen brain atlas.
 
-    Downloads the annotation NRRD and structure-tree JSON into ``data_dir``
-    (reusing cached files on hit) and returns a
-    wrapper object preserving the caller contract used by
+    Will use the 2017 adult version of the atlas. Downloads the annotation
+    NRRD and structure-tree JSON into ``data_dir`` (reusing cached files on
+    hit) and returns a wrapper object preserving the caller contract used by
     ``registration/register.py`` and ``segmentation/stats.py``:
     ``.annotation``, ``.structure_tree`` (with ``get_structures_by_name``,
     ``descendant_ids``, ``get_structures_by_id``), ``.make_structure_mask``,
     ``.export_itksnap_labels``.
 
-    :param data_dir: The directory where the atlas NRRD and structure-tree JSON are saved.
-    :type data_dir: str
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :param reference_space_key: The reference space key (kept for signature compat).
-    :type reference_space_key: str
-    :return: A reference-space wrapper with the caller-contract attributes/methods.
-    :rtype: _ReferenceSpace
+    Parameters
+    ----------
+    data_dir : str
+        The directory where the atlas NRRD and structure-tree JSON are saved.
+    resolution : int
+        The resolution of the atlas in micron. Must be 10, 25, 50 or 100
+        microns.
+    reference_space_key : str
+        The reference space key (kept for signature compat).
+
+    Returns
+    -------
+    _ReferenceSpace
+        A reference-space wrapper with the caller-contract attributes/methods.
+
+    Raises
+    ------
+    ValueError
+        If ``resolution`` is not one of 10, 25, 50, or 100.
     """
     # Check the resolution
     if int(resolution) not in _VALID_RESOLUTIONS:
@@ -499,6 +591,13 @@ def _download_nrrd(url: str, dest: str) -> None:
     Raises ``requests.HTTPError`` on non-200 status (never silent fallback).
     A 200-but-not-NRRD response is caught downstream by ``nrrd.read`` raising
     ``NRRDError``.
+
+    Parameters
+    ----------
+    url : str
+        The URL to download from.
+    dest : str
+        The destination filesystem path for the NRRD file.
     """
     tmp = dest + ".partial"
     try:
@@ -516,7 +615,7 @@ def _download_nrrd(url: str, dest: str) -> None:
 
 
 def _download_structure_tree(dest: str) -> list[dict]:
-    """Download the Allen structure-tree JSON, cache it to ``dest`` atomically, return flattened list.
+    """Download the Allen structure-tree JSON, cache to ``dest`` atomically, return flat list.
 
     Fetches ``_STRUCTURE_TREE_URL`` (static-file endpoint), extracts the
     ``msg`` array, writes the raw ``msg`` list to a ``dest + ".partial"`` temp
@@ -525,7 +624,15 @@ def _download_structure_tree(dest: str) -> list[dict]:
     cache file). The temp file is removed on any exception. The cache format
     matches allensdk's so caches are interchangeable.
 
-    :return: ``_flatten_structure_tree(msg)``.
+    Parameters
+    ----------
+    dest : str
+        The destination filesystem path for the cached structure-tree JSON.
+
+    Returns
+    -------
+    list[dict]
+        ``_flatten_structure_tree(msg)``.
     """
     r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
     r.raise_for_status()
@@ -588,16 +695,25 @@ class _ReferenceSpace:
     ``.make_structure_mask``, ``.export_itksnap_labels``.
     """
 
-    def __init__(self, resolution, annotation, structure_tree) -> None:
+    def __init__(
+        self,
+        resolution: int,
+        annotation: NDArray[np.generic],
+        structure_tree: _StructureTree,
+    ) -> None:
         self.resolution = resolution
         self.annotation = annotation
         self.structure_tree = structure_tree
 
-    def export_itksnap_labels(self, id_type=np.uint16) -> tuple[np.ndarray, pd.DataFrame]:
+    def export_itksnap_labels(
+        self, id_type: type = np.uint16
+    ) -> tuple[NDArray[np.generic], pd.DataFrame]:
         label_description = _build_structure_metadata(self.structure_tree.structures)
         return _remap_to_id_type(self.annotation, label_description, id_type)
 
-    def make_structure_mask(self, structure_ids: list[int], tolerance=None) -> np.ndarray:
+    def make_structure_mask(
+        self, structure_ids: list[int], tolerance: int | None = None
+    ) -> NDArray[np.bool_]:
         # Expand each structure_id with its descendants, then build a boolean
         # mask where the annotation equals any expanded id.
         expanded: set[int] = set(structure_ids)
