@@ -38,9 +38,23 @@ def cl_dice(image_predicted: ArrayLike, image_truth: ArrayLike) -> float:
     Returns
     -------
     float
-        The clDice topology-preserving metric.
+        The clDice topology-preserving metric. Returns ``0.0`` when both
+        skeletons are empty (``tprec + tsens == 0``).
+
+    Raises
+    ------
+    ValueError
+        If either input is not 2D or 3D.
     """
-    if len(image_predicted.shape) in (2, 3):
-        tprec = cl_score(image_predicted, skeletonize(image_truth))
-        tsens = cl_score(image_truth, skeletonize(image_predicted))
-    return 2 * tprec * tsens / (tprec + tsens)
+    if len(image_predicted.shape) not in (2, 3):
+        raise ValueError(
+            f"cl_dice expects 2D or 3D input, got {len(image_predicted.shape)}D"
+        )
+    tprec = cl_score(image_predicted, skeletonize(image_truth))
+    tsens = cl_score(image_truth, skeletonize(image_predicted))
+    denom = tprec + tsens
+    if denom == 0:
+        # Both skeletons empty: no topology to preserve. Return 0.0
+        # rather than dividing by zero.
+        return 0.0
+    return 2 * tprec * tsens / denom
