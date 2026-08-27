@@ -15,7 +15,13 @@ from .prediction import predict_one
 from .utils import calculate_metrics
 
 
-def show_diff(mask: ArrayLike, prediction: ArrayLike, output_path: str, id: str, acq: str) -> None:
+def show_diff(
+    mask: ArrayLike,
+    prediction: ArrayLike,
+    output_path: str,
+    image_id: str,
+    acq: str,
+) -> None:
     """Show the difference between the mask and the prediction.
 
     Saves an RGB overlay image where:
@@ -33,7 +39,7 @@ def show_diff(mask: ArrayLike, prediction: ArrayLike, output_path: str, id: str,
         The prediction mask.
     output_path : str
         The output directory for the comparison image.
-    id : str
+    image_id : str
         The id of the image.
     acq : str
         The acquisition label of the image.
@@ -46,7 +52,7 @@ def show_diff(mask: ArrayLike, prediction: ArrayLike, output_path: str, id: str,
     green = (prediction & mask) * 1.0
 
     rgb = np.stack([red, green, blue], axis=2)
-    plt.imsave(f"{output_path}/{acq}_{id}_comparison.png", rgb)
+    plt.imsave(f"{output_path}/{acq}_{image_id}_comparison.png", rgb)
 
 
 def validate_model(model: VsegModel, img_list: list[str], save_path: str, device: str) -> None:
@@ -117,7 +123,7 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
     jaccard_list = ["jaccard", *jaccard, jaccard_mean]
     cldice_list = ["clDice", *cldice, cldice_mean]
 
-    with open(f"{save_path}/validationmetrics.csv", mode="w") as f:
+    with open(f"{save_path}/validationmetrics.csv", encoding="utf-8", mode="w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(headings)
         csvwriter.writerow(accuracy_list)

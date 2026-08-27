@@ -264,5 +264,4 @@ def do_predict(model: VsegModel, patch: torch.Tensor) -> NDArray[np.uint8]:
         pred_y = pred_y[0].numpy()
         pred_y = np.squeeze(pred_y, axis=0)
         pred_y = pred_y > 0.5
-        pred_y = np.array(pred_y, dtype=np.uint8)
-    return pred_y
+        return np.array(pred_y, dtype=np.uint8)

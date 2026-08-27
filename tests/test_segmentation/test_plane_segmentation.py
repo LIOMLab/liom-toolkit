@@ -43,7 +43,7 @@ def test_erode_mask_shrinks_foreground():
     assert eroded.sum() < mask.sum()
     # Erosion only shrinks: every True pixel in the output is also True in
     # the input (the eroded set is a subset of the original set).
-    assert np.all(eroded[mask == False] == False)
+    assert np.all(~eroded[~mask])
 
 
 def test_remove_small_objects_max_size_removes_small_blobs():

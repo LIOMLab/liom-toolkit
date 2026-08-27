@@ -76,9 +76,7 @@ def segment_3d(
 
     print("Removing small structures...")
     # Remove small objects
-    mask = remove_small_structures(vol_p, mask)
-
-    return mask
+    return remove_small_structures(vol_p, mask)
 
 
 def fill_holes_2d_3d(mask: ArrayLike) -> NDArray[np.bool_]:
@@ -110,5 +108,4 @@ def fill_holes_2d_3d(mask: ArrayLike) -> NDArray[np.bool_]:
         mask[:, :, z] = binary_fill_holes(mask[:, :, z])
 
     # Refill holes in 3D (in case some were missed)
-    mask = binary_fill_holes(mask)
-    return mask
+    return binary_fill_holes(mask)

@@ -106,5 +106,4 @@ def load_ants_image_from_node(node: Node, resolution_level: int = 2, channel: in
     image = load_zarr_image_from_node(node, resolution_level)
     if len(image.shape) == 4:
         image = image[channel, :, :, :]
-    ants_image = convert_dask_to_ants(image, node, resolution_level)
-    return ants_image
+    return convert_dask_to_ants(image, node, resolution_level)

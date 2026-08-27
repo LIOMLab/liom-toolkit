@@ -33,9 +33,7 @@ from __future__ import annotations
 
 import os
 
-import nrrd
 import numpy as np
-import pandas as pd
 
 # One-time, gated — allensdk is only imported here, never in the package.
 from allensdk.core.reference_space import ReferenceSpace
@@ -80,8 +78,8 @@ def main() -> None:
     print(f"Fixture generated in {FIXTURE_DIR}:")
     print(f"  labels.parquet: {len(df)} rows, {df.shape[1]} columns")
     print(f"  annotation_25um.npz: shape={vol.shape}, dtype={vol.dtype}")
-    print(f"  annotation_25.nrrd: cached for the regression test")
-    print(f"  structure_tree.json: cached for the regression test")
+    print("  annotation_25.nrrd: cached for the regression test")
+    print("  structure_tree.json: cached for the regression test")
 
 
 if __name__ == "__main__":

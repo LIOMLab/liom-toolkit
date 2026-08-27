@@ -45,8 +45,7 @@ def extract_single_slice_from_zarr(
         volume = volume[channel]
 
     image = volume[z, :, :]
-    image = image.compute()
-    return image
+    return image.compute()
 
 
 def extract_and_save_slice_from_zarr(

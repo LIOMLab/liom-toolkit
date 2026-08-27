@@ -5,8 +5,8 @@ from __future__ import annotations
 import pickle
 
 import torch
-import torch.nn as nn
 import wandb
+from torch import nn
 
 
 class ConvBlock(nn.Module):
@@ -42,8 +42,7 @@ class ConvBlock(nn.Module):
 
         x = self.conv2(x)
         x = self.bn2(x)
-        x = self.relu(x)
-        return x
+        return self.relu(x)
 
 
 class EncoderBlock(nn.Module):
@@ -102,9 +101,7 @@ class DecoderBlock(nn.Module):
         """
         x = self.up(inputs)
         x = torch.cat([x, skip], axis=1)
-        x = self.conv(x)
-
-        return x
+        return self.conv(x)
 
 
 class VsegModel(nn.Module):
@@ -183,5 +180,4 @@ class VsegModel(nn.Module):
         d4 = self.d4(d3, s1)
 
         outputs = self.outputs(d4)
-        outputs = self.output_activation(outputs)
-        return outputs
+        return self.output_activation(outputs)

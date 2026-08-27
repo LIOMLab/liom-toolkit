@@ -209,7 +209,7 @@ def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
             f"label level {level} dtype {arr.dtype} is not integer — "
             "NEAREST resampling must preserve integer label dtype"
         )
-        unique = set(int(v) for v in np.unique(arr))
+        unique = {int(v) for v in np.unique(arr)}
         assert unique.issubset(original_values), (
             f"label level {level} unique values {unique} are not a subset of "
             f"the original label value set {original_values} — "

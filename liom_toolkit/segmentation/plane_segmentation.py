@@ -118,9 +118,7 @@ def estimate_tissue_mask(img: ArrayLike) -> NDArray[np.bool_]:
     # Filter out noisy segmentation
     mask = median_filter(mask, 5)
 
-    mask = remove_small_structures(img, mask)
-
-    return mask
+    return remove_small_structures(img, mask)
 
 
 def remove_small_structures(img: ArrayLike, mask: ArrayLike) -> NDArray[np.generic]:
@@ -144,10 +142,9 @@ def remove_small_structures(img: ArrayLike, mask: ArrayLike) -> NDArray[np.gener
 
     # Area threshold
     img_size = img.size
-    tissue_labels = []
-    for this_region in props:
-        if this_region.area / img_size >= 0.05:
-            tissue_labels.append(this_region.label)
+    tissue_labels = [
+        this_region.label for this_region in props if this_region.area / img_size >= 0.05
+    ]
     mask = np.zeros_like(mask)
     for this_label in tissue_labels:
         mask[img_labels == this_label] = 1

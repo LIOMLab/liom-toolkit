@@ -32,6 +32,7 @@ def test_vsegmodel_imports():
     pytest.importorskip("wandb")
 
     import torch
+
     from liom_toolkit.segmentation.vseg.model import VsegModel
 
     assert callable(VsegModel)
@@ -46,6 +47,7 @@ def test_vsegmodel_state_dict_round_trip_weights_only_true(tmp_path):
     pytest.importorskip("torch")
 
     import torch
+
     from liom_toolkit.segmentation.vseg.model import VsegModel
 
     model = VsegModel(pretrained=False)

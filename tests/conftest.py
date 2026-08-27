@@ -61,9 +61,7 @@ def synthetic_ants_image():
     # antspyx 0.6.x setDirection expects a 2D direction matrix
     # (Sequence[Sequence[float]]), not the raveled length-9 form accepted by
     # 0.5.x. Passing np.eye(3) keeps the identity direction in the 0.6.x shape.
-    return ants.from_numpy(
-        arr, spacing=(1, 1, 1), origin=(0, 0, 0), direction=np.eye(3)
-    )
+    return ants.from_numpy(arr, spacing=(1, 1, 1), origin=(0, 0, 0), direction=np.eye(3))
 
 
 @pytest.fixture
@@ -112,4 +110,3 @@ def _reset_pil_max_image_pixels():
     PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000
     yield
     PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000
-

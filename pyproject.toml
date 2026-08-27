@@ -150,11 +150,65 @@ extend-exclude = ["docs"]
 # final ratchet after the per-module docstring/annotation waves are done.
 # CI runs `ruff check` + `ruff format --check` read-only.
 [tool.ruff.lint]
-# Phase-7 select: Phase-1 auto-fixable subset + D (pydocstyle) + DOC
-# (pydoclint, preview) + ANN (flake8-annotations). DOC requires preview.
+# Full expansive rule set per the Phase-7 final ratchet. The Phase-1
+# auto-fixable subset (E, F, W, I, UP, B, SIM, C4, RUF) plus the docstring /
+# annotation families (D, DOC, ANN) landed in the early waves; the remaining
+# rule sets (security, naming, structural, refactor, etc.) land here as the
+# final ratchet. T20 stays in `ignore` (D-05 — Phase 8 LOG-01 owns the
+# print→logging sweep). DOC requires `preview = true` (set below).
 # UP037 (useless future import) does NOT fire under target-version = "py312",
 # so `from __future__ import annotations` is preserved (load-bearing on 3.12).
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF", "D", "DOC", "ANN"]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting)
+    "UP",     # pyupgrade (modernize syntax)
+    "B",      # flake8-bugbear (common bugs)
+    "SIM",    # flake8-simplify
+    "C4",     # flake8-comprehensions
+    "RUF",    # Ruff-specific rules
+    "D",      # pydocstyle (numpy convention)
+    "DOC",    # pydoclint (preview — signature↔docstring consistency)
+    "ANN",    # flake8-annotations (enforce type annotations)
+    "S",      # flake8-bandit (security)
+    "N",      # pep8-naming (tuned for scientific code — see per-file-ignores)
+    "A",      # flake8-builtins
+    "ARG",    # flake8-unused-arguments
+    "PL",     # Pylint (PLC, PLE, PLR, PLW)
+    "PTH",    # flake8-use-pathlib
+    "PERF",   # Perflint
+    "LOG",    # flake8-logging
+    "G",      # flake8-logging-format
+    "PGH",    # pygrep-hooks
+    "BLE",    # flake8-blind-except
+    "DTZ",    # flake8-datetimez
+    "YTT",    # flake8-2020
+    "EM",     # flake8-errmsg
+    "EXE",    # flake8-executable
+    "FA",     # flake8-future-annotations
+    "ICN",    # flake8-import-conventions
+    "INP",    # flake8-no-pep420
+    "SLF",    # flake8-self
+    "TD",     # flake8-todos
+    "FIX",    # flake8-fixme
+    "ERA",    # eradicate (commented-out code)
+    "TRY",    # tryceratops
+    "RET",    # flake8-return
+    "FBT",    # flake8-boolean-trap
+    "RSE",    # flake8-raise
+    "SLOT",   # flake8-slots
+    "PD",     # pandas-vet
+    "C90",    # mccabe (complexity)
+    "TC",     # flake8-type-checking
+    "TID",    # flake8-tidy-imports
+    "PIE",    # flake8-pie
+    "FLY",    # flynt (f-string conversion)
+    "FURB",   # refurb
+    "NPY",    # NumPy-specific (deprecated aliases)
+    "Q",      # flake8-quotes (enforce double quotes)
+    "PT",     # flake8-pytest-style
+]
 # Enable preview rules project-wide so DOC (pydoclint) is active. Non-DOC
 # preview rules that fire are triaged below in `ignore` with justifications.
 preview = true
@@ -170,14 +224,187 @@ ignore = [
     "ISC001",  # formatter conflict — permanent
     # ratchet: Phase 8 / LOG-01 — print()→logging migration; drop this line after the sweep
     "T20",
+    # --- MiP-3 scientific-convention ignores (per 07-RESEARCH.md Pitfall 1) ---
+    # N813: CamelCase-imported-as-lowercase. `import SimpleITK as sitk` and
+    # similar CamelCase aliases are universal in the SimpleITK/scikit-image
+    # ecosystem; renaming would diverge from every downstream consumer.
+    "N813",
+    # ANN401: dynamically-typed-Any. `Any` is legitimately unavoidable in a
+    # few torch/override signatures and for ANTsImage under
+    # replace-imports-with-any (ty maps ants.** to Any at runtime; the
+    # static type is ANTsImage under TYPE_CHECKING, but a handful of helper
+    # signatures accept Any to stay faithful to the runtime contract).
+    "ANN401",
+    # PLR2004: magic-value-comparison. Scientific code compares against
+    # domain constants inline (e.g. `if resolution in [10, 25, 50, 100]`,
+    # voxel-size literals, channel counts). Extracting every literal to a
+    # named constant would harm legibility for one-off domain values.
+    "PLR2004",
+    # --- style-preference rule families (not correctness; suppress to keep
+    # the gate meaningful rather than noisy) ---
+    # TRY003/EM101/EM102: raise-vanilla-args / raw-string-in-exception /
+    # f-string-in-exception. These enforce assigning the message to a
+    # variable before raising. The project raises with inline string
+    # literals throughout (idiomatic and readable); the style is not a
+    # correctness or security concern.
+    "TRY003",
+    "EM101",
+    "EM102",
+    # FBT001/FBT002/FBT003: boolean-trap. Scientific Python and the existing
+    # public API use boolean positional arguments extensively (e.g.
+    # `fill_holes=True`, `pretrained=False`). Migrating to keyword-only
+    # would be a breaking API change deferred to Phase 8 API-01.
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    # PLC0415: import-outside-top-level. Lazy imports of heavy optional deps
+    # (ants, torch) inside function bodies are intentional per AGENTS §3
+    # (modules must import cleanly without extras). Function-scope imports
+    # also break circular-import cycles (e.g. io.py <-> zarr_writer.py).
+    "PLC0415",
+    # TC001/TC002/TC003: typing-only imports. Moving imports under
+    # TYPE_CHECKING is a non-trivial refactor with pydantic/eager-resolution
+    # risks (AGENTS global rules: pydantic v2 resolves eagerly). Out of
+    # scope for a lint ratchet; the runtime cost of top-level imports is
+    # negligible compared to the heavy-dep lazy-import strategy.
+    "TC001",
+    "TC002",
+    "TC003",
+    # PLR0913/PLR0917: too-many-arguments / too-many-positional-arguments.
+    # Orchestration and pipeline functions thread many parameters by design
+    # (conversion, registration, training entry points).
+    "PLR0913",
+    "PLR0917",
+    # PLR0914/PLR0915/PLR0912/PLR1702/C901: complexity rules (too-many-locals,
+    # too-many-statements, too-many-branches, too-many-nested-blocks,
+    # complex-structure). Long pipeline functions are accepted per the
+    # project conventions; refactoring them is Phase 8 PERF-01 scope.
+    "PLR0914",
+    "PLR0915",
+    "PLR0912",
+    "PLR1702",
+    "C901",
+    # PLR6301: no-self-use. False positives on methods that don't use self
+    # but are part of a class API (e.g. nn.Module forward helpers).
+    "PLR6301",
+    # PLR6104: non-augmented-assignment. Style preference (`x = x + 1` vs
+    # `x += 1`); not a correctness concern.
+    "PLR6104",
+    # PLW2901: redefined-loop-name. Intentional in several pipeline loops
+    # that progressively refine a variable.
+    "PLW2901",
+    # PLW3201: bad-dunder-method-name. False positives on legitimate
+    # double-underscore-prefixed private methods (see dask_client.py).
+    "PLW3201",
+    # PLC1901: compare-to-empty-string. Style preference (`x == ""` vs
+    # `not x`); both are correct.
+    "PLC1901",
+    # PLR6201: literal-membership. Style preference (`x in [a, b]` vs
+    # `x in {a, b}`); for 2-3 element lists the set-literal micro-optimization
+    # is not worth the legibility cost.
+    "PLR6201",
+    # N806/N803/N812: scientific naming. Uppercase/single-letter variable
+    # names (H, W, N, C) and CamelCase aliases are mathematical convention
+    # in the U-Net forward pass and tensor operations.
+    "N806",
+    "N803",
+    "N812",
+    # PTH: flake8-use-pathlib. The codebase uses os.path throughout;
+    # migrating to pathlib is a refactor deferred to a future phase (not a
+    # correctness concern). Suppressing the whole PTH family avoids
+    # sprinkling per-file ignores across every module.
+    "PTH",
+    # TID252: relative-imports. The project uses relative imports within
+    # the package by convention (idiomatic for a library).
+    "TID252",
+    # ERA001: commented-out-code. A couple of legacy commented-out blocks
+    # are kept as historical context (see loss.py, io.py); removing them is
+    # a deliberate cleanup, not a lint-driven deletion.
+    "ERA001",
+    # S403: suspicious-pickle-import. `import pickle` in vseg/model.py is
+    # used only to catch `pickle.UnpicklingError` from torch.load (safe —
+    # not pickling untrusted data). Suppressed globally; the other S rules
+    # remain active.
+    "S403",
+    # RUF201: rule-codes-in-selectors. Prefers rule names over codes in
+    # select/ignore (e.g. "missing-trailing-comma" over "COM812"). Rule codes
+    # are more compact and the conventional form in ruff configs; the names
+    # are verbose and less recognizable. Style preference only.
+    "RUF201",
+    # ARG001/ARG002/ARG003: unused-function-argument / unused-method-argument /
+    # unused-class-argument. The library keeps several parameters for
+    # backward-signature compatibility (e.g. ``rsc`` on download_allen_template,
+    # ``reference_space_key`` on construct_reference_space, ``tolerance`` on
+    # make_structure_mask) — removing them would break downstream callers.
+    # Abstract-method implementations and protocol-shaped helpers also
+    # legitimately leave args unused.
+    "ARG001",
+    "ARG002",
+    "ARG003",
+    # PLW0717: too-many-statements-in-try-clause. The atomic-download pattern
+    # in _download_nrrd / _download_structure_tree naturally groups the
+    # stream + write + rename in one try clause (6 statements) so the
+    # except can clean up the .partial temp file. Splitting would scatter
+    # the cleanup logic.
+    "PLW0717",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Forward-looking: tests legitimately use `assert` (S101). S101 is not in the
-# current select list, so production assert usage is not flagged yet. When
-# S101 is enabled in the final ratchet, tests stay exempt via this entry.
+# Test files: relaxed rules — annotations, docstrings, unused-args, naming,
+# complexity, private-member-access, and commented-out code are not required
+# in tests (per .planning/research/ARCHITECTURE.md per-file-ignores table).
+# S101 (assert) is the idiomatic pytest assertion primitive.
+# PT011 (pytest-raises-too-broad) and PT018 (composite-assertion) are
+# acceptable in tests where the exact match is not the test's focus.
 "tests/**" = [
     "S101",   # assert is the idiomatic pytest assertion primitive
+    "ANN",    # type annotations not required on test functions
+    "D",      # docstrings not required on test functions
+    "DOC",    # pydoclint consistency not enforced on test docstrings
+    "ARG001", # unused function arguments (fixtures, dummies) are common
+    "ARG002", # unused method arguments (e.g. setUp/tearDown) are common
+    "ARG005", # unused lambda arguments are common in test stubs
+    "PLR0915",# long test functions are acceptable
+    "PLR0912",# many branches in test cases are acceptable
+    "PLR0914",# many locals in test cases are acceptable
+    "PLR1702",# nested blocks in test cases are acceptable
+    "PLR6301",# no-self-use on test class methods is a false positive
+    "C901",   # complexity not enforced on tests
+    "SLF001", # private-member-access is common in white-box tests
+    "ERA001", # commented-out code in tests is acceptable
+    "TC001",  # typing-only imports not required in tests
+    "TC002",  # typing-only third-party imports not required in tests
+    "TC003",  # typing-only stdlib imports not required in tests
+    "PLC0415",# function-scope imports are common in tests (importorskip)
+    "PLC2701",# importing private names is common in white-box tests
+    "PLC1901",# compare-to-empty-string style not enforced on tests
+    "PLR6201",# literal-membership style not enforced on tests
+    "PLW2901",# redefined loop names are common in test loops
+    "PLW1514",# unspecified-encoding acceptable in test file IO
+    "FBT001", # boolean positional args common in test helpers
+    "FBT002", # boolean default positional args common in test helpers
+    "FBT003", # boolean positional value in call common in tests
+    "EM101",  # raw-string-in-exception style not enforced on tests
+    "EM102",  # f-string-in-exception style not enforced on tests
+    "TRY003", # raise-vanilla-args style not enforced on tests
+    "PTH",    # os.path usage in tests is acceptable
+    "S108",   # hardcoded temp file paths in tests are acceptable
+    "S403",   # pickle import in tests is acceptable
+    "S301",   # pickle use in tests is acceptable
+    "N806",   # uppercase variable names common in test math
+    "N803",   # uppercase argument names common in test math
+    "RUF069", # float-equality comparison common in numeric tests
+    "RUF059", # unused unpacked variable common in test fixtures
+    "RUF002", # ambiguous unicode in docstrings acceptable in tests
+    "RUF003", # ambiguous unicode in comments acceptable in tests
+    "RUF001", # ambiguous unicode in strings acceptable in tests
+    "E402",   # module-import-not-at-top acceptable in tests (importorskip)
+    "INP001", # implicit namespace package acceptable for test conftest
+    "PT011",  # pytest-raises-too-broad acceptable in tests
+    "PT018",  # pytest-composite-assertion acceptable in tests
+    "NPY002", # numpy legacy random acceptable in test fixtures
+    "FIX",    # FIXME/TODO/XXX tags acceptable in tests
+    "TD",     # TODO tags acceptable in tests
 ]
 
 [tool.ruff.lint.pydocstyle]

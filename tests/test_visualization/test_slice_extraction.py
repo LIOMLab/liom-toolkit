@@ -87,9 +87,7 @@ def test_extract_slices_from_zarr_each_slice_distinct(tmp_path):
     # no slice is a copy of the last-written slice.
     for i, z in enumerate(image_zs):
         expected_value = int(z) + 1
-        assert np.all(
-            full_volume[i, :, :] == expected_value
-        ), (
+        assert np.all(full_volume[i, :, :] == expected_value), (
             f"output slice {i} (z={z}) should hold constant {expected_value}, "
             f"got {full_volume[i, 0, 0]} — slice clobber regression"
         )
@@ -100,8 +98,7 @@ def test_extract_slices_from_zarr_each_slice_distinct(tmp_path):
     # where every slot holds the last plane's value.
     slice_values = [int(full_volume[i, 0, 0]) for i in range(full_volume.shape[0])]
     assert len(set(slice_values)) == len(slice_values), (
-        f"output slices are not distinct — clobber bug present, "
-        f"slice values = {slice_values}"
+        f"output slices are not distinct — clobber bug present, slice values = {slice_values}"
     )
 
 

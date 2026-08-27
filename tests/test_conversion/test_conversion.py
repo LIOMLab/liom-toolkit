@@ -37,12 +37,13 @@ patches at the import site inside ``conversion.py`` — NOT at
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import h5py
 import nibabel as nib
 import nrrd
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
 
 from liom_toolkit.conversion.conversion import (
     convert_hdf5_to_zarr,

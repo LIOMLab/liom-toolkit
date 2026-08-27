@@ -48,8 +48,7 @@ def load_zarr(zarr_file: str) -> list[Node]:
         The loaded zarr file.
     """
     reader = Reader(parse_url(zarr_file))
-    nodes = list(reader())
-    return nodes
+    return list(reader())
 
 
 def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.Array:
@@ -67,8 +66,7 @@ def load_zarr_image_from_node(node: Node, resolution_level: int = 1) -> da.Array
     da.Array
         The image.
     """
-    volume = node.data[resolution_level]
-    return volume
+    return node.data[resolution_level]
 
 
 def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> list[float]:
@@ -86,8 +84,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> list
     list[float]
         The coordinate transform matching the resolution level.
     """
-    transform = node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
-    return transform
+    return node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
 
 
 def load_omero_channels(zarr_file: str) -> list[dict] | None:
@@ -239,11 +236,10 @@ def create_mask_from_zarr(
     if len(image.shape) == 4:
         image = image[0, :, :, :]
     image = image.compute()
-    mask = segment_3d(image, fill_holes=fill_holes)
+    return segment_3d(image, fill_holes=fill_holes)
     # Compare first dimension to see if transpose is needed
     # if mask.shape[0] != image.shape[0]:
     #     mask = np.transpose(mask, (2, 1, 0))
-    return mask
 
 
 def save_label_to_zarr(
@@ -378,12 +374,11 @@ def generate_label_color_dict_mask() -> list[dict]:
     list[dict]
         The label color dictionary.
     """
-    label_colors = [
+    return [
         {"label-value": 0, "rgba": [0, 0, 0, 0]},
         {"label-value": 1, "rgba": [250, 0, 0, 255]},
         {"label-value": None, "rgba": [255, 255, 255, 255]},
     ]
-    return label_colors
 
 
 def validate_n_levels(

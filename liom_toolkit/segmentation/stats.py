@@ -106,7 +106,7 @@ def compute_slice_metrics(
 
     # Compute metrics per region
     for i in tqdm(
-        range(0, region_count), desc="Computing metrics per region for " + image, leave=False
+        range(region_count), desc="Computing metrics per region for " + image, leave=False
     ):
         region = get_vessel_region(regions, i, full_vessel_mask)
 
@@ -241,8 +241,7 @@ def get_vessel_region(
         The vessel within the masked region.
     """
     region = regions == region_index + 1
-    region = region * vessel_mask
-    return region
+    return region * vessel_mask
 
 
 def calculate_regional_density(
@@ -374,11 +373,15 @@ def get_branching_points(skeleton: ArrayLike) -> NDArray[np.bool_]:
     """
     # Setup structural elements for detecting branching points
     selems = []
-    selems.append(np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]))
-    selems.append(np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]))
-    selems.append(np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]))
-    selems.append(np.array([[0, 1, 0], [1, 1, 0], [0, 0, 1]]))
-    selems.append(np.array([[0, 0, 1], [1, 1, 1], [0, 1, 0]]))
+    selems.extend(
+        (
+            np.array([[0, 1, 0], [1, 1, 1], [0, 0, 0]]),
+            np.array([[1, 0, 1], [0, 1, 0], [1, 0, 0]]),
+            np.array([[1, 0, 1], [0, 1, 0], [0, 1, 0]]),
+            np.array([[0, 1, 0], [1, 1, 0], [0, 0, 1]]),
+            np.array([[0, 0, 1], [1, 1, 1], [0, 1, 0]]),
+        )
+    )
     selems = [np.rot90(selems[i], k=j) for i in range(5) for j in range(4)]
 
     # Detect branching points
@@ -559,7 +562,7 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
     region_sub_acronyms = [
         region["acronym"] for region in structure_tree.get_structures_by_id(region_sub[0])
     ]
-    itk_ids = labels.loc[labels["LABEL"].isin(region_sub_acronyms)]["IDX"].values.tolist()
+    itk_ids = labels.loc[labels["LABEL"].isin(region_sub_acronyms)]["IDX"].to_numpy().tolist()
 
     if data_dir == "":
         temp_dir.cleanup()
@@ -584,8 +587,7 @@ def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.A
     """
     client = dask_client_manager.get_client()
     filter_image = client.submit(da.isin, atlas, region_ids)
-    filter_image = client.gather(filter_image)
-    return filter_image
+    return client.gather(filter_image)
 
 
 def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> da.Array:
@@ -605,8 +607,7 @@ def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> d
     """
     client = dask_client_manager.get_client()
     filtered_image = client.submit(da.where, image_filter, data, 0)
-    filtered_image = client.gather(filtered_image)
-    return filtered_image
+    return client.gather(filtered_image)
 
 
 def compute_mask_area(mask: da.Array | Future) -> np.uint64:
@@ -625,5 +626,4 @@ def compute_mask_area(mask: da.Array | Future) -> np.uint64:
     client = dask_client_manager.get_client()
     total_area = client.submit(da.sum, mask)
     total_area = client.gather(total_area)
-    total_area = total_area.compute()
-    return total_area
+    return total_area.compute()

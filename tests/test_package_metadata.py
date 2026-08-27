@@ -115,8 +115,7 @@ class TestPackageMetadata:
         """
         requires = distribution("liom-toolkit").requires or []
         antspy_entries = [
-            r for r in requires
-            if 'extra == "antspy"' in r and _req_name(r) == "antspyx"
+            r for r in requires if 'extra == "antspy"' in r and _req_name(r) == "antspyx"
         ]
         assert antspy_entries, (
             "The antspy extra must declare an antspyx requirement, but none was "

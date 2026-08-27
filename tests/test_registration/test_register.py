@@ -20,7 +20,8 @@ Hybrid suite per D-05:
   does not work — there is no module attribute to replace). The mock is
   popped from ``sys.modules`` after each test so it does not leak.
 
-* **None-reorient regression** (``test_align_brain_region_to_atlas_none_reorient_returns_valid_mask``,
+* **None-reorient regression**
+  (``test_align_brain_region_to_atlas_none_reorient_returns_valid_mask``,
   antspy-marked) uses REAL ants (no ants mock) to assert that
   ``align_brain_region_to_atlas(registration_volume=None)`` returns a valid
   ANTsImage mask — the documented ``registration_volume=None`` contract
@@ -35,7 +36,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -223,9 +223,7 @@ def test_align_annotations_to_volume_wiring(mock_ants, tmp_path):
     # public API's explicit False).
     reg_calls = mock_ants.registration.call_args_list
     assert len(reg_calls) >= 1
-    assert all(
-        c.kwargs.get("use_legacy_histogram_matching") is False for c in reg_calls
-    )
+    assert all(c.kwargs.get("use_legacy_histogram_matching") is False for c in reg_calls)
     assert result is not None
 
 
@@ -404,7 +402,7 @@ def test_align_brain_region_to_atlas_invalid_resolution_raises(tmp_path):
     """
     from liom_toolkit.registration.register import align_brain_region_to_atlas
 
-    mock_ants = _install_mock_ants()
+    _install_mock_ants()
     try:
         with pytest.raises(ValueError):
             align_brain_region_to_atlas(
@@ -429,7 +427,7 @@ def test_align_annotations_to_volume_invalid_resolution_raises(tmp_path):
     """
     from liom_toolkit.registration.register import align_annotations_to_volume
 
-    mock_ants = _install_mock_ants()
+    _install_mock_ants()
     try:
         with pytest.raises(ValueError):
             align_annotations_to_volume(

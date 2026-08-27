@@ -65,8 +65,7 @@ def _install_fake_ants():
 @pytest.fixture
 def fake_ants():
     """Provide a fake ants module for the duration of the test."""
-    fake = _install_fake_ants()
-    yield fake
+    yield _install_fake_ants()
     sys.modules.pop("ants", None)
 
 

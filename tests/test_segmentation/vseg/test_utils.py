@@ -98,6 +98,7 @@ def test_create_patches_view_as_windows_shape_and_contents(tmp_path):
     raw = iio.imread(str(png))
     if raw.ndim == 3:
         from skimage.color import rgb2gray
+
         raw = rgb2gray(raw)
     cropped = crop_image(raw, size, stride)
     scaled = (cropped / cropped.max() * 255).astype(np.uint8)
@@ -119,6 +120,7 @@ def test_create_patches_view_as_windows_shape_and_contents(tmp_path):
     # The module must no longer expose a ``patchify`` attribute (the import
     # is gone after the GREEN swap).
     import liom_toolkit.segmentation.vseg.utils as u
+
     assert not hasattr(u, "patchify"), "vseg/utils.py still imports patchify"
 
 
@@ -139,9 +141,7 @@ def test_create_patches_non_divisible(tmp_path):
     png = tmp_path / "t30.png"
     iio.imwrite(str(png), img)
 
-    patches, img_shape, patch_shape, _ = create_patches(
-        str(png), size=(8, 8), stride=4
-    )
+    patches, img_shape, patch_shape, _ = create_patches(str(png), size=(8, 8), stride=4)
 
     assert len(patches) > 0
     # patch_shape is (n_h, n_w, 8, 8); n_h == n_w == 6 for the 28x28 crop.
@@ -163,7 +163,7 @@ def test_pil_max_image_pixels_is_finite():
     pytest.importorskip("torch")  # vseg/utils.py module-top imports torch
     import PIL.Image
 
-    import liom_toolkit.segmentation.vseg.utils  # noqa: F401 -- import triggers the module-top assignment
+    import liom_toolkit.segmentation.vseg.utils  # ruff: ignore[unused-import] -- import triggers the module-top assignment
 
     assert PIL.Image.MAX_IMAGE_PIXELS is not None
     assert isinstance(PIL.Image.MAX_IMAGE_PIXELS, int)

@@ -241,7 +241,7 @@ def mask_image(
     pred_mask = (pred_mask - diff_mask) * 2
 
     labels = np.max([y_mask, diff_mask, pred_mask], axis=0)
-    img = label2rgb(
+    return label2rgb(
         labels,
         image=img,
         colors=[[0, 0, 1], [0, 1, 0], [1, 0, 0]],
@@ -249,7 +249,6 @@ def mask_image(
         bg_label=0,
         bg_color=None,
     )
-    return img
 
 
 def train_model(

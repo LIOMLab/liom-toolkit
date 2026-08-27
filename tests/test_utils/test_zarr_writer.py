@@ -34,7 +34,6 @@ from liom_toolkit.utils.zarr_writer import (
     create_transformation_dict,
 )
 
-
 # ---------------------------------------------------------------------------
 # create_directory — pure-logic / filesystem tests (use tmp_path, real dirs)
 # ---------------------------------------------------------------------------
@@ -213,8 +212,8 @@ def test_omezarrwriter_streaming_4d_multichannel_omero(tmp_path):
     frames = {}
     for c in range(2):
         for z in range(4):
-            frames[(c, z)] = np.full((16, 16), 100 * (c + 1) + z, dtype=np.uint16)
-            writer[c, z, :, :] = frames[(c, z)]
+            frames[c, z] = np.full((16, 16), 100 * (c + 1) + z, dtype=np.uint16)
+            writer[c, z, :, :] = frames[c, z]
     omero_channels = [
         {
             "label": "555 nm",
@@ -236,7 +235,7 @@ def test_omezarrwriter_streaming_4d_multichannel_omero(tmp_path):
     nodes = load_zarr(zpath)
     img = nodes[0]
     expected_l0 = np.stack(
-        [np.stack([frames[(c, z)] for z in range(4)], axis=0) for c in range(2)], axis=0
+        [np.stack([frames[c, z] for z in range(4)], axis=0) for c in range(2)], axis=0
     )
     assert len(img.data) == 5  # L0 + 4
     assert np.array_equal(np.asarray(img.data[0]), expected_l0)

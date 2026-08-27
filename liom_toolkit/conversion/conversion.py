@@ -76,9 +76,7 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     # case so the rechunk does not raise on shape/chunk dimension mismatch.
     chunks = (1, 128, 128, 128) if data.ndim == 4 else (128, 128, 128)
     data = da.rechunk(data, chunks=chunks)
-    data = client.persist(data)
-
-    return data
+    return client.persist(data)
 
 
 def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:

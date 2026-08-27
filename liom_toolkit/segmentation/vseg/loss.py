@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class DiceLoss(nn.Module):
@@ -70,5 +70,4 @@ class DiceBCELoss(nn.Module):
         intersection = (inputs * targets).sum()
         dice_loss = 1 - (2.0 * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
         BCE = F.binary_cross_entropy(inputs, targets, reduction="mean")
-        Dice_BCE = BCE + dice_loss
-        return Dice_BCE
+        return BCE + dice_loss

@@ -52,5 +52,4 @@ def convert_to_png_for_saving(img: ArrayLike) -> NDArray[np.uint8]:
         The converted image, normalized to ``[0, 255]`` and cast to ``uint8``.
     """
     normalized_image = (img - np.min(img)) * (255.0 / (np.max(img) - np.min(img)))
-    normalized_image = normalized_image.astype("uint8")
-    return normalized_image
+    return normalized_image.astype("uint8")

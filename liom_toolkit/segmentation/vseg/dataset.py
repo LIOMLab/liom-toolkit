@@ -169,11 +169,9 @@ class OmeZarrDataset(Dataset):
         torch.Tensor
             The loaded (and optionally normalised/pre-processed) patch tensor.
         """
-        patch_image = self.load_patch(
+        return self.load_patch(
             self.data, idx, self.pre_process, normalise=True, normalisation_value=self.max_value
         )
-
-        return patch_image
 
     def __iter__(self) -> Iterator[torch.Tensor]:
         """Iterate over patches in the dataset.
@@ -253,8 +251,7 @@ class OmeZarrDataset(Dataset):
         if pre_process:
             patch_data = self.pre_process_patch(patch_data)
 
-        patch_data = torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
-        return patch_data
+        return torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
 
     def normalise_patch(
         self, patch: NDArray[np.generic], normalisation_value: int | float = 65535
@@ -266,8 +263,7 @@ class OmeZarrDataset(Dataset):
         NDArray[np.generic]
             The normalised patch (dtype follows the input).
         """
-        patch = patch / normalisation_value
-        return patch
+        return patch / normalisation_value
 
     def pre_process_patch(self, patch: NDArray[np.generic]) -> NDArray[np.generic]:
         """Apply CLAHE to the patch using the dataset's kernel size and clip limit.
@@ -277,9 +273,7 @@ class OmeZarrDataset(Dataset):
         NDArray[np.generic]
             The CLAHE-processed patch.
         """
-        new_patch = apply_clahe(patch, kernel_size=self.kernel_size, clip_limit=self.clip_limit)
-
-        return new_patch
+        return apply_clahe(patch, kernel_size=self.kernel_size, clip_limit=self.clip_limit)
 
 
 class OmeZarrLabelDataSet(OmeZarrDataset):
@@ -351,9 +345,8 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         """
         if hasattr(self, "valid_indices") and self.filter_empty:
             return len(self.valid_indices)
-        else:
-            # If not filtering empty patches, return the full length
-            return super().__len__()
+        # If not filtering empty patches, return the full length
+        return super().__len__()
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Load a (image, label) patch pair.

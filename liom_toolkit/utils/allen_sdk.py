@@ -57,6 +57,7 @@ mitigation for the HTTP tampering surface.
 from __future__ import annotations
 
 import json
+import operator
 import os
 import tempfile
 from typing import TYPE_CHECKING
@@ -180,7 +181,7 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
     # Match allensdk's flat-list ordering (the RMA query orders by
     # structures.graph_order) so this module's caches are interchangeable.
     if flat and all("graph_order" in n for n in flat):
-        flat.sort(key=lambda n: n["graph_order"])
+        flat.sort(key=operator.itemgetter("graph_order"))
     return flat
 
 
@@ -217,7 +218,7 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
         raise ValueError(
             "Structure tree is empty — the download may have failed or the cache is corrupt."
         )
-    df = pd.DataFrame(
+    return pd.DataFrame(
         [
             {
                 "IDX": node["id"],
@@ -232,7 +233,6 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
             for node in structures
         ]
     ).loc[:, ("IDX", "-R-", "-G-", "-B-", "-A-", "VIS", "MSH", "LABEL")]
-    return df
 
 
 def _remap_to_id_type(
@@ -265,7 +265,7 @@ def _remap_to_id_type(
         ``(new_annotation, new_label_description)`` — remapped if any IDX
         exceeds ``id_type`` max, else unchanged.
     """
-    if np.any(label_description["IDX"].values > np.iinfo(id_type).max):
+    if np.any(label_description["IDX"].to_numpy() > np.iinfo(id_type).max):
         label_description = label_description.sort_values(by="LABEL")
         label_description = label_description.reset_index(drop=True)
         # Build old-IDX -> new-IDX (1..N) map. Vectorize the volume remap with
@@ -274,7 +274,7 @@ def _remap_to_id_type(
         # volume is O(N*V) and takes minutes. np.unique is O(V log V) and the
         # LUT lookup touches only the unique values (~1327), not every voxel.
         id_map: dict[int, int] = {}
-        for ii, idx in enumerate(label_description["IDX"].values):
+        for ii, idx in enumerate(label_description["IDX"].to_numpy()):
             id_map[idx] = ii + 1
         unique_vals, inverse = np.unique(annotation, return_inverse=True)
         lut = np.fromiter(
@@ -348,21 +348,18 @@ def generate_label_color_dict_allen() -> list[dict]:
         _annotation, meta = download_allen_atlas(tmpdir, resolution=25, keep_nrrd=False)
 
         # Generate a color dictionary according to the OME-NGFF specification
-        color_dict = []
-        for row in meta.iterrows():
-            color_dict.append(
-                {
-                    "label-value": row[1]["IDX"],
-                    "rgba": [
-                        row[1]["-R-"],
-                        row[1]["-G-"],
-                        row[1]["-B-"],
-                        (int(row[1]["-A-"] * 255)),
-                    ],
-                }
-            )
-
-    return color_dict
+        return [
+            {
+                "label-value": row[1]["IDX"],
+                "rgba": [
+                    row[1]["-R-"],
+                    row[1]["-G-"],
+                    row[1]["-B-"],
+                    (int(row[1]["-A-"] * 255)),
+                ],
+            }
+            for row in meta.iterrows()
+        ]
 
 
 def download_allen_atlas(
@@ -555,7 +552,7 @@ def construct_reference_space(
     tree_file = f"{data_dir}/structure_tree.json"
     if not os.path.exists(tree_file):
         _download_structure_tree(tree_file)
-    with open(tree_file) as f:
+    with open(tree_file, encoding="utf-8") as f:
         tree_data = json.load(f)
     # The cached file may be the raw ``msg`` list (allensdk's cache format and
     # the committed regression fixture, and the format this module's own
@@ -640,7 +637,7 @@ def _download_structure_tree(dest: str) -> list[dict]:
     msg = payload["msg"]
     tmp = dest + ".partial"
     try:
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(msg, f)
         os.replace(tmp, dest)
     except BaseException:

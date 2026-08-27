@@ -22,7 +22,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Task 1 — pure-logic helpers
 # ---------------------------------------------------------------------------
@@ -338,7 +337,11 @@ class TestRemapToIdType:
     """``_remap_to_id_type`` mirrors allensdk ``ReferenceSpace.export_itksnap_labels`` remap."""
 
     def test_no_remap_when_all_idx_within_range(self):
-        from liom_toolkit.utils.allen_sdk import _build_structure_metadata, _flatten_structure_tree, _remap_to_id_type
+        from liom_toolkit.utils.allen_sdk import (
+            _build_structure_metadata,
+            _flatten_structure_tree,
+            _remap_to_id_type,
+        )
 
         flat = _flatten_structure_tree(_sample_structure_tree())
         df = _build_structure_metadata(flat)
@@ -352,7 +355,11 @@ class TestRemapToIdType:
         pd.testing.assert_frame_equal(new_df, df)
 
     def test_remap_when_idx_exceeds_uint16_max(self):
-        from liom_toolkit.utils.allen_sdk import _build_structure_metadata, _flatten_structure_tree, _remap_to_id_type
+        from liom_toolkit.utils.allen_sdk import (
+            _build_structure_metadata,
+            _flatten_structure_tree,
+            _remap_to_id_type,
+        )
 
         # Build a structure tree with one id > 65535
         msg = [
@@ -402,7 +409,11 @@ class TestRemapToIdType:
         assert new_vol.dtype == np.uint16
 
     def test_volume_idx_consistency_after_remap(self):
-        from liom_toolkit.utils.allen_sdk import _build_structure_metadata, _flatten_structure_tree, _remap_to_id_type
+        from liom_toolkit.utils.allen_sdk import (
+            _build_structure_metadata,
+            _flatten_structure_tree,
+            _remap_to_id_type,
+        )
 
         msg = [
             {
@@ -435,7 +446,11 @@ class TestRemapToIdType:
         assert unique_vol_values == unique_idx_values
 
     def test_remap_resets_index(self):
-        from liom_toolkit.utils.allen_sdk import _build_structure_metadata, _flatten_structure_tree, _remap_to_id_type
+        from liom_toolkit.utils.allen_sdk import (
+            _build_structure_metadata,
+            _flatten_structure_tree,
+            _remap_to_id_type,
+        )
 
         msg = [
             {
@@ -475,9 +490,11 @@ def test_download_nrrd_raises_on_404(tmp_path):
     mock_resp.__exit__ = lambda *a: False
 
     dest = str(tmp_path / "out.nrrd")
-    with patch("liom_toolkit.utils.allen_sdk.requests.get", return_value=mock_resp):
-        with pytest.raises(_requests.HTTPError):
-            _download_nrrd("http://example.com/x.nrrd", dest)
+    with (
+        patch("liom_toolkit.utils.allen_sdk.requests.get", return_value=mock_resp),
+        pytest.raises(_requests.HTTPError),
+    ):
+        _download_nrrd("http://example.com/x.nrrd", dest)
 
 
 def test_download_allen_atlas_cache_hit(tmp_path):
@@ -673,7 +690,7 @@ def test_import_allen_sdk_no_allensdk():
     # Remove any cached allensdk from a prior import, then import the module
     sys.modules.pop("allensdk", None)
     sys.modules.pop("liom_toolkit.utils.allen_sdk", None)
-    import liom_toolkit.utils.allen_sdk  # noqa: F401
+    import liom_toolkit.utils.allen_sdk  # ruff: ignore[unused-import]
 
     assert "allensdk" not in sys.modules
 
@@ -732,8 +749,6 @@ def test_export_itksnap_labels_25um_matches_allensdk_fixture():
     expected_df = pd.read_parquet(parquet_path)
     expected_vol = np.load(npz_path)["arr"]
 
-    from liom_toolkit.utils.allen_sdk import construct_reference_space
-
     # Point construct_reference_space at the fixture dir, which has the cached
     # annotation_25.nrrd + structure_tree.json — no network, no allensdk.
     # The fixture dir uses "annotation_25.nrrd" but construct_reference_space
@@ -741,6 +756,8 @@ def test_export_itksnap_labels_25um_matches_allensdk_fixture():
     # via a temp data_dir that points at the cached files.
     import shutil
     import tempfile
+
+    from liom_toolkit.utils.allen_sdk import construct_reference_space
 
     with tempfile.TemporaryDirectory() as data_dir:
         # Copy the cached files to the names construct_reference_space expects

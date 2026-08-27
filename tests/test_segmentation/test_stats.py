@@ -37,7 +37,6 @@ from liom_toolkit.segmentation.stats import (
     create_heatmap,
 )
 
-
 # ---------------------------------------------------------------------------
 # calculate_density
 # ---------------------------------------------------------------------------
@@ -463,8 +462,9 @@ def test_create_heatmap_overwrite(tmp_path):
     The bare ``os.mkdir(output_dir)`` race is fixed by routing directory
     creation through ``create_directory(overwrite=True)``. Real IO in
     ``tmp_path``; no mocking per AGENTS section 5."""
-    import imageio.v3 as iio
     import os
+
+    import imageio.v3 as iio
 
     # 300x300 square image with a single on-block so the heatmap is non-trivial.
     image = np.zeros((300, 300), dtype=np.uint8)

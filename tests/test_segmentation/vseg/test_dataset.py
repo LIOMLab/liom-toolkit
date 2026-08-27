@@ -52,7 +52,7 @@ def _make_tiny_labeled_zarr(tmp_path, label_name: str = "training") -> str:
     fork-mutation regression needs a non-trivial valid set. Real zarr IO
     throughout; no mocking of zarr/numpy/torch (AGENTS section 5).
     """
-    from liom_toolkit.conversion.conversion import save_zarr, save_label_to_zarr
+    from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
     from liom_toolkit.utils.io import generate_label_color_dict_mask
 
     arr = np.zeros((16, 16, 16), dtype=np.uint16)
@@ -148,8 +148,7 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
     # Patches 0..3 all map to grid patch 0 with rest=0 -> identical raw content
     # (np.rot90 with k=0 is a no-op).
     patches_group0 = [
-        ds.load_patch(ds.data, idx, pre_process=False, normalise=False)
-        for idx in [0, 1, 2, 3]
+        ds.load_patch(ds.data, idx, pre_process=False, normalise=False) for idx in [0, 1, 2, 3]
     ]
     # Compare as numpy arrays (load_patch returns torch.Tensor -> .numpy())
     arrs_group0 = [p.numpy() if hasattr(p, "numpy") else np.asarray(p) for p in patches_group0]
@@ -229,20 +228,16 @@ def test_get_valid_indices_fork_mutation(tmp_path):
     grid_product = ds.grid_shape[0] * ds.grid_shape[1] * ds.grid_shape[2]
     if ds.rotate_patches:
         dataset_length = grid_product
-        patch_index = lambda i: i * 4  # noqa: E731
+        patch_index = lambda i: i * 4  # ruff: ignore[lambda-assignment]
     else:
         dataset_length = grid_product
-        patch_index = lambda i: i  # noqa: E731
-    expected = [
-        i for i in range(dataset_length) if ds.check_patch(ds[patch_index(i)][1])
-    ]
+        patch_index = lambda i: i  # ruff: ignore[lambda-assignment]
+    expected = [i for i in range(dataset_length) if ds.check_patch(ds[patch_index(i)][1])]
 
     assert len(ds.valid_indices) > 0, (
         "valid_indices is empty — forked-worker list mutations were lost (D-11)"
     )
-    assert np.array_equal(
-        np.sort(np.asarray(ds.valid_indices)), np.sort(np.asarray(expected))
-    )
+    assert np.array_equal(np.sort(np.asarray(ds.valid_indices)), np.sort(np.asarray(expected)))
 
 
 def test_get_valid_indices_rotate_patches_false_validates_all_grid_patches(tmp_path):
@@ -264,7 +259,7 @@ def test_get_valid_indices_rotate_patches_false_validates_all_grid_patches(tmp_p
     """
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
-    from liom_toolkit.conversion.conversion import save_zarr, save_label_to_zarr
+    from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
     from liom_toolkit.utils.io import generate_label_color_dict_mask
 
@@ -302,6 +297,4 @@ def test_get_valid_indices_rotate_patches_false_validates_all_grid_patches(tmp_p
         "valid_indices is empty — _process_patch skipped grid patch 1 "
         "(rotate_patches=False indexing bug)"
     )
-    assert np.array_equal(
-        np.sort(np.asarray(ds.valid_indices)), np.array([1])
-    )
+    assert np.array_equal(np.sort(np.asarray(ds.valid_indices)), np.array([1]))

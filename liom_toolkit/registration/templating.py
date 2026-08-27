@@ -637,6 +637,5 @@ def update_brain_name_list(names: list[str]) -> list[str]:
     """
     new_names = []
     for name in names:
-        new_names.append(name)
-        new_names.append(name + "_mirrored")
+        new_names.extend((name, name + "_mirrored"))
     return new_names

@@ -117,8 +117,7 @@ def process_image(image: ArrayLike, device: torch.device) -> torch.Tensor:
     x = np.expand_dims(x, axis=0)
     x = x.astype(np.float32)
     x = torch.from_numpy(x)
-    x = x.to(device)
-    return x
+    return x.to(device)
 
 
 # Sort a list of filenames by numerical order
@@ -142,9 +141,7 @@ def numeric_filesort(path: str, folder: str = "images", extension: str = "png") 
         The sorted list of filenames.
     """
     test = sorted(glob(f"{path}/{folder}/*{extension}"))
-    test = natsort.natsorted(test, reverse=False)
-
-    return test
+    return natsort.natsorted(test, reverse=False)
 
 
 # Add a inferred patch to empty array
@@ -200,7 +197,6 @@ def add_patch_to_empty_array(
             # If this is the first column
             if coords[1] == 0:
                 x2 = x1 + overlap
-                y1 = y1
                 y2 = y1 + W
                 to_add = [(x1, x2, y1, y2)]
 
@@ -347,7 +343,4 @@ def apply_clahe(image: ArrayLike, kernel_size: int, clip_limit: float) -> NDArra
     NDArray[np.generic]
         The CLAHE-processed image.
     """
-    ahe_result = equalize_adapthist(
-        image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256
-    )
-    return ahe_result
+    return equalize_adapthist(image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256)
