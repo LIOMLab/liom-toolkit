@@ -42,25 +42,36 @@ class DaskClientManager:
             raise RuntimeError("Dask client was not initialized")
         return self.client
 
-    def set_client(self, address: str = "") -> None:
+    def set_client(self, address: str = "", n_workers: int | None = None) -> None:
         """Set the client to a local cluster or a cluster. Explicit function.
 
         Parameters
         ----------
         address : str
             The address of the cluster.
+        n_workers : int, optional
+            Number of workers for the local cluster. Ignored when connecting
+            to a remote scheduler (``address`` non-empty). Defaults to
+            ``cpu_count() - 1`` when ``None`` and a local cluster is created.
         """
         if self.client is None and address == "":
-            self.__create_local_cluster__()
+            self.__create_local_cluster__(n_workers)
         elif self.client is None and address != "":
             self.__connect_to_cluster__(address)
 
-    def __create_local_cluster__(self) -> None:
-        """Create a local cluster with the number of cores - 1."""
+    def __create_local_cluster__(self, n_workers: int | None = None) -> None:
+        """Create a local cluster with the number of cores - 1.
+
+        Parameters
+        ----------
+        n_workers : int, optional
+            Number of workers. Defaults to ``cpu_count() - 1`` when ``None``.
+        """
         if self.client is not None:
             return
-        cores = multiprocessing.cpu_count() - 1
-        cluster = LocalCluster(n_workers=cores, threads_per_worker=1)
+        if n_workers is None:
+            n_workers = multiprocessing.cpu_count() - 1
+        cluster = LocalCluster(n_workers=n_workers, threads_per_worker=1)
         self.client = cluster.get_client()
 
     def __connect_to_cluster__(self, address: str) -> None:

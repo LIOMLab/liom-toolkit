@@ -87,6 +87,7 @@ dev = [
 [project.scripts]
 liom-convert-hdf5-to-zarr = "liom_toolkit.scripts.liom_convert_hdf5_to_zarr:main"
 liom-create-mask = "liom_toolkit.scripts.liom_create_mask:main"
+liom-segment-2d = "liom_toolkit.scripts.liom_segment_2d:main"
 
 [project.urls]
 Homepage = "https://github.com/LIOMLab/liom-toolkit"
@@ -217,14 +218,11 @@ preview = true
 # Ratchet: the remaining ignores suppress non-auto-fixable violations.
 # E501/B008/E721 ratchet debts were cleared in the prior wave (manual line
 # breaks, deferred device default-arg, isinstance type comparison) and are
-# no longer listed. T20 is suppressed until the Phase 8 LOG-01 print→logging
-# sweep — T20 autofix is a deletion rule that would destroy user-facing
-# print statements (AGENTS §2 violation); never enable T20 with --fix.
+# no longer listed. T20 (print) was dropped after the LOG-01 print→logging
+# sweep; the print-free invariant is now enforced by the T20 hard-gate.
 ignore = [
     "COM812",  # formatter conflict — permanent
     "ISC001",  # formatter conflict — permanent
-    # ratchet: Phase 8 / LOG-01 — print()→logging migration; drop this line after the sweep
-    "T20",
     # --- MiP-3 scientific-convention ignores (per 07-RESEARCH.md Pitfall 1) ---
     # N813: CamelCase-imported-as-lowercase. `import SimpleITK as sitk` and
     # similar CamelCase aliases are universal in the SimpleITK/scikit-image
@@ -346,6 +344,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# CLI scripts legitimately import the internal shared parent-parser helper
+# `_common` from the sibling `liom_toolkit.scripts` package — the underscore
+# prefix marks it as package-internal (not part of the public CLI surface),
+# but sibling CLI modules are the intended consumers.
+"liom_toolkit/scripts/liom_*.py" = [
+    "PLC2701",  # importing the internal `_common` helper is the sanctioned sibling-import pattern
+]
 # Test files: relaxed rules — annotations, docstrings, unused-args, naming,
 # complexity, private-member-access, and commented-out code are not required
 # in tests (per .planning/research/ARCHITECTURE.md per-file-ignores table).
