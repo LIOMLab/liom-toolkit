@@ -1,3 +1,5 @@
+"""Visualization helpers: slice/MIP extraction from OME-Zarr volumes."""
+
 from __future__ import annotations
 
 from .slice_extraction import (
