@@ -1,3 +1,17 @@
 from __future__ import annotations
 
-from .slice_extraction import *
+from .slice_extraction import (
+    colour_image,
+    extract_and_save_slice_from_zarr,
+    extract_and_save_slices_from_zarr,
+    extract_single_slice_from_zarr,
+    extract_slices_from_zarr,
+)
+
+__all__ = [
+    "colour_image",
+    "extract_and_save_slice_from_zarr",
+    "extract_and_save_slices_from_zarr",
+    "extract_single_slice_from_zarr",
+    "extract_slices_from_zarr",
+]
