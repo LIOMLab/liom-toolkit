@@ -344,15 +344,20 @@ def train_model(
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
     if filter_empty_patches:
-        # Filter indices on valid patches
-        train_valid_indices = [
-            idx for idx in train_dataset.indices if idx in full_dataset.valid_indices
-        ]
-        test_valid_indices = [
-            idx for idx in test_dataset.indices if idx in full_dataset.valid_indices
-        ]
+        # Map the split indices through valid_indices to get the actual
+        # dataset indices. random_split returns Subset objects whose
+        # .indices are integers in 0..len(valid_indices)-1 (i.e. indices
+        # INTO the filtered dataset, since full_dataset.__len__ returns
+        # len(valid_indices) when filter_empty is set). The previous code
+        # checked whether a filtered-dataset index was a VALUE in
+        # valid_indices (which contains original dataset indices) -- a
+        # namespace mismatch that succeeded only by numerical coincidence
+        # and produced a tiny, non-random training subset. Map each split
+        # index through valid_indices to recover the true dataset index.
+        train_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices]
+        test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
 
-        # Crate new subsets for dataloaders
+        # Create new subsets for dataloaders
         train_dataset = Subset(full_dataset, train_valid_indices)
         test_dataset = Subset(full_dataset, test_valid_indices)
 
