@@ -91,9 +91,21 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
         mask_path = images.replace(".png", "_mask.png")
         mask = iio.imread(mask_path)
 
-        # comparison image
-        mask = (mask / mask.max()).astype(np.uint8)
-        inference = (inference / inference.max()).astype(np.uint8)
+        # comparison image. Guard the divide-by-zero on an all-zero mask
+        # (vessel-free ground truth) or all-zero inference (vessel-free
+        # prediction): dividing by 0 produces NaN + RuntimeWarning, then
+        # .astype(np.uint8) silently converts NaN to 0
+        # (implementation-defined across platforms). Use an explicit
+        # all-zero array for the empty case, mirroring the predict_one
+        # inference.max() == 0 guard.
+        mask_max = mask.max()
+        mask = (mask / mask_max).astype(np.uint8) if mask_max > 0 else np.zeros_like(mask, dtype=np.uint8)
+        inference_max = inference.max()
+        inference = (
+            (inference / inference_max).astype(np.uint8)
+            if inference_max > 0
+            else np.zeros_like(inference, dtype=np.uint8)
+        )
         show_diff(
             mask=mask,
             prediction=inference,
