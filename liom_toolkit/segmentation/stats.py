@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import tempfile
 from typing import Any
 
@@ -168,8 +169,15 @@ def compute_slice_metrics(
     # higher than the sum of per-region densities (a data inconsistency
     # in the same output DataFrame).
     tissue_area, vessel_area, vessel_density = calculate_density(full_vessel_mask, mask, voxel_size)
+    # Use full_vessel_mask (vessel_mask * mask * vessel_exclude) for the
+    # whole-slice branching and diameter calculations so the 'total' row is
+    # consistent with the per-region rows, which all derive their vessel area
+    # from full_vessel_mask via get_vessel_region. The pre-fix code passed
+    # the raw vessel_mask, so the total row's branching count and diameter
+    # included vessels outside the tissue mask and explicitly excluded
+    # vessels -- inconsistent with the per-region rows in the same DataFrame.
     branching_points_count, skeleton, branching_points = get_branching_point_count(
-        vessel_mask, output_dir
+        full_vessel_mask, output_dir
     )
     draw_branch_point_circles(skeleton, branching_points, output_dir)
     # Whole-slice diameter: wrap in try/except ValueError mirroring the
@@ -182,7 +190,7 @@ def compute_slice_metrics(
     # entry, the same publishable 'no vessels detected' signal used for
     # vessel-free regions.
     try:
-        mean_diameter = compute_average_diameter(vessel_mask, skeleton, voxel_size)
+        mean_diameter = compute_average_diameter(full_vessel_mask, skeleton, voxel_size)
         total_entry = {
             "image": [image],
             "region": "total",
@@ -211,15 +219,15 @@ def compute_slice_metrics(
     # rescale), and the explicit astype is identical output with no warning
     # and clearer intent (we are narrowing a small-integer mask, not
     # rescaling a float image).
-    iio.imwrite(output_dir + "regions.png", regions.astype(np.uint8))
-    iio.imwrite(output_dir + "vessel_exclude.png", vessel_exclude.astype(np.uint8))
-    iio.imwrite(output_dir + "_complete_mask.png", mask.astype(np.uint8))
-    iio.imwrite(output_dir + "vessels.png", vessel_mask.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, "regions.png"), regions.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, "vessel_exclude.png"), vessel_exclude.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, "_complete_mask.png"), mask.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, "vessels.png"), vessel_mask.astype(np.uint8))
 
     # Save data
     entry = pd.DataFrame.from_dict(total_entry)
     df = pd.concat([df, entry])
-    df.to_excel(output_dir + "regions.xlsx", index=False)
+    df.to_excel(os.path.join(output_dir, "regions.xlsx"), index=False)
 
 
 def get_vessel_region(
@@ -282,7 +290,7 @@ def calculate_regional_density(
     total_area = props_list[region_index].area * math.pow(voxel_size, 2)
     if total_area == 0:
         raise ValueError("Empty region: regionprops area is 0 (bad region mask, caller error)")
-    iio.imwrite(output_dir + str(region_index) + ".tif", region.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, f"{region_index}.tif"), region.astype(np.uint8))
     density = vessel_area / total_area
     return vessel_area, total_area, density
 
@@ -352,7 +360,7 @@ def get_branching_point_count(
     skeleton = skeletonize(vessel_mask)
     branching_points = get_branching_points(skeleton)
     points_count = branching_points.sum()
-    iio.imwrite(output_dir + filename, skeleton.astype(np.uint8))
+    iio.imwrite(os.path.join(output_dir, filename), skeleton.astype(np.uint8))
     return points_count, skeleton, branching_points
 
 
@@ -417,7 +425,7 @@ def draw_branch_point_circles(
         circy, circx = circle_perimeter(point[0], point[1], 7, shape=skeleton.shape)
         circled_skeleton[circy, circx] = (220, 20, 20)
 
-    iio.imwrite(output_dir + filename, circled_skeleton)
+    iio.imwrite(os.path.join(output_dir, filename), circled_skeleton)
     del circled_skeleton
 
 
@@ -523,7 +531,7 @@ def create_heatmap(image: ArrayLike, output_dir: str, square_size: int = 150) ->
     heatmap = heatmap.astype(np.uint16)
     heatmap = heatmap.astype(float)
     heatmap = heatmap / (square_size**2)
-    iio.imwrite(output_dir + "heatmap.tif", heatmap)
+    iio.imwrite(os.path.join(output_dir, "heatmap.tif"), heatmap)
 
 
 def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]:
@@ -544,29 +552,37 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
     list[int]
         The list of itk ids for the region and its descendants.
     """
-    # Setup temporary directory if not given
-    if data_dir == "":
+    # Setup temporary directory if not given. Track whether WE created it
+    # so the cleanup runs unconditionally (the pre-fix code reassigned
+    # data_dir = temp_dir.name then re-tested ``if data_dir == ""``, which
+    # was always False after the reassignment, so temp_dir.cleanup() never
+    # ran and the temp directory leaked on every call where data_dir="" --
+    # the default).
+    use_temp = data_dir == ""
+    temp_dir: tempfile.TemporaryDirectory | None = None
+    if use_temp:
         temp_dir = tempfile.TemporaryDirectory()
         data_dir = temp_dir.name
 
-    # Construct reference space and get itk ids
-    from liom_toolkit.utils import construct_reference_space
+    try:
+        # Construct reference space and get itk ids
+        from liom_toolkit.utils import construct_reference_space
 
-    rs = construct_reference_space(data_dir)
-    structure_tree = rs.structure_tree
-    _, labels = rs.export_itksnap_labels()
+        rs = construct_reference_space(data_dir)
+        structure_tree = rs.structure_tree
+        _, labels = rs.export_itksnap_labels()
 
-    # Get the itk ids for the region
-    region = structure_tree.get_structures_by_name([region])
-    region_id = region[0]["id"]
-    region_sub = structure_tree.descendant_ids([region_id])
-    region_sub_acronyms = [
-        region["acronym"] for region in structure_tree.get_structures_by_id(region_sub[0])
-    ]
-    itk_ids = labels.loc[labels["LABEL"].isin(region_sub_acronyms)]["IDX"].to_numpy().tolist()
-
-    if data_dir == "":
-        temp_dir.cleanup()
+        # Get the itk ids for the region
+        region = structure_tree.get_structures_by_name([region])
+        region_id = region[0]["id"]
+        region_sub = structure_tree.descendant_ids([region_id])
+        region_sub_acronyms = [
+            region["acronym"] for region in structure_tree.get_structures_by_id(region_sub[0])
+        ]
+        itk_ids = labels.loc[labels["LABEL"].isin(region_sub_acronyms)]["IDX"].to_numpy().tolist()
+    finally:
+        if use_temp and temp_dir is not None:
+            temp_dir.cleanup()
 
     return itk_ids
 
