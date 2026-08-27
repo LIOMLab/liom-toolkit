@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import imageio.v3 as iio
@@ -87,7 +88,7 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> list
     return node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
 
 
-def load_omero_channels(zarr_file: str) -> list[dict] | None:
+def load_omero_channels(zarr_file: str) -> list[dict[str, Any]] | None:
     """Read the ``omero.channels`` list from an OME-Zarr root group.
 
     OME-Zarr files written by THIS package always carry an ``ome`` root attr
@@ -108,7 +109,7 @@ def load_omero_channels(zarr_file: str) -> list[dict] | None:
 
     Returns
     -------
-    list[dict] | None
+    list[dict[str, Any]] | None
         The ``omero.channels`` list of channel dicts, or ``None`` when
         the file has no ``ome`` / ``omero`` / ``omero.channels`` metadata.
     """
@@ -245,7 +246,7 @@ def create_mask_from_zarr(
 def save_label_to_zarr(
     label: ArrayLike,
     zarr_file: str,
-    color_dict: list[dict],
+    color_dict: list[dict[str, Any]],
     name: str,
     scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
     chunks: tuple[int, int, int] = (128, 128, 128),
@@ -260,7 +261,7 @@ def save_label_to_zarr(
         The mask to save.
     zarr_file : str
         The zarr file to save the mask to.
-    color_dict : list[dict]
+    color_dict : list[dict[str, Any]]
         The color dictionary to use for the mask.
     scales : tuple[float, float, float]
         The scales to use for the mask.
@@ -364,14 +365,14 @@ def save_label_to_zarr(
         )
 
 
-def generate_label_color_dict_mask() -> list[dict]:
+def generate_label_color_dict_mask() -> list[dict[str, Any]]:
     """Generate a label color dictionary for the mask.
 
     Black is background, white is foreground.
 
     Returns
     -------
-    list[dict]
+    list[dict[str, Any]]
         The label color dictionary.
     """
     return [
@@ -463,7 +464,7 @@ def build_scale_factors(n_levels: int, axes: list[str]) -> list[dict[str, int]]:
     ]
 
 
-def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
+def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict[str, Any]]:
     """Generate the NGFF v0.5 full dict-form axes list for the zarr file.
 
     Returns axes in ``(c, z, y, x)`` order (channel prepended for 4D only).
@@ -488,7 +489,7 @@ def generate_axes_dict(dimensions: int, unit: str = "micrometer") -> list[dict]:
 
     Returns
     -------
-    list[dict]
+    list[dict[str, Any]]
         The dict-form axes list, e.g.
         ``[{"name":"z","type":"space","unit":"micrometer"}, ...]`` for 3D or
         ``[{"name":"c","type":"channel"}, {"name":"z",...}, ...]`` for 4D.

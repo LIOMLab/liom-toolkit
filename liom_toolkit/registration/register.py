@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
@@ -28,7 +28,7 @@ def deformably_register_volume(
     rigid_interpolator: str = "linear",
     use_composite: bool = True,
     use_legacy_histogram_matching: bool = False,
-) -> tuple[ANTsImage, dict, dict]:
+) -> tuple[ANTsImage, dict[str, Any], dict[str, Any]]:
     """Register an image to a template using a rigid then a deformable registration.
 
     Parameters
@@ -56,7 +56,7 @@ def deformably_register_volume(
 
     Returns
     -------
-    tuple[ANTsImage, dict, dict]
+    tuple[ANTsImage, dict[str, Any], dict[str, Any]]
         The registered image, the transform from the rigid registration,
         and the transform from the deformable registration.
 
@@ -112,7 +112,7 @@ def rigidly_register_volume(
     interpolator: str = "linear",
     use_composite: bool = True,
     use_legacy_histogram_matching: bool = False,
-) -> tuple[ANTsImage, dict]:
+) -> tuple[ANTsImage, dict[str, Any]]:
     """Register an image to a template using a rigid registration.
 
     Parameters
@@ -136,7 +136,7 @@ def rigidly_register_volume(
 
     Returns
     -------
-    tuple[ANTsImage, dict]
+    tuple[ANTsImage, dict[str, Any]]
         The registered image and the transform from the rigid registration.
 
     Raises
@@ -177,7 +177,7 @@ def get_transformations_for_atlas(
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
     use_legacy_histogram_matching: bool = False,
-) -> tuple[dict, dict]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Get the transformations for an image to be aligned to the Allen template.
 
     Parameters
@@ -205,7 +205,7 @@ def get_transformations_for_atlas(
 
     Returns
     -------
-    tuple[dict, dict]
+    tuple[dict[str, Any], dict[str, Any]]
         The transformations for the image to be aligned to the Allen template.
 
     Raises
@@ -255,8 +255,8 @@ def align_brain_region_to_atlas(
     rigid_type: str = "Similarity",
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
-    syn_image: dict | None = None,
-    syn_allen: dict | None = None,
+    syn_image: dict[str, Any] | None = None,
+    syn_allen: dict[str, Any] | None = None,
 ) -> ANTsImage:
     """Mask an image with a brain region.
 

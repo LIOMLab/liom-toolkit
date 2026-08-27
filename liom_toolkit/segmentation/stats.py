@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import tempfile
+from typing import Any
 
 import dask.array as da
 import imageio.v3 as iio
@@ -570,12 +571,12 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
     return itk_ids
 
 
-def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.Array:
+def create_filter_image(atlas: da.Array | Future[Any], region_ids: list[int]) -> da.Array:
     """Create a filter image based on the region ids.
 
     Parameters
     ----------
-    atlas : da.Array | Future
+    atlas : da.Array | Future[Any]
         The atlas containing the region ids.
     region_ids : list[int]
         The region ids to filter.
@@ -590,14 +591,14 @@ def create_filter_image(atlas: da.Array | Future, region_ids: list[int]) -> da.A
     return client.gather(filter_image)
 
 
-def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> da.Array:
+def filter_image_to_region(image_filter: da.Array, data: da.Array | Future[Any]) -> da.Array:
     """Filter an image to a region based on a filter.
 
     Parameters
     ----------
     image_filter : da.Array
         The filter to apply.
-    data : da.Array | Future
+    data : da.Array | Future[Any]
         The data to filter.
 
     Returns
@@ -610,12 +611,12 @@ def filter_image_to_region(image_filter: da.Array, data: da.Array | Future) -> d
     return client.gather(filtered_image)
 
 
-def compute_mask_area(mask: da.Array | Future) -> np.uint64:
+def compute_mask_area(mask: da.Array | Future[Any]) -> np.uint64:
     """Compute the area of a mask by summing the binary mask values.
 
     Parameters
     ----------
-    mask : da.Array | Future
+    mask : da.Array | Future[Any]
         The mask to compute the area of.
 
     Returns

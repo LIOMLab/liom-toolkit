@@ -188,7 +188,7 @@ def create_images(
     pred_mask = pred.cpu().detach().numpy()
     x = x.cpu().detach().numpy()
     images: list[NDArray[np.generic]] = []
-    num_images = min(num_images, x.shape[0])
+    num_images = int(min(num_images, x.shape[0]))
     i = 0
     while len(images) < num_images:
         img = mask_image(x, y_mask, pred_mask, i)

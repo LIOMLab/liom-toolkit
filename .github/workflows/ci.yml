@@ -20,10 +20,11 @@ jobs:
       - run: uv sync                   # installs dev group (ruff, ty) + core deps
       - run: uv run ruff check
       - run: uv run ruff format --check
-      # ty baseline only — not gated in this phase. continue-on-error so a
-      # non-zero ty exit does not block. Gating is a later phase (LINT-02).
+      # ty is hard-gated: a non-zero ty exit fails the lint job. ty is
+      # configured with error-on-warning = false, so only error-severity
+      # diagnostics fail CI; warnings (third-party stub friction, numpy
+      # ArrayLike union noise) are reported but non-gating.
       - run: uv run ty check
-        continue-on-error: true
 
   test:
     needs: lint

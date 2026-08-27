@@ -296,7 +296,7 @@ def build_template(
         raise ValueError("build_template requires a non-empty image_list.")
 
     if weights is None:
-        weights = np.repeat(1.0 / len(image_list), len(image_list))
+        weights = list(np.repeat(1.0 / len(image_list), len(image_list)))
     weights = [x / sum(weights) for x in weights]
     if initial_template is None:
         initial_template = image_list[0] * 0

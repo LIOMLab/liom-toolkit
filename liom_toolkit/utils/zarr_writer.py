@@ -28,6 +28,7 @@ import shutil
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -104,7 +105,7 @@ def create_transformation_dict(
     voxel_size: Sequence[float],
     ndims: int = 4,
     downscale_factor: int = 2,
-) -> list[list[dict]]:
+) -> list[list[dict[str, Any]]]:
     """Per-level ``coordinateTransformations`` for ``write_multiscales_metadata``.
 
     Each entry is ``[{"type": "scale", "scale": [s_c, s_z, s_y, s_x]}]`` for
@@ -141,7 +142,7 @@ def create_transformation_dict(
 
     Returns
     -------
-    list[list[dict]]
+    list[list[dict[str, Any]]]
         A list of ``n_levels`` ``[{"type":"scale","scale":[...]}]`` entries,
         one per pyramid level (L0 first).
 
@@ -165,7 +166,7 @@ def create_transformation_dict(
         raise ValueError(f"n_levels must be >= 1, got {n_levels!r}.")
 
     z_base, y_base, x_base = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
-    transforms: list[list[dict]] = []
+    transforms: list[list[dict[str, Any]]] = []
     for i in range(n_levels):
         if ndims == 4:
             scale = [
@@ -377,7 +378,7 @@ class OmeZarrWriter:
         self,
         res: Sequence[float],
         n_levels: int,
-        omero_channels: list[dict] | None = None,
+        omero_channels: list[dict[str, Any]] | None = None,
     ) -> None:
         """Downsample the pyramid from disk and write NGFF v0.5 multiscales metadata.
 
@@ -401,7 +402,7 @@ class OmeZarrWriter:
         n_levels : int
             Number of downsample levels (excluding L0). Clamped by
             ``validate_n_levels`` to what the Y/X shapes can support.
-        omero_channels : list[dict] | None
+        omero_channels : list[dict[str, Any]] | None
             Optional list of omero channel dicts (``{"label", "color"
             (6-char hex, no #), "active", "wavelength", "window":
             {"min","max","start","end"}}``). Written to
@@ -558,7 +559,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         base_res: tuple[float, float, float],
         target_resolutions_um: tuple[float, ...] = (10, 25, 50, 100),
         make_isotropic: bool = True,
-        omero_channels: list[dict] | None = None,
+        omero_channels: list[dict[str, Any]] | None = None,
     ) -> None:
         """Append target-resolution pyramid levels beyond raw L0.
 
@@ -595,7 +596,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             changes). If False, all dims scale uniformly by
             ``target_um / min(base_res)`` (aspect ratio preserved,
             anisotropic output voxels).
-        omero_channels : list[dict] | None
+        omero_channels : list[dict[str, Any]] | None
             Optional omero channel dicts (same shape as
             :meth:`OmeZarrWriter.finalize`).
 

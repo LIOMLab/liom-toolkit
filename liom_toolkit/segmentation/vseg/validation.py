@@ -95,7 +95,11 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
         mask = (mask / mask.max()).astype(np.uint8)
         inference = (inference / inference.max()).astype(np.uint8)
         show_diff(
-            mask=mask, prediction=inference, output_path=save_path, id=image_id, acq=acquisition
+            mask=mask,
+            prediction=inference,
+            output_path=save_path,
+            image_id=image_id,
+            acq=acquisition,
         )
 
         # metrics

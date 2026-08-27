@@ -60,7 +60,7 @@ import json
 import operator
 import os
 import tempfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import nrrd
 import numpy as np
@@ -118,7 +118,7 @@ def _hex_to_rgb(hex_color: str) -> list[int]:
     return [int(hex_color[i : i + 2], 16) for i in (0, 2, 4)]
 
 
-def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
+def _flatten_structure_tree(msg: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten a structure-tree payload into a flat list of node dicts with ``rgb_triplet``.
 
     Handles two on-disk formats:
@@ -146,14 +146,14 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
 
     Parameters
     ----------
-    msg : list[dict]
+    msg : list[dict[str, Any]]
         The ``msg`` array from the structure-tree JSON — either a flat list
         of node dicts (cache format) or a list of root nodes whose
         ``children`` cascade (nested download format).
 
     Returns
     -------
-    list[dict]
+    list[dict[str, Any]]
         Flat list of node dicts with ``rgb_triplet`` attached.
     """
     # Detect format: nested if any node carries a 'children' key.
@@ -164,9 +164,9 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
         # cached dicts.
         return [dict(node) for node in msg]
 
-    flat: list[dict] = []
+    flat: list[dict[str, Any]] = []
 
-    def _walk(node: dict) -> None:
+    def _walk(node: dict[str, Any]) -> None:
         node = dict(node)  # shallow copy so we don't mutate the caller's dict
         if "rgb_triplet" not in node:
             node["rgb_triplet"] = _hex_to_rgb(node.get("color_hex_triplet", "0"))
@@ -185,7 +185,7 @@ def _flatten_structure_tree(msg: list[dict]) -> list[dict]:
     return flat
 
 
-def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
+def _build_structure_metadata(structures: list[dict[str, Any]]) -> pd.DataFrame:
     """Build the 8-column ITK-SNAP label-description DataFrame.
 
     Mirrors ``allensdk.core.structure_tree.StructureTree.export_label_description``
@@ -199,7 +199,7 @@ def _build_structure_metadata(structures: list[dict]) -> pd.DataFrame:
 
     Parameters
     ----------
-    structures : list[dict]
+    structures : list[dict[str, Any]]
         Flat list of structure dicts (with ``rgb_triplet`` attached) from
         ``_flatten_structure_tree``.
 
@@ -336,12 +336,12 @@ def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTs
     return atlas_volume
 
 
-def generate_label_color_dict_allen() -> list[dict]:
+def generate_label_color_dict_allen() -> list[dict[str, Any]]:
     """Generate a label color dictionary for the allen atlas.
 
     Returns
     -------
-    list[dict]
+    list[dict[str, Any]]
         The label color dictionary.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -611,7 +611,7 @@ def _download_nrrd(url: str, dest: str) -> None:
         raise
 
 
-def _download_structure_tree(dest: str) -> list[dict]:
+def _download_structure_tree(dest: str) -> list[dict[str, Any]]:
     """Download the Allen structure-tree JSON, cache to ``dest`` atomically, return flat list.
 
     Fetches ``_STRUCTURE_TREE_URL`` (static-file endpoint), extracts the
@@ -628,7 +628,7 @@ def _download_structure_tree(dest: str) -> list[dict]:
 
     Returns
     -------
-    list[dict]
+    list[dict[str, Any]]
         ``_flatten_structure_tree(msg)``.
     """
     r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
@@ -660,13 +660,13 @@ class _StructureTree:
     ``get_structures_by_id``.
     """
 
-    def __init__(self, structures: list[dict]) -> None:
+    def __init__(self, structures: list[dict[str, Any]]) -> None:
         self.structures = structures
 
-    def get_structures_by_name(self, names: list[str]) -> list[dict]:
+    def get_structures_by_name(self, names: list[str]) -> list[dict[str, Any]]:
         return [s for s in self.structures if s["name"] in names]
 
-    def get_structures_by_id(self, ids: list[int]) -> list[dict]:
+    def get_structures_by_id(self, ids: list[int]) -> list[dict[str, Any]]:
         return [s for s in self.structures if s["id"] in ids]
 
     def descendant_ids(self, ids: list[int]) -> list[list[int]]:
