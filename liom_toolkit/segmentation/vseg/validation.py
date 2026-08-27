@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 
 import imageio.v3 as iio
 import matplotlib.pyplot as plt
@@ -78,17 +79,20 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
     ids: list[str] = []
 
     for images in img_list:
-        image_name = images.split("/")
-        image_id = image_name[len(image_name) - 1]
-        image_id = image_id.replace(".png", "")
+        # Use os.path.basename + os.path.splitext instead of split('/') and
+        # replace('.png', ''): the split is platform-specific (fails on
+        # Windows backslashes) and replace strips all '.png' occurrences,
+        # not just the extension. The acquisition is the parent directory
+        # name (one level up from the image file).
+        image_id = os.path.splitext(os.path.basename(images))[0]
         ids.append(image_id)
-        acquisition = image_name[len(image_name) - 2]
+        acquisition = os.path.basename(os.path.dirname(images))
 
         inference = predict_one(
             model=model, img_path=images, save_path=save_path, norm=True, dev=device, patching=False
         )
 
-        mask_path = images.replace(".png", "_mask.png")
+        mask_path = os.path.splitext(images)[0] + "_mask.png"
         mask = iio.imread(mask_path)
 
         # comparison image. Guard the divide-by-zero on an all-zero mask

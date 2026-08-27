@@ -93,9 +93,11 @@ def predict_one(
 
     device = torch.device(dev)
 
-    image_name = img_path.split("/")
-    image_name = image_name[len(image_name) - 1]
-    image_id = image_name.replace(".png", "")
+    # Use os.path.basename + os.path.splitext instead of split('/') and
+    # replace('.png', ''): the split is platform-specific (fails on Windows
+    # backslashes) and replace strips all '.png' occurrences, not just the
+    # extension.
+    image_id = os.path.splitext(os.path.basename(img_path))[0]
 
     overlap = W - stride
 
