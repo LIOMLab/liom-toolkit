@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import imageio.v3 as iio
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -239,8 +241,10 @@ def segment_2d_image(
     # Apply mask
     vessel_mask = cleaned * mask
 
-    # Save image
-    iio.imwrite(output_dir + name + "_mask.tif", img_as_ubyte(mask))
-    iio.imwrite(output_dir + name + "_vessel_mask.tif", img_as_ubyte(vessel_mask))
+    # Save image. Use os.path.join so a caller passing output_dir without a
+    # trailing separator still writes inside the created directory (string
+    # concatenation would write to the parent directory).
+    iio.imwrite(os.path.join(output_dir, f"{name}_mask.tif"), img_as_ubyte(mask))
+    iio.imwrite(os.path.join(output_dir, f"{name}_vessel_mask.tif"), img_as_ubyte(vessel_mask))
     # Clean memory
     del image, mask, frangi, vessel_mask_raw, vessel_mask, cleaned
