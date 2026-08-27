@@ -54,8 +54,13 @@ def train(
     x : torch.Tensor
         The inputs from the last batch.
     """
-    # Initialize epoch loss to 0
+    # Initialize epoch loss to 0. Pre-bind the loop variables to None so an
+    # empty loader does not raise UnboundLocalError at the return statement
+    # (the for-loop body never assigns them when the loader yields nothing).
     epoch_loss = 0.0
+    y = None
+    y_pred = None
+    x = None
 
     # Put in training mode
     model.train()
@@ -71,8 +76,10 @@ def train(
         optimizer.step()
         epoch_loss += loss.item()
 
-    # Normalize cumulative loss for number of examples
-    epoch_loss = epoch_loss / len(loader)
+    # Normalize cumulative loss for number of examples. Guard the
+    # divide-by-zero when the loader is empty (len(loader) == 0).
+    if len(loader) > 0:
+        epoch_loss = epoch_loss / len(loader)
     return epoch_loss, y, y_pred, x
 
 
@@ -123,12 +130,16 @@ def evaluate(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
     # Initialize epoch loss to 0
-    # Added metrics
+    # Added metrics. Pre-bind the loop variables to None so an empty loader
+    # does not raise UnboundLocalError at the return statement.
     epoch_loss = 0.0
     f1 = 0.0
     accuracy = 0.0
     jaccard = 0.0
     recall = 0.0
+    y = None
+    y_pred = None
+    x = None
 
     # Put in eval mode
     model.eval()
@@ -153,12 +164,14 @@ def evaluate(
             jaccard += score_jaccard
             recall += score_recall
 
-        # Normalize cumulative loss for number of examples
-        epoch_loss = epoch_loss / len(loader)
-        f1 = f1 / len(loader)
-        accuracy = accuracy / len(loader)
-        jaccard = jaccard / len(loader)
-        recall = recall / len(loader)
+        # Normalize cumulative loss for number of examples. Guard the
+        # divide-by-zero when the loader is empty (len(loader) == 0).
+        if len(loader) > 0:
+            epoch_loss = epoch_loss / len(loader)
+            f1 = f1 / len(loader)
+            accuracy = accuracy / len(loader)
+            jaccard = jaccard / len(loader)
+            recall = recall / len(loader)
 
     return epoch_loss, y, y_pred, x, f1, accuracy, jaccard, recall
 
