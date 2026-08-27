@@ -50,6 +50,16 @@ def convert_to_png_for_saving(img: ArrayLike) -> NDArray[np.uint8]:
     -------
     NDArray[np.uint8]
         The converted image, normalized to ``[0, 255]`` and cast to ``uint8``.
+        A constant image (``max == min``) returns an all-zero array of the
+        same shape rather than dividing by zero.
     """
-    normalized_image = (img - np.min(img)) * (255.0 / (np.max(img) - np.min(img)))
-    return normalized_image.astype("uint8")
+    img = np.asarray(img)
+    min_val = np.min(img)
+    max_val = np.max(img)
+    if max_val == min_val:
+        # Constant image: division would produce inf -> NaN -> 0 via
+        # implementation-defined uint8 cast. Return an explicit all-zero
+        # array instead (a constant image has no contrast to normalize).
+        return np.zeros_like(img, dtype=np.uint8)
+    normalized_image = (img - min_val) * (255.0 / (max_val - min_val))
+    return normalized_image.astype(np.uint8)
