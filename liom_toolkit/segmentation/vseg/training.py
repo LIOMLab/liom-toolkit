@@ -277,7 +277,9 @@ def train_model(
     epochs: int = 62,
     wandb_mode: str = "offline",
     filter_empty_patches: bool = True,
-    wandb_project: str = "vseg",
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+    pretrained_artifact: str | None = None,
     pin_memory: bool = True,
 ) -> None:
     """Train the vessel segmentation model.
@@ -301,8 +303,17 @@ def train_model(
         The number of epochs to train.
     wandb_mode : str
         The mode for wandb.
-    wandb_project : str
-        The project for wandb. See wandb of LIOM for more details.
+    wandb_project : str | None
+        The wandb project name. ``None`` lets wandb use its own default
+        (the toolkit is lab-config-free on import).
+    wandb_entity : str | None
+        The wandb entity (team/user) name. ``None`` lets wandb use the
+        user's default entity (no hardcoded lab entity).
+    pretrained_artifact : str | None
+        The wandb artifact path (``"entity/project/name:version"``) of a
+        pretrained model to initialise from. ``None`` trains from scratch.
+        When non-None, threads through to ``VsegModel(pretrained=True,
+        pretrained_artifact=...)``.
     filter_empty_patches : bool
         Whether to filter empty patches.
     pin_memory : bool
@@ -340,9 +351,11 @@ def train_model(
         "epochs": epochs,
     }
 
-    # Init wandb
+    # Init wandb. entity=wandb_entity (None -> wandb uses the user's default
+    # entity; project=wandb_project (None -> wandb default project). No
+    # hardcoded lab config.
     run = wandb.init(
-        project=wandb_project, entity="liom-lab", mode=wandb_mode, config=hyperparameter_defaults
+        project=wandb_project, entity=wandb_entity, mode=wandb_mode, config=hyperparameter_defaults
     )
 
     config = wandb.config
@@ -394,7 +407,12 @@ def train_model(
     checkpoint_path = f"{output_train}/files/checkpoint"
     create_dir(f"{output_train}/patch_seg")
 
-    model = VsegModel()
+    # Initialise the model. pretrained_artifact threads through to VsegModel;
+    # None trains from scratch (no silent fallback to a hardcoded lab artifact).
+    model = VsegModel(
+        pretrained=pretrained_artifact is not None,
+        pretrained_artifact=pretrained_artifact,
+    )
 
     model = model.to(dev)
 

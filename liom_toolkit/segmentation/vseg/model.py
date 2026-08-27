@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pickle
-
 import torch
 import wandb
 from torch import nn
@@ -110,9 +108,30 @@ class VsegModel(nn.Module):
     def __init__(
         self,
         pretrained: bool = False,
-        pre_trained_project: str = "liom-lab/model-registry/Vessel Segmentation:latest",
+        pretrained_artifact: str | None = None,
         device: torch.device | None = None,
     ) -> None:
+        """Initialise the U-Net.
+
+        Parameters
+        ----------
+        pretrained : bool
+            Whether to initialise from a pretrained wandb artifact. When
+            ``True``, ``pretrained_artifact`` must be supplied.
+        pretrained_artifact : str | None
+            The wandb artifact path (``"entity/project/name:version"``) of a
+            pretrained model to load. ``None`` trains from scratch. When
+            ``pretrained=True`` and this is ``None``, raises ``ValueError``
+            (no silent fallback to a hardcoded lab artifact — AGENTS section 2).
+        device : torch.device | None
+            The device to load the pretrained weights onto. ``None`` resolves
+            to ``torch.device("cpu")``.
+
+        Raises
+        ------
+        ValueError
+            If ``pretrained=True`` and ``pretrained_artifact`` is ``None``.
+        """
         super().__init__()
         if device is None:
             device = torch.device("cpu")
@@ -137,20 +156,23 @@ class VsegModel(nn.Module):
         self.output_activation = nn.Sigmoid()
 
         if pretrained:
+            if pretrained_artifact is None:
+                raise ValueError(
+                    "pretrained=True requires pretrained_artifact (wandb path) "
+                    "— no silent fallback to a hardcoded lab artifact"
+                )
             run = wandb.init()
-            artifact = run.use_artifact(pre_trained_project, type="model")
+            artifact = run.use_artifact(pretrained_artifact, type="model")
             artifact_dir = artifact.download()
             run.finish()
 
             checkpoint_path = artifact_dir + "/checkpoint.latest.pth"
             # PyTorch 2.6+ defaults to weights_only=True, which restricts
-            # unpickling to tensors/ints/floats. Try the safe default first;
-            # fall back to weights_only=False only for the trusted internal
-            # liom-lab/model-registry W&B artifact (not user-supplied input).
-            try:
-                state = torch.load(checkpoint_path, map_location=device, weights_only=True)
-            except pickle.UnpicklingError:
-                state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+            # unpickling to tensors/ints/floats. Load with the safe default
+            # only — the artifact is user-supplied, so the trust assumption
+            # for weights_only=False no longer holds. An untrusted artifact
+            # that cannot load under weights_only=True fails safe (AGENTS section 2).
+            state = torch.load(checkpoint_path, map_location=device, weights_only=True)
             self.load_state_dict(state)
             self.to(device)
 

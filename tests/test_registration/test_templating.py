@@ -354,6 +354,111 @@ def test_pre_register_brain_no_kwarg_wiring(mock_ants_templating):
     )
 
 
+# --- atlas_resolution parameterization (CLI-01, Phase 5 deferral) ------------
+
+
+def test_build_template_for_resolution_has_atlas_resolution_param() -> None:
+    """build_template_for_resolution signature has ``atlas_resolution: int | None = None``
+    (Phase 5 deferral closure)."""
+    import inspect
+
+    from liom_toolkit.registration.templating import build_template_for_resolution
+
+    sig = inspect.signature(build_template_for_resolution)
+    assert "atlas_resolution" in sig.parameters, (
+        "build_template_for_resolution must accept atlas_resolution"
+    )
+    param = sig.parameters["atlas_resolution"]
+    assert param.default is None, (
+        f"atlas_resolution must default to None, got {param.default!r}"
+    )
+
+
+def test_build_template_atlas_resolution_none_uses_template_resolution(
+    mock_ants_templating,
+):
+    """Calling build_template_for_resolution without atlas_resolution (None
+    default) downloads the Allen atlas at template_resolution — backward
+    compat for existing callers that pass only template_resolution."""
+    mock_ants, _ = mock_ants_templating
+    from liom_toolkit.registration.templating import build_template_for_resolution
+
+    with (
+        patch("liom_toolkit.registration.templating.create_template") as mock_create,
+        patch("liom_toolkit.registration.templating.download_allen_template") as mock_dl,
+        patch("liom_toolkit.registration.templating.load_zarr") as mock_load_zarr,
+        patch("liom_toolkit.registration.templating.load_node_by_name") as mock_load_node,
+        patch("liom_toolkit.registration.templating.load_volume_for_registration") as mock_load_vol,
+        patch("liom_toolkit.registration.templating.update_brain_name_list") as mock_update,
+        patch("liom_toolkit.segmentation.segment_3d") as mock_seg,
+    ):
+        mock_create.return_value = MagicMock()
+        mock_dl.return_value = MagicMock()
+        mock_load_zarr.return_value = [MagicMock()]
+        mock_load_node.return_value = MagicMock()
+        mock_load_vol.return_value = (MagicMock(), MagicMock())
+        mock_update.return_value = []
+        mock_seg.return_value = MagicMock()
+
+        build_template_for_resolution(
+            output_file="/tmp/test_template.nrrd",
+            zarr_files=["/tmp/fake.zarr"],
+            brain_names=["brain1"],
+            template_resolution=50,
+            # atlas_resolution omitted -> None -> defaults to template_resolution
+        )
+
+        # The Allen atlas/template download received resolution=template_resolution
+        # (atlas_resolution defaulted to template_resolution).
+        assert mock_dl.called, "download_allen_template must be called"
+        dl_kwargs = mock_dl.call_args.kwargs
+        assert dl_kwargs.get("resolution") == 50, (
+            f"atlas_resolution=None must default to template_resolution=50, "
+            f"got download resolution={dl_kwargs.get('resolution')!r}"
+        )
+
+
+def test_build_template_atlas_resolution_explicit_threads_through(
+    mock_ants_templating,
+):
+    """Calling build_template_for_resolution with atlas_resolution=25 threads
+    25 through to download_allen_template (the param is functional, not a
+    no-op)."""
+    mock_ants, _ = mock_ants_templating
+    from liom_toolkit.registration.templating import build_template_for_resolution
+
+    with (
+        patch("liom_toolkit.registration.templating.create_template") as mock_create,
+        patch("liom_toolkit.registration.templating.download_allen_template") as mock_dl,
+        patch("liom_toolkit.registration.templating.load_zarr") as mock_load_zarr,
+        patch("liom_toolkit.registration.templating.load_node_by_name") as mock_load_node,
+        patch("liom_toolkit.registration.templating.load_volume_for_registration") as mock_load_vol,
+        patch("liom_toolkit.registration.templating.update_brain_name_list") as mock_update,
+        patch("liom_toolkit.segmentation.segment_3d") as mock_seg,
+    ):
+        mock_create.return_value = MagicMock()
+        mock_dl.return_value = MagicMock()
+        mock_load_zarr.return_value = [MagicMock()]
+        mock_load_node.return_value = MagicMock()
+        mock_load_vol.return_value = (MagicMock(), MagicMock())
+        mock_update.return_value = []
+        mock_seg.return_value = MagicMock()
+
+        build_template_for_resolution(
+            output_file="/tmp/test_template.nrrd",
+            zarr_files=["/tmp/fake.zarr"],
+            brain_names=["brain1"],
+            template_resolution=50,
+            atlas_resolution=25,
+        )
+
+        dl_kwargs = mock_dl.call_args.kwargs
+        assert dl_kwargs.get("resolution") == 25, (
+            f"atlas_resolution=25 must thread through to "
+            f"download_allen_template(resolution=25), got {dl_kwargs.get('resolution')!r}"
+        )
+
+
 @pytest.mark.antspy
 def test_build_template_uses_mkdtemp_not_mktemp(synthetic_ants_image):
     """build_template creates its work_dir via tempfile.mkdtemp, not mktemp.

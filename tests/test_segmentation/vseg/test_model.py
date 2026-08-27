@@ -39,6 +39,70 @@ def test_vsegmodel_imports():
     assert issubclass(VsegModel, torch.nn.Module)
 
 
+# --- pretrained_artifact parameterization (CLI-01) ---------------------------
+#
+# VsegModel.__init__ replaced the hardcoded ``pre_trained_project`` default
+# ("liom-lab/model-registry/Vessel Segmentation:latest") with
+# ``pretrained_artifact: str | None = None``. ``pretrained=True`` with
+# ``pretrained_artifact=None`` must raise ValueError — no silent fallback to
+# the old hardcoded lab artifact (AGENTS section 2 -- no silent wrong-data).
+# All tests are torch-gated per AGENTS section 5.
+
+
+def test_vseg_model_has_pretrained_artifact_param_none_default() -> None:
+    """VsegModel.__init__ has ``pretrained_artifact: str | None = None``
+    (not the old ``pre_trained_project`` with a hardcoded lab default)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    import inspect
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    sig = inspect.signature(VsegModel.__init__)
+    assert "pretrained_artifact" in sig.parameters, (
+        "VsegModel.__init__ must accept pretrained_artifact"
+    )
+    param = sig.parameters["pretrained_artifact"]
+    assert param.default is None, (
+        f"pretrained_artifact must default to None, got {param.default!r}"
+    )
+    # The old hardcoded-lab-default param name must be gone.
+    assert "pre_trained_project" not in sig.parameters, (
+        "VsegModel.__init__ must NOT keep the old pre_trained_project param "
+        "(replaced by pretrained_artifact)"
+    )
+
+
+def test_vseg_model_pretrained_true_none_artifact_raises_value_error() -> None:
+    """VsegModel(pretrained=True, pretrained_artifact=None) raises ValueError
+    mentioning pretrained_artifact — no silent fallback to the old hardcoded
+    lab artifact (AGENTS section 2)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    with pytest.raises(ValueError, match="pretrained_artifact"):
+        VsegModel(pretrained=True, pretrained_artifact=None)
+
+
+def test_vseg_model_no_liom_lab_hardcoded() -> None:
+    """No ``"liom-lab"`` string remains in model.py source (lab-config-free)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    import inspect
+
+    from liom_toolkit.segmentation.vseg import model as model_mod
+
+    source = inspect.getsource(model_mod)
+    assert "liom-lab" not in source, (
+        "model.py must not hardcode the 'liom-lab' wandb artifact path — "
+        "the toolkit is lab-config-free per PROJECT.md core value"
+    )
+
+
 def test_vsegmodel_state_dict_round_trip_weights_only_true(tmp_path):
     """A plain state_dict round-trips through torch.save/torch.load with
     weights_only=True and reloads via load_state_dict without raising --

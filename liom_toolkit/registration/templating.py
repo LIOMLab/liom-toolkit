@@ -439,6 +439,7 @@ def build_template_for_resolution(
     brain_names: list[str],
     resolution_level: int = 3,
     template_resolution: int = 50,
+    atlas_resolution: int | None = None,
     iterations: int = 15,
     init_with_template: bool = False,
     register_to_template: bool = False,
@@ -457,7 +458,12 @@ def build_template_for_resolution(
     resolution_level : int
         The resolution level to load the images at.
     template_resolution : int
-        The resolution of the template.
+        The resolution of the template (in micron).
+    atlas_resolution : int | None
+        The resolution of the Allen atlas/reference volume to download
+        (in micron). ``None`` (default) falls back to ``template_resolution``
+        for backward compatibility — existing callers passing only
+        ``template_resolution`` are unaffected.
     iterations : int
         The number of iterations to use to create the template.
     init_with_template : bool
@@ -482,6 +488,11 @@ def build_template_for_resolution(
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         ) from e
+    # atlas_resolution defaults to template_resolution for backward compat
+    # (closes the Phase 5 deferral — existing callers passing only
+    # template_resolution are unaffected).
+    if atlas_resolution is None:
+        atlas_resolution = template_resolution
     # Use a context manager so the temp dir is cleaned up on every exit
     # path, not just the success path. Without this, a download,
     # create_template, segment_3d, or image_write failure would leak the
@@ -493,9 +504,10 @@ def build_template_for_resolution(
         if flipped_brains:
             brain_names = update_brain_name_list(brain_names)
 
-        # Load allen template
+        # Load allen atlas/reference at atlas_resolution (defaults to
+        # template_resolution for backward compat).
         template_volume = download_allen_template(
-            temp_folder, resolution=template_resolution, keep_nrrd=True
+            temp_folder, resolution=atlas_resolution, keep_nrrd=True
         )
         template_volume = ants.reorient_image2(template_volume, "RAS")
 
