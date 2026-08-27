@@ -367,8 +367,12 @@ def train_model(
         # namespace mismatch that succeeded only by numerical coincidence
         # and produced a tiny, non-random training subset. Map each split
         # index through valid_indices to recover the true dataset index.
-        train_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices]
-        test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
+        train_valid_indices = [
+            int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices
+        ]
+        test_valid_indices = [
+            int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices
+        ]
 
         # Create new subsets for dataloaders
         train_dataset = Subset(full_dataset, train_valid_indices)

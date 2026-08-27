@@ -559,7 +559,7 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
     # ran and the temp directory leaked on every call where data_dir="" --
     # the default).
     use_temp = data_dir == ""
-    temp_dir: tempfile.TemporaryDirectory | None = None
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
     if use_temp:
         temp_dir = tempfile.TemporaryDirectory()
         data_dir = temp_dir.name

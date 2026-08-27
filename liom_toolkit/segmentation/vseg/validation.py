@@ -103,7 +103,11 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
         # all-zero array for the empty case, mirroring the predict_one
         # inference.max() == 0 guard.
         mask_max = mask.max()
-        mask = (mask / mask_max).astype(np.uint8) if mask_max > 0 else np.zeros_like(mask, dtype=np.uint8)
+        mask = (
+            (mask / mask_max).astype(np.uint8)
+            if mask_max > 0
+            else np.zeros_like(mask, dtype=np.uint8)
+        )
         inference_max = inference.max()
         inference = (
             (inference / inference_max).astype(np.uint8)

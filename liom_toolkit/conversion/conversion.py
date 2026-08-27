@@ -366,7 +366,9 @@ def create_full_zarr_volume(
 
         pbar = tqdm(total=5, desc="Creating zarr volume")
         pbar.set_postfix({"step": "Creating multichannel zarr"})
-        create_multichannel_zarr(auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks)
+        create_multichannel_zarr(
+            auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks
+        )
         pbar.update(1)
 
         pbar.set_postfix({"step": "Creating temporary mask"})
@@ -423,7 +425,9 @@ def create_full_zarr_volume(
         atlas_resized = da.transpose(atlas, (2, 1, 0))
         atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
 
-        save_atlas_to_zarr(zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0)
+        save_atlas_to_zarr(
+            zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0
+        )
         pbar.update(1)
 
     # Creating final mask
