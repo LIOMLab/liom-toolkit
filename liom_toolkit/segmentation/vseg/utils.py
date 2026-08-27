@@ -1,13 +1,15 @@
+"""Utilities for vessel segmentation: CLAHE, patching, metrics, file sorting."""
+
 from __future__ import annotations
 
 import os
 from glob import glob
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import imageio.v3 as iio
 import natsort
 import numpy as np
-from numpy import dtype, ndarray
+from numpy.typing import ArrayLike, NDArray
 from PIL import Image
 from skimage.color import rgb2gray
 from skimage.exposure import equalize_adapthist
@@ -20,27 +22,38 @@ Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None — A
 
 
 def create_dir(path: str) -> None:
-    """
-    Create a directory if it does not exist yet
+    """Create a directory if it does not exist yet.
 
-    :param path: The path to create
-    :type path: str
-    :return: None
+    Parameters
+    ----------
+    path : str
+        The path to create.
     """
     if not os.path.exists(path):
         os.makedirs(path)
 
 
-def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
-    """
-    Calculate metrics between ground truth and prediction. Metrics are F1, Recall, Precision, Accuracy, and Jaccard.
+def calculate_metrics(y_true: ArrayLike, y_pred: ArrayLike) -> list[float]:
+    """Calculate metrics between ground truth and prediction.
 
-    :param y_true: Ground truth
-    :type y_true: np.ndarray
-    :param y_pred: Prediction
-    :type y_pred: np.ndarray
-    :return: List of metrics
-    :rtype: list[float]
+    Metrics are F1, Recall, Precision, Accuracy, and Jaccard.
+
+    Parameters
+    ----------
+    y_true : ArrayLike
+        Ground truth.
+    y_pred : ArrayLike
+        Prediction.
+
+    Returns
+    -------
+    list[float]
+        ``[f1, recall, accuracy, jaccard, precision]``.
+
+    Raises
+    ------
+    ImportError
+        If scikit-learn is not installed (re-raised with an actionable message).
     """
     try:
         from sklearn.metrics import (
@@ -73,16 +86,26 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list[float]:
     return [score_f1, score_recall, score_acc, score_jaccard, score_precision]
 
 
-def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
-    """
-    Process an image to present to U-net model
+def process_image(image: ArrayLike, device: torch.device) -> torch.Tensor:
+    """Process an image to present to the U-Net model.
 
-    :param image: The image to process
-    :type image: np.ndarray
-    :param device: The device to use
-    :type device: torch.device
-    :return: The processed image
-    :rtype: torch.Tensor
+    Parameters
+    ----------
+    image : ArrayLike
+        The image to process.
+    device : torch.device
+        The device to use.
+
+    Returns
+    -------
+    torch.Tensor
+        The processed image as a float32 tensor on ``device`` with shape
+        ``(1, 1, H, W)``.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
     try:
         import torch
@@ -99,19 +122,24 @@ def process_image(image: np.ndarray, device: torch.device) -> torch.Tensor:
 
 
 # Sort a list of filenames by numerical order
-# This is used to order the patches as they are names 0_0_png, 1_0_png 2_0_png ... (instead of 0, 1, 10, 11 ...)
+# This is used to order the patches as they are named 0_0_png, 1_0_png,
+# 2_0_png ... (instead of 0, 1, 10, 11 ...)
 def numeric_filesort(path: str, folder: str = "images", extension: str = "png") -> list[str]:
-    """
-    Sort a list of filenames by numerical order
+    """Sort a list of filenames by numerical order.
 
-    :param path: The path to the folder
-    :type path: str
-    :param folder: The folder to sort
-    :type folder: str
-    :param extension: The extension of the files
-    :type extension: str
-    :return: The sorted list of filenames
-    :rtype: list[str]
+    Parameters
+    ----------
+    path : str
+        The path to the folder.
+    folder : str
+        The folder to sort.
+    extension : str
+        The extension of the files.
+
+    Returns
+    -------
+    list[str]
+        The sorted list of filenames.
     """
     test = sorted(glob(f"{path}/{folder}/*{extension}"))
     test = natsort.natsorted(test, reverse=False)
@@ -121,30 +149,34 @@ def numeric_filesort(path: str, folder: str = "images", extension: str = "png") 
 
 # Add a inferred patch to empty array
 def add_patch_to_empty_array(
-    inference: np.ndarray,
-    pred_y: np.ndarray,
+    inference: NDArray[np.generic],
+    pred_y: NDArray[np.generic],
     coords: tuple[int, int],
     stride: int,
     overlap: int,
     size: tuple[int, int],
-) -> np.ndarray:
-    """
-    Add a inferred patch to empty array
+) -> NDArray[np.generic]:
+    """Add an inferred patch to an empty array.
 
-    :param inference: The empty array to add the patch to
-    :type inference: np.ndarray
-    :param pred_y: The predicted patch
-    :type pred_y: np.ndarray
-    :param coords: The coordinates of the patch
-    :type coords: tuple[int, int]
-    :param stride: The stride of the patch
-    :type stride: int
-    :param overlap: The overlap of the patch
-    :type overlap: int
-    :param size: The size of the patch
-    :type size: tuple[int, int]
-    :return: The array with the patch added
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    inference : NDArray[np.generic]
+        The empty array to add the patch to.
+    pred_y : NDArray[np.generic]
+        The predicted patch.
+    coords : tuple[int, int]
+        The coordinates of the patch.
+    stride : int
+        The stride of the patch.
+    overlap : int
+        The overlap of the patch.
+    size : tuple[int, int]
+        The size of the patch.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The array with the patch added (overlapping regions averaged).
     """
     H = size[0]
     W = size[1]
@@ -196,18 +228,22 @@ def add_patch_to_empty_array(
     return inference
 
 
-def crop_image(image: np.ndarray, size: tuple[int, int], stride: int) -> np.ndarray:
-    """
-    Crop an image to a specific size and stride
+def crop_image(image: ArrayLike, size: tuple[int, int], stride: int) -> NDArray[np.generic]:
+    """Crop an image to a specific size and stride.
 
-    :param image: The image to crop
-    :type image: np.ndarray
-    :param size: The size to crop to
-    :type size: tuple[int, int]
-    :param stride: The stride to crop with
-    :type stride: int
-    :return: The cropped image
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    image : ArrayLike
+        The image to crop.
+    size : tuple[int, int]
+        The size to crop to.
+    stride : int
+        The stride to crop with.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The cropped image.
     """
     # size[0] is the window height (axis 0 / rows), size[1] is the window
     # width (axis 1 / cols) — view_as_windows requires the window shape to
@@ -234,25 +270,40 @@ def create_patches(
     size: tuple[int, int] = (256, 256),
     stride: int = 64,
     norm: bool = False,
-    norm_params: tuple = (10, 0.05),
-) -> tuple[list[Any], tuple[int, ...], tuple[int, ...], ndarray[Any, dtype[Any]] | Any]:
-    """
-    Create patches from an image
+    norm_params: tuple[float, float] = (10, 0.05),
+) -> tuple[list[NDArray[np.generic]], tuple[int, ...], tuple[int, ...], NDArray[np.generic]]:
+    """Create patches from an image.
 
-    :param image_path: The path to the image
-    :type image_path: str
-    :param size: The size of the patches
-    :type size: tuple[int, int]
-    :param stride: The stride of the patches
-    :type stride: int
-    :param norm: Normalize the patches
-    :type norm: bool
-    :param norm_params: The parameters for the normalization. (kernel_size, clip_limit)
-    :type norm_params: tuple
-    :return: The patches, the shape of the image, the shape of the patches, and the image
-    :rtype: tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray]
+    Parameters
+    ----------
+    image_path : str
+        The path to the image.
+    size : tuple[int, int]
+        The size of the patches.
+    stride : int
+        The stride of the patches.
+    norm : bool
+        Normalize the patches (apply CLAHE).
+    norm_params : tuple[float, float]
+        The parameters for the normalization: ``(kernel_size, clip_limit)``.
+
+    Returns
+    -------
+    patches : list[NDArray[np.generic]]
+        The list of extracted patches.
+    image_shape : tuple[int, ...]
+        The shape of the cropped image.
+    patch_shape : tuple[int, ...]
+        The shape of the patch grid.
+    image_clahe : NDArray[np.generic]
+        The (optionally CLAHE-processed) cropped image.
+
+    Raises
+    ------
+    ValueError
+        If the input image is all-zero after cropping (cannot normalise).
     """
-    patches = []
+    patches: list[NDArray[np.generic]] = []
 
     image = iio.imread(image_path)
     if image.ndim == 3:
@@ -279,7 +330,23 @@ def create_patches(
     return patches, image.shape, patch.shape, image_clahe
 
 
-def apply_clahe(image: ndarray, kernel_size: int, clip_limit: float):
+def apply_clahe(image: ArrayLike, kernel_size: int, clip_limit: float) -> NDArray[np.generic]:
+    """Apply CLAHE (adaptive histogram equalization) to an image.
+
+    Parameters
+    ----------
+    image : ArrayLike
+        The image to process.
+    kernel_size : int
+        The kernel size for the CLAHE operation.
+    clip_limit : float
+        The clip limit for the CLAHE operation.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The CLAHE-processed image.
+    """
     ahe_result = equalize_adapthist(
         image, kernel_size=kernel_size, clip_limit=clip_limit, nbins=256
     )

@@ -1,38 +1,46 @@
+"""cl_dice topology-preserving vessel segmentation metric."""
+
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import ArrayLike
 from skimage.morphology import skeletonize
 
 
-def cl_score(image: np.ndarray, skeleton: np.ndarray) -> float:
-    """
-    Compute the skeleton volume intersection
+def cl_score(image: ArrayLike, skeleton: ArrayLike) -> float:
+    """Compute the skeleton volume intersection.
 
-    :param image: image
-    :type image: np.ndarray
-    :param skeleton: skeleton
-    :type skeleton: np.ndarray
-    :return: computed skeleton volume intersection
-    :rtype: float
+    Parameters
+    ----------
+    image : ArrayLike
+        The image to score against the skeleton.
+    skeleton : ArrayLike
+        The skeletonised reference image.
+
+    Returns
+    -------
+    float
+        The computed skeleton volume intersection ratio.
     """
     return np.sum(image * skeleton) / np.sum(skeleton)
 
 
-def cl_dice(image_predicted: np.ndarray, image_truth: np.ndarray) -> float:
-    """
-    Compute the CLDice metric
+def cl_dice(image_predicted: ArrayLike, image_truth: ArrayLike) -> float:
+    """Compute the clDice metric.
 
-    :param image_predicted: predicted image
-    :type image_predicted: np.ndarray
-    :param image_truth: ground truth image
-    :type image_truth: np.ndarray
-    :return: CLDice metric
-    :rtype: float
+    Parameters
+    ----------
+    image_predicted : ArrayLike
+        The predicted image.
+    image_truth : ArrayLike
+        The ground truth image.
+
+    Returns
+    -------
+    float
+        The clDice topology-preserving metric.
     """
-    if len(image_predicted.shape) == 2:
-        tprec = cl_score(image_predicted, skeletonize(image_truth))
-        tsens = cl_score(image_truth, skeletonize(image_predicted))
-    elif len(image_predicted.shape) == 3:
+    if len(image_predicted.shape) in (2, 3):
         tprec = cl_score(image_predicted, skeletonize(image_truth))
         tsens = cl_score(image_truth, skeletonize(image_predicted))
     return 2 * tprec * tsens / (tprec + tsens)
