@@ -370,9 +370,7 @@ def train_model(
         train_valid_indices = [
             int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices
         ]
-        test_valid_indices = [
-            int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices
-        ]
+        test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
 
         # Create new subsets for dataloaders
         train_dataset = Subset(full_dataset, train_valid_indices)

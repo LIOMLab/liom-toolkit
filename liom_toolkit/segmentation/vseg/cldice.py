@@ -47,9 +47,7 @@ def cl_dice(image_predicted: ArrayLike, image_truth: ArrayLike) -> float:
         If either input is not 2D or 3D.
     """
     if len(image_predicted.shape) not in (2, 3):
-        raise ValueError(
-            f"cl_dice expects 2D or 3D input, got {len(image_predicted.shape)}D"
-        )
+        raise ValueError(f"cl_dice expects 2D or 3D input, got {len(image_predicted.shape)}D")
     tprec = cl_score(image_predicted, skeletonize(image_truth))
     tsens = cl_score(image_truth, skeletonize(image_predicted))
     denom = tprec + tsens
