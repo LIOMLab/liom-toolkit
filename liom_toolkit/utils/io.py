@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import warnings
+from pathlib import Path
 
 import dask.array as da
 import imageio.v3 as iio
@@ -504,12 +504,14 @@ def extract_zarr_to_png(zarr_file: str, target_dir: str, channel: int) -> None:
     if len(volume.shape) == 4:
         volume = volume[channel]
 
-    # Create if not exists, empty if exists
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
-    else:
-        for file in os.listdir(target_dir):
-            os.remove(os.path.join(target_dir, file))
+    # Create if not exists, empty if exists. The shared helper is
+    # symlink-aware (unlinks symlinks instead of rmtree-ing through them),
+    # which is safer than the previous inline os.listdir + os.remove loop.
+    # Imported lazily because zarr_writer imports from this module at the
+    # top level (circular import otherwise).
+    from .zarr_writer import create_directory
+
+    create_directory(Path(target_dir), overwrite=True)
 
     for z in tqdm(range(volume.shape[0])):
         image = volume[z, :, :]

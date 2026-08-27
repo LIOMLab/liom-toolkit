@@ -106,9 +106,11 @@ class VsegModel(nn.Module):
         self,
         pretrained: bool = False,
         pre_trained_project: str = "liom-lab/model-registry/Vessel Segmentation:latest",
-        device: torch.device = torch.device("cpu"),
+        device: torch.device | None = None,
     ):
         super().__init__()
+        if device is None:
+            device = torch.device("cpu")
 
         """ Encoder """
         self.e1 = EncoderBlock(1, 64)

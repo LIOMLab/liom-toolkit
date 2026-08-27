@@ -99,7 +99,7 @@ class OmeZarrDataset(Dataset):
         """
         self.zarr_path = zarr_path
         self.patch_size = patch_size
-        if type(device) == str:
+        if isinstance(device, str):
             device = torch.device(device)
         self.device = device
         self.pre_process = pre_process
