@@ -182,7 +182,6 @@ ignore = [
 # Temporary: D/DOC not yet converted for these modules. Shrinks each wave as
 # modules are converted to numpy-convention docstrings. Removed entirely in
 # the final ratchet after the per-module docstring waves are done.
-"liom_toolkit/registration/**" = ["D", "DOC"]
 "liom_toolkit/segmentation/**" = ["D", "DOC"]
 "liom_toolkit/utils/**" = ["D", "DOC"]
 "liom_toolkit/scripts/**" = ["D", "DOC"]

@@ -1,3 +1,5 @@
+"""ANTs-based volume registration and atlas alignment."""
+
 from __future__ import annotations
 
 import os
@@ -26,33 +28,42 @@ def deformably_register_volume(
     rigid_interpolator: str = "linear",
     use_composite: bool = True,
     use_legacy_histogram_matching: bool = False,
-) -> (ANTsImage, dict, dict):
-    """
-    Register an image to a template using a rigid registration followed by a deformable registration.
+) -> tuple[ANTsImage, dict, dict]:
+    """Register an image to a template using a rigid then a deformable registration.
 
-    :param image: The image to register
-    :type image: ANTsImage
-    :param mask: The mask to use in registration
-    :type mask: ANTsImage
-    :param template: The template to register to
-    :type template: ANTsImage
-    :param rigid_type: The type of rigid registration to use
-    :type rigid_type: str
-    :param deformable_type: The type of deformable registration to use
-    :type deformable_type: str
-    :param interpolator: The interpolator to use to apply the transform.
-    :type interpolator: str
-    :param rigid_interpolator: The interpolator to use for applying the rigid transform.
-    :type rigid_interpolator: str
-    :param use_composite: Whether to create a composite transform or not
-    :type use_composite: bool
-    :param use_legacy_histogram_matching: Forwarded to ants.registration. False
-        matches the antspyx 0.6.x default (histogram matching off); the public
-        API entry points pass False explicitly, direct callers rely on this default.
-    :type use_legacy_histogram_matching: bool
-    :return: The registered image, the transform from the rigid registration,
-            and the transform from the deformable registration
-    :rtype: tuple[ANTsImage, dict, dict]
+    Parameters
+    ----------
+    image : ANTsImage
+        The image to register.
+    mask : ANTsImage or None
+        The mask to use in registration.
+    template : ANTsImage
+        The template to register to.
+    rigid_type : str
+        The type of rigid registration to use.
+    deformable_type : str
+        The type of deformable registration to use.
+    interpolator : str
+        The interpolator to use to apply the transform.
+    rigid_interpolator : str
+        The interpolator to use for applying the rigid transform.
+    use_composite : bool
+        Whether to create a composite transform or not.
+    use_legacy_histogram_matching : bool
+        Forwarded to ants.registration. False matches the antspyx 0.6.x
+        default (histogram matching off); the public API entry points pass
+        False explicitly, direct callers rely on this default.
+
+    Returns
+    -------
+    tuple[ANTsImage, dict, dict]
+        The registered image, the transform from the rigid registration,
+        and the transform from the deformable registration.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
     try:
         import ants
@@ -101,28 +112,37 @@ def rigidly_register_volume(
     interpolator: str = "linear",
     use_composite: bool = True,
     use_legacy_histogram_matching: bool = False,
-) -> (ANTsImage, dict):
-    """
-    Register an image to a template using a rigid registration.
+) -> tuple[ANTsImage, dict]:
+    """Register an image to a template using a rigid registration.
 
-    :param image: The image to register
-    :type image: ANTsImage
-    :param mask: The mask to use in registration
-    :type mask: ANTsImage
-    :param template: The template to register to
-    :type template: ANTsImage
-    :param rigid_type: The type of rigid registration to use
-    :type rigid_type: str
-    :param interpolator: The interpolator to use to apply the transform.
-    :type interpolator: str
-    :param use_composite: Whether to create a composite transform or not
-    :type use_composite: bool
-    :param use_legacy_histogram_matching: Forwarded to ants.registration. False
-        matches the antspyx 0.6.x default (histogram matching off); the public
-        API entry points pass False explicitly, direct callers rely on this default.
-    :type use_legacy_histogram_matching: bool
-    :return: The registered image and the transform from the rigid registration
-    :rtype: tuple[ANTsImage, dict]
+    Parameters
+    ----------
+    image : ANTsImage
+        The image to register.
+    mask : ANTsImage
+        The mask to use in registration.
+    template : ANTsImage
+        The template to register to.
+    rigid_type : str
+        The type of rigid registration to use.
+    interpolator : str
+        The interpolator to use to apply the transform.
+    use_composite : bool
+        Whether to create a composite transform or not.
+    use_legacy_histogram_matching : bool
+        Forwarded to ants.registration. False matches the antspyx 0.6.x
+        default (histogram matching off); the public API entry points pass
+        False explicitly, direct callers rely on this default.
+
+    Returns
+    -------
+    tuple[ANTsImage, dict]
+        The registered image and the transform from the rigid registration.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
     try:
         import ants
@@ -157,32 +177,41 @@ def get_transformations_for_atlas(
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
     use_legacy_histogram_matching: bool = False,
-) -> (dict, dict):
-    """
-    Get the transformations for an image to be aligned to the Allen template.
+) -> tuple[dict, dict]:
+    """Get the transformations for an image to be aligned to the Allen template.
 
-    :param image: The image to align.
-    :type image: ANTsImage
-    :param mask: The mask of the image to use in registration.
-    :type mask: ANTsImage
-    :param template: The custom template to use for registration.
-    :type template: ANTsImage
-    :param template_allen: The Allen template to use for registration.
-    :type template_allen: ANTsImage
-    :param data_dir: The directory to use for saving temporary files.
-    :type data_dir: str
-    :param rigid_type: The type of rigid registration to use.
-    :type rigid_type: str
-    :param deformable_type: The type of deformable registration to use.
-    :type deformable_type: str
-    :param keep_intermediary: Whether to keep intermediary files or not.
-    :type keep_intermediary: bool
-    :param use_legacy_histogram_matching: Forwarded to deformably_register_volume
-        (and onward to ants.registration). False matches the antspyx 0.6.x
-        default; the public API entry points pass False explicitly.
-    :type use_legacy_histogram_matching: bool
-    :return: The transformations for the image to be aligned to the Allen template.
-    :rtype: tuple[dict, dict]
+    Parameters
+    ----------
+    image : ANTsImage
+        The image to align.
+    mask : ANTsImage
+        The mask of the image to use in registration.
+    template : ANTsImage
+        The custom template to use for registration.
+    template_allen : ANTsImage
+        The Allen template to use for registration.
+    data_dir : str
+        The directory to use for saving temporary files.
+    rigid_type : str
+        The type of rigid registration to use.
+    deformable_type : str
+        The type of deformable registration to use.
+    keep_intermediary : bool
+        Whether to keep intermediary files or not.
+    use_legacy_histogram_matching : bool
+        Forwarded to deformably_register_volume (and onward to
+        ants.registration). False matches the antspyx 0.6.x default; the
+        public API entry points pass False explicitly.
+
+    Returns
+    -------
+    tuple[dict, dict]
+        The transformations for the image to be aligned to the Allen template.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
     try:
         import ants
@@ -222,42 +251,58 @@ def align_brain_region_to_atlas(
     region: str,
     data_dir: str,
     resolution: int = 25,
-    registration_volume: ANTsImage = None,
+    registration_volume: ANTsImage | None = None,
     rigid_type: str = "Similarity",
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
     syn_image: dict | None = None,
     syn_allen: dict | None = None,
 ) -> ANTsImage:
-    """
-    Mask an image with a brain region. Assumes all images are in RAS+ orientation.
+    """Mask an image with a brain region.
 
-    :param target_volume: The image to mask.
-    :type target_volume: ANTsImage
-    :param mask: The mask to use.
-    :type mask: ANTsImage
-    :param template: The template to use for registration.
-    :type template: ANTsImage
-    :param region: The brain region to use. Will do a lookup in the Allen ontology.
-    :type region: str
-    :param data_dir: The directory to use for saving temporary files.
-    :type data_dir: str
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :param registration_volume: The volume to use for registration. If None, the target_volume will be used.
-    :type registration_volume: ANTsImage
-    :param rigid_type: The type of rigid registration to use.
-    :type rigid_type: str
-    :param deformable_type: The type of deformable registration to use.
-    :type deformable_type: str
-    :param keep_intermediary: Whether to write intermediary files or not. Will also save the final masked image.
-    :type keep_intermediary: bool
-    :param syn_image: The syn transform for the image. If None, it will be calculated.
-    :type syn_image: dict
-    :param syn_allen: The syn transform for the Allen template. If None, it will be calculated.
-    :type syn_allen: dict
-    :return: The brain region mask aligned to the target volume.
-    :rtype: ANTsImage
+    Assumes all images are in RAS+ orientation.
+
+    Parameters
+    ----------
+    target_volume : ANTsImage
+        The image to mask.
+    mask : ANTsImage
+        The mask to use.
+    template : ANTsImage
+        The template to use for registration.
+    region : str
+        The brain region to use. Will do a lookup in the Allen ontology.
+    data_dir : str
+        The directory to use for saving temporary files.
+    resolution : int
+        The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns.
+    registration_volume : ANTsImage or None
+        The volume to use for registration. If None, the
+        target_volume will be used.
+    rigid_type : str
+        The type of rigid registration to use.
+    deformable_type : str
+        The type of deformable registration to use.
+    keep_intermediary : bool
+        Whether to write intermediary files or not. Will also save the
+        final masked image.
+    syn_image : dict or None
+        The syn transform for the image. If None, it will be calculated.
+    syn_allen : dict or None
+        The syn transform for the Allen template. If None, it will be
+        calculated.
+
+    Returns
+    -------
+    ANTsImage
+        The brain region mask aligned to the target volume.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
+    ValueError
+        If ``resolution`` is not one of 10, 25, 50, or 100.
     """
     try:
         import ants
@@ -360,29 +405,41 @@ def align_annotations_to_volume(
     deformable_type: str = "SyN",
     keep_intermediary: bool = False,
 ) -> ANTsImage:
-    """
-    Align an annotation to a target image.
+    """Align an annotation to a target image.
 
-    :param target_volume: The target image to align to.
-    :type target_volume: ANTsImage
-    :param mask: The mask to use in registration.
-    :type mask: ANTsImage
-    :param template: The template to use for registration.
-    :type template: ANTsImage
-    :param atlas: The annotation to align.
-    :type atlas: ANTsImage
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :param data_dir: The directory to use for saving temporary files.
-    :type data_dir: str
-    :param rigid_type: The type of rigid registration to use.
-    :type rigid_type: str
-    :param deformable_type: The type of deformable registration to use.
-    :type deformable_type: str
-    :param keep_intermediary: Whether to keep intermediary files or not.
-    :type keep_intermediary: bool
-    :return: The aligned annotation.
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    target_volume : ANTsImage
+        The target image to align to.
+    mask : ANTsImage
+        The mask to use in registration.
+    template : ANTsImage
+        The template to use for registration.
+    atlas : ANTsImage
+        The annotation to align.
+    data_dir : str
+        The directory to use for saving temporary files.
+    resolution : int
+        The resolution of the atlas in micron. Must be 10, 25, 50 or 100
+        microns.
+    rigid_type : str
+        The type of rigid registration to use.
+    deformable_type : str
+        The type of deformable registration to use.
+    keep_intermediary : bool
+        Whether to keep intermediary files or not.
+
+    Returns
+    -------
+    ANTsImage
+        The aligned annotation.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
+    ValueError
+        If ``resolution`` is not one of 10, 25, 50, or 100.
     """
     try:
         import ants
@@ -437,20 +494,30 @@ def align_annotations_to_volume(
 def align_volume_to_allen(
     image: ANTsImage, mask: ANTsImage | None, resolution: int = 25
 ) -> ANTsImage:
-    """
-    Align a volume to the Allen template using the Allen template as a reference.
+    """Align a volume to the Allen template using the Allen template as a reference.
 
-    :param image: The image to align
-    :type image: ANTsImage
-    :param mask: The mask to use in registration
-    :type mask: ANTsImage | None
-    :param resolution: The resolution of the atlas in micron. Must be 10, 25, 50 or 100 microns
-    :type resolution: int
-    :return: The aligned image
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    image : ANTsImage
+        The image to align.
+    mask : ANTsImage or None
+        The mask to use in registration.
+    resolution : int
+        The resolution of the atlas in micron. Must be 10, 25, 50 or 100
+        microns.
+
+    Returns
+    -------
+    ANTsImage
+        The aligned image.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
     try:
-        import ants  # noqa: F401 -- imported for the actionable error; deformably_register_volume re-imports
+        import ants  # ruff: ignore[unused-import] -- imported for the actionable error; deformably_register_volume re-imports
     except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
@@ -460,9 +527,7 @@ def align_volume_to_allen(
     # registration failure would leak the temp dir on disk.
     with tempfile.TemporaryDirectory() as temp_folder:
         # Get the Allen template
-        template = download_allen_template(
-            temp_folder, resolution=resolution, keep_nrrd=False
-        )
+        template = download_allen_template(temp_folder, resolution=resolution, keep_nrrd=False)
 
         # Align the image to the Allen template. deformably_register_volume
         # returns a 3-tuple (syn, syn_transform, rigid_transform); only the
