@@ -9,7 +9,6 @@ from .conversion import (
     convert_nrrd_to_zarr,
     create_full_zarr_volume,
     create_multichannel_zarr,
-    load_hdf5,
     save_zarr,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "convert_nrrd_to_zarr",
     "create_full_zarr_volume",
     "create_multichannel_zarr",
-    "load_hdf5",
     "save_zarr",
 ]

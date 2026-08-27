@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .slice_extraction import (
-    colour_image,
     extract_and_save_slice_from_zarr,
     extract_and_save_slices_from_zarr,
     extract_single_slice_from_zarr,
@@ -11,7 +10,6 @@ from .slice_extraction import (
 )
 
 __all__ = [
-    "colour_image",
     "extract_and_save_slice_from_zarr",
     "extract_and_save_slices_from_zarr",
     "extract_single_slice_from_zarr",
