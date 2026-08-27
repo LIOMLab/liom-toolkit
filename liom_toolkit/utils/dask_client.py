@@ -28,11 +28,18 @@ class DaskClientManager:
         -------
         Client
             The dask distributed client.
+
+        Raises
+        ------
+        RuntimeError
+            If the client could not be initialized after the setup attempt.
         """
         if self.client is None and address == "":
             self.__create_local_cluster__()
         elif self.client is None and address != "":
             self.__connect_to_cluster__(address)
+        if self.client is None:
+            raise RuntimeError("Dask client was not initialized")
         return self.client
 
     def set_client(self, address: str = "") -> None:

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 import SimpleITK as sitk
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from scipy.ndimage import binary_fill_holes
 
 from liom_toolkit.segmentation import remove_small_structures
 
 
 def segment_3d(
-    volume: ArrayLike,
+    volume: NDArray[np.number],
     k: int = 5,
     use_log: bool = True,
     threshold_method: str = "otsu",
@@ -79,7 +79,7 @@ def segment_3d(
     return remove_small_structures(vol_p, mask)
 
 
-def fill_holes_2d_3d(mask: ArrayLike) -> NDArray[np.bool_]:
+def fill_holes_2d_3d(mask: NDArray[np.bool_]) -> NDArray[np.bool_]:
     """Fill holes in a 2D and 3D mask.
 
     Source:

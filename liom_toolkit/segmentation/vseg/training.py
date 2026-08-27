@@ -213,8 +213,8 @@ def create_images(
 
 def mask_image(
     x: NDArray[np.generic],
-    y_mask: NDArray[np.generic],
-    pred_mask: NDArray[np.generic],
+    y_mask: NDArray[np.floating],
+    pred_mask: NDArray[np.floating],
     i: int,
 ) -> NDArray[np.generic]:
     """Overlay the ground-truth and predicted masks on a single input image.

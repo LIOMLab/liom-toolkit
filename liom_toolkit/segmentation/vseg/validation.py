@@ -8,7 +8,7 @@ from pathlib import Path
 import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 
 from .cldice import cl_dice
 from .model import VsegModel
@@ -17,8 +17,8 @@ from .utils import calculate_metrics
 
 
 def show_diff(
-    mask: ArrayLike,
-    prediction: ArrayLike,
+    mask: NDArray[np.number],
+    prediction: NDArray[np.number],
     output_path: str,
     image_id: str,
     acq: str,
@@ -45,12 +45,12 @@ def show_diff(
     acq : str
         The acquisition label of the image.
     """
-    mask = mask > 0.5
-    prediction = prediction > 0.5
+    mask_bin = mask > 0.5
+    prediction_bin = prediction > 0.5
 
-    red = prediction * 1.0
-    blue = mask * 1.0
-    green = (prediction & mask) * 1.0
+    red = prediction_bin * 1.0
+    blue = mask_bin * 1.0
+    green = (prediction_bin & mask_bin) * 1.0
 
     rgb = np.stack([red, green, blue], axis=2)
     plt.imsave(f"{output_path}/{acq}_{image_id}_comparison.png", rgb)

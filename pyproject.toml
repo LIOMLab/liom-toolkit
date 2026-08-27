@@ -81,6 +81,7 @@ dev = [
     "scipy-stubs",
     "pandas-stubs",
     "pyarrow>=25.0.1",
+    "types-openpyxl>=3.1.5.20260827",
 ]
 
 [project.scripts]

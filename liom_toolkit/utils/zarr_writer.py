@@ -317,7 +317,10 @@ class OmeZarrWriter:
         # overwrite=False — no silent clobber).
         create_directory(Path(store_path), overwrite=overwrite)
 
-        store = parse_url(store_path, mode="w").store
+        zarr_location = parse_url(store_path, mode="w")
+        if zarr_location is None:
+            raise ValueError(f"Could not parse zarr URL: {store_path}")
+        store = zarr_location.store
         self.root = zarr.group(store=store)
 
         # Pre-allocate L0 with exact=True so an existing "0" array with a
@@ -334,6 +337,24 @@ class OmeZarrWriter:
             dimension_names=[ax["name"] for ax in self.axes],
         )
 
+    def _level0_array(self) -> zarr.Array[Any]:
+        """Return the level-0 zarr array, narrowing from the Group|Array union.
+
+        Returns
+        -------
+        zarr.Array[Any]
+            The level-0 zarr array.
+
+        Raises
+        ------
+        TypeError
+            If the level-0 group member is not a zarr Array.
+        """
+        arr = self.root["0"]
+        if not isinstance(arr, zarr.Array):
+            raise TypeError(f"Expected level-0 zarr Array, got {type(arr)}")
+        return arr
+
     def __setitem__(self, key: tuple[slice | int, ...] | slice | int, value: ArrayLike) -> None:
         """Write *value* at *key* into the pre-allocated level-0 array.
 
@@ -347,7 +368,7 @@ class OmeZarrWriter:
         value : ArrayLike
             The frame (or stack of frames) to write at *key*.
         """
-        self.root["0"][key] = value
+        self._level0_array()[key] = value
 
     def __getitem__(self, key: tuple[slice | int, ...] | slice | int) -> NDArray[np.generic]:
         """Read a slice from the level-0 array (cheap read-back).
@@ -362,17 +383,17 @@ class OmeZarrWriter:
         NDArray[np.generic]
             The materialised slice (dtype follows the level-0 array).
         """
-        return self.root["0"][key]
+        return np.asarray(self._level0_array()[key])
 
     @property
     def ndim(self) -> int:
         """Number of dimensions of the level-0 array."""
-        return self.root["0"].ndim
+        return self._level0_array().ndim
 
     @property
     def dtype(self) -> np.dtype:
         """Data type of the level-0 array."""
-        return self.root["0"].dtype
+        return self._level0_array().dtype
 
     def finalize(
         self,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ome_zarr.reader import Node
@@ -331,6 +331,9 @@ def build_template(
     # cleaned up; an explicit output_dir is retained by the caller.
     try:
         xavg = initial_template.clone()
+        wavg: Any = None
+        xavgNew: Any = None
+        L: int = 0
         for i in tqdm(
             range(iterations),
             desc="Running template iterations",
@@ -466,6 +469,8 @@ def build_template_for_resolution(
     ------
     ImportError
         If ANTsPy is not installed.
+    ValueError
+        If the mask node is not found in a zarr file.
     """
     try:
         import ants
@@ -505,6 +510,8 @@ def build_template_for_resolution(
             nodes = load_zarr(zarr_file)
             image_node = nodes[0]
             mask_node = load_node_by_name(nodes, "mask")
+            if mask_node is None:
+                raise ValueError(f"Mask node not found in {zarr_file}")
 
             brain_volume, mask = load_volume_for_registration(
                 image_node, mask_node, resolution_level, flipped=False

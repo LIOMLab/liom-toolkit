@@ -150,7 +150,7 @@ def predict_one(
 
     x1 = 0
     y1 = 0
-    inference: NDArray[np.float64] = np.zeros(processed_image.shape)
+    inference: NDArray[np.floating] = np.zeros(processed_image.shape, dtype=np.float64)
 
     for x in test_x:
         image = iio.imread(x)
@@ -163,7 +163,9 @@ def predict_one(
             x1 += 1
             y1 = 0
 
-        inference = add_patch_to_empty_array(inference, pred_y, [x1, y1], stride, overlap, size)
+        inference = add_patch_to_empty_array(
+            inference, pred_y.astype(np.float64), (x1, y1), stride, overlap, size
+        )
 
         y1 += 1
 
@@ -205,6 +207,8 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
     ------
     ImportError
         If PyTorch is not installed (re-raised with an actionable message).
+    TypeError
+        If the opened zarr volume is not a zarr Array.
     """
     try:
         import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
@@ -212,11 +216,16 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
+    # Normalize dask chunks (tuple of tuples per-dimension) to a flat chunk
+    # shape tuple for zarr. dask.array.core.Array.chunksize already does this,
+    # but the _array_expr Array variant does not expose chunksize, so we
+    # derive it from the first chunk of each dimension.
+    chunk_shape = tuple(int(c[0]) for c in dataset.data.chunks)
     new_volume = zarr.open(
         zarr_location,
         mode="w",
         shape=dataset.data.shape,
-        chunks=dataset.data.chunksize,
+        chunks=chunk_shape,
         dtype=np.uint8,
     )
 
@@ -228,6 +237,8 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         if pred_y.ndim == 2:
             pred_y = np.expand_dims(pred_y, axis=0)
 
+        if not isinstance(new_volume, zarr.Array):
+            raise TypeError(f"Expected zarr Array, got {type(new_volume)}")
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y
 
 

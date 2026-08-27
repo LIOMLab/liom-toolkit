@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import imageio.v3 as iio
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from skimage import filters, morphology, restoration
 from skimage.filters import frangi, thresholding
@@ -13,7 +13,7 @@ from skimage.morphology import disk, erosion
 from skimage.util import img_as_ubyte
 
 
-def subtract_background(img: ArrayLike, radius: int = 70) -> NDArray[np.float64]:
+def subtract_background(img: NDArray[np.generic], radius: int = 70) -> NDArray[np.float64]:
     """Subtract background from an image using the rolling ball algorithm.
 
     Parameters
@@ -35,7 +35,7 @@ def subtract_background(img: ArrayLike, radius: int = 70) -> NDArray[np.float64]
 
 
 def frangi_filter(
-    img: ArrayLike,
+    img: NDArray[np.generic],
     sigma_range: tuple[int, int, int],
     black_ridges: bool = False,
 ) -> NDArray[np.float64]:
@@ -58,7 +58,7 @@ def frangi_filter(
     return frangi(img, sigmas=list(range(*sigma_range)), black_ridges=black_ridges)
 
 
-def li_threshold_image(img: ArrayLike) -> NDArray[np.bool_]:
+def li_threshold_image(img: NDArray[np.generic]) -> NDArray[np.bool_]:
     """Apply the Li thresholding algorithm to an image.
 
     Parameters
@@ -71,10 +71,12 @@ def li_threshold_image(img: ArrayLike) -> NDArray[np.bool_]:
     NDArray[np.bool_]
         The thresholded image.
     """
-    return img > thresholding.threshold_li(img, initial_guess=np.quantile(img, 0.95))
+    return img > thresholding.threshold_li(
+        img, initial_guess=np.quantile(img.astype(np.float64), 0.95)
+    )
 
 
-def sauvola_threshold_image(img: ArrayLike, window_size: int = 15) -> NDArray[np.bool_]:
+def sauvola_threshold_image(img: NDArray[np.generic], window_size: int = 15) -> NDArray[np.bool_]:
     """Apply the Sauvola thresholding algorithm to an image.
 
     Parameters
@@ -92,7 +94,7 @@ def sauvola_threshold_image(img: ArrayLike, window_size: int = 15) -> NDArray[np
     return img > filters.threshold_sauvola(img, window_size=window_size)
 
 
-def estimate_tissue_mask(img: ArrayLike) -> NDArray[np.bool_]:
+def estimate_tissue_mask(img: NDArray[np.floating]) -> NDArray[np.bool_]:
     """Estimate the tissue mask from an image.
 
     Based on a function from
@@ -118,10 +120,12 @@ def estimate_tissue_mask(img: ArrayLike) -> NDArray[np.bool_]:
     # Filter out noisy segmentation
     mask = median_filter(mask, 5)
 
-    return remove_small_structures(img, mask)
+    return remove_small_structures(img, mask).astype(bool)
 
 
-def remove_small_structures(img: ArrayLike, mask: ArrayLike) -> NDArray[np.generic]:
+def remove_small_structures(
+    img: NDArray[np.generic], mask: NDArray[np.generic]
+) -> NDArray[np.generic]:
     """Remove small structures from a mask.
 
     Parameters
@@ -151,7 +155,7 @@ def remove_small_structures(img: ArrayLike, mask: ArrayLike) -> NDArray[np.gener
     return mask
 
 
-def erode_mask(mask: ArrayLike, disk_size: int = 30) -> NDArray[np.generic]:
+def erode_mask(mask: NDArray[np.generic], disk_size: int = 30) -> NDArray[np.generic]:
     """Erode the outer edge of a mask.
 
     Parameters
@@ -171,7 +175,7 @@ def erode_mask(mask: ArrayLike, disk_size: int = 30) -> NDArray[np.generic]:
 
 def segment_2d_image(
     output_dir: str,
-    image: ArrayLike,
+    image: NDArray[np.floating],
     name: str,
     frangi_sigma_range: tuple[int, int, int] = (2, 16, 2),
     frangi_black_ridges: bool = False,

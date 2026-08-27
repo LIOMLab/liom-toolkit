@@ -45,18 +45,27 @@ def _level0_component(zarr_path: str, group_path: str = "") -> str:
     ------
     ValueError
         If the group has no OME multiscales metadata.
+    TypeError
+        If the multiscales metadata is not a list or tuple.
     """
     root = zarr.open_group(zarr_path, mode="r")
     group = root if not group_path else root[group_path]
     ome = group.attrs.get("ome")
-    multiscales = ome["multiscales"] if isinstance(ome, dict) else group.attrs.get("multiscales")
-    if not multiscales:
+    multiscales_raw = (
+        ome["multiscales"] if isinstance(ome, dict) else group.attrs.get("multiscales")
+    )
+    if not multiscales_raw:
         raise ValueError(
             f"No OME multiscales metadata found in {zarr_path}"
             + (f" at group {group_path!r}" if group_path else "")
             + " — cannot resolve the level-0 dataset path."
         )
-    level0_path = multiscales[0]["datasets"][0]["path"]
+    if not isinstance(multiscales_raw, (list, tuple)):
+        raise TypeError(
+            f"Unexpected multiscales metadata type {type(multiscales_raw)} in {zarr_path}"
+        )
+    multiscales = multiscales_raw
+    level0_path = str(multiscales[0]["datasets"][0]["path"])
     return f"{group_path}/{level0_path}" if group_path else level0_path
 
 
@@ -193,12 +202,12 @@ class OmeZarrDataset(Dataset):
             The ``(z1, z2, y1, y2, x1, x2)`` slice bounds.
         """
         patch_idx = np.unravel_index(idx, self.grid_shape)
-        z1 = patch_idx[0] * self.patch_size[0]
-        z2 = (patch_idx[0] + 1) * self.patch_size[0]
-        y1 = patch_idx[1] * self.patch_size[1]
-        y2 = (patch_idx[1] + 1) * self.patch_size[1]
-        x1 = patch_idx[2] * self.patch_size[2]
-        x2 = (patch_idx[2] + 1) * self.patch_size[2]
+        z1 = int(patch_idx[0] * self.patch_size[0])
+        z2 = int((patch_idx[0] + 1) * self.patch_size[0])
+        y1 = int(patch_idx[1] * self.patch_size[1])
+        y2 = int((patch_idx[1] + 1) * self.patch_size[1])
+        x1 = int(patch_idx[2] * self.patch_size[2])
+        x2 = int((patch_idx[2] + 1) * self.patch_size[2])
         return z1, z2, y1, y2, x1, x2
 
     def load_patch(
@@ -230,6 +239,7 @@ class OmeZarrDataset(Dataset):
             The loaded patch as a float32 tensor on ``self.device``.
         """
         # The index corresponds to the place in the grid, the rest is for the rotation
+        rest = 0
         if self.rotate_patches:
             idx = idx // 4
             rest = idx % 4
@@ -254,13 +264,13 @@ class OmeZarrDataset(Dataset):
         return torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
 
     def normalise_patch(
-        self, patch: NDArray[np.generic], normalisation_value: int | float = 65535
-    ) -> NDArray[np.generic]:
+        self, patch: NDArray[np.floating], normalisation_value: int | float = 65535
+    ) -> NDArray[np.floating]:
         """Divide the patch by ``normalisation_value``.
 
         Returns
         -------
-        NDArray[np.generic]
+        NDArray[np.floating]
             The normalised patch (dtype follows the input).
         """
         return patch / normalisation_value
@@ -482,4 +492,4 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             ``True`` if the patch has any non-zero pixel.
         """
         # Check if the patch is empty
-        return patch.max() > 0
+        return bool(patch.max() > 0)

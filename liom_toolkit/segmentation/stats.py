@@ -14,7 +14,7 @@ import pandas as pd
 import PIL.Image
 import scipy.ndimage as ndi
 from dask.distributed import Future
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from scipy.ndimage import distance_transform_edt
 from skimage import measure
 from skimage.color import gray2rgb
@@ -33,10 +33,10 @@ PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None â
 def compute_slice_metrics(
     output_dir: str,
     image: str,
-    mask: ArrayLike,
-    vessel_mask: ArrayLike,
-    region_map: ArrayLike,
-    vessel_exclude: ArrayLike,
+    mask: NDArray[np.number],
+    vessel_mask: NDArray[np.number],
+    region_map: NDArray[np.number],
+    vessel_exclude: NDArray[np.number],
     voxel_size: float = 0.65,
 ) -> None:
     """Compute the metrics for a brain slice and save the results to disk.
@@ -229,8 +229,8 @@ def compute_slice_metrics(
 
 
 def get_vessel_region(
-    regions: ArrayLike, region_index: int, vessel_mask: ArrayLike
-) -> NDArray[np.generic]:
+    regions: NDArray[np.number], region_index: int, vessel_mask: NDArray[np.number]
+) -> NDArray[np.number]:
     """Get the vessels in a region.
 
     Parameters
@@ -252,7 +252,7 @@ def get_vessel_region(
 
 
 def calculate_regional_density(
-    region: ArrayLike,
+    region: NDArray[np.number],
     region_index: int,
     props_list: list[RegionProperties],
     output_dir: str,
@@ -284,8 +284,8 @@ def calculate_regional_density(
     ValueError
         If the region has zero area (bad region mask, caller error).
     """
-    vessel_area = (region == 1).sum() * math.pow(voxel_size, 2)
-    total_area = props_list[region_index].area * math.pow(voxel_size, 2)
+    vessel_area = float((region == 1).sum()) * math.pow(voxel_size, 2)
+    total_area = float(props_list[region_index].area) * math.pow(voxel_size, 2)
     if total_area == 0:
         raise ValueError("Empty region: regionprops area is 0 (bad region mask, caller error)")
     iio.imwrite(str(Path(output_dir) / f"{region_index}.tif"), region.astype(np.uint8))
@@ -294,7 +294,7 @@ def calculate_regional_density(
 
 
 def calculate_density(
-    vessel_mask: ArrayLike, mask: ArrayLike, voxel_size: float = 0.65
+    vessel_mask: NDArray[np.number], mask: NDArray[np.number], voxel_size: float = 0.65
 ) -> tuple[float, float, float]:
     """Calculate the areas of the tissue and vessel to compute vessel density in a mask.
 
@@ -327,16 +327,16 @@ def calculate_density(
     ValueError
         If the tissue mask is empty (``mask.sum() == 0``).
     """
-    tissue_area = mask.sum() * math.pow(voxel_size, 2)
+    tissue_area = float(mask.sum()) * math.pow(voxel_size, 2)
     if tissue_area == 0:
         raise ValueError("Empty tissue mask: mask.sum() == 0 (bad region mask, caller error)")
-    vessel_area = vessel_mask.sum() * math.pow(voxel_size, 2)
+    vessel_area = float(vessel_mask.sum()) * math.pow(voxel_size, 2)
     vessel_density = vessel_area / tissue_area
     return tissue_area, vessel_area, vessel_density
 
 
 def get_branching_point_count(
-    vessel_mask: ArrayLike, output_dir: str, filename: str = "skeleton.tif"
+    vessel_mask: NDArray[np.number], output_dir: str, filename: str = "skeleton.tif"
 ) -> tuple[int, NDArray[np.bool_], NDArray[np.bool_]]:
     """Get the number of branching points in a vessel mask.
 
@@ -362,7 +362,7 @@ def get_branching_point_count(
     return points_count, skeleton, branching_points
 
 
-def get_branching_points(skeleton: ArrayLike) -> NDArray[np.bool_]:
+def get_branching_points(skeleton: NDArray[np.bool_]) -> NDArray[np.bool_]:
     """Get the branching points in a skeleton using predefined structural elements.
 
     Source:
@@ -399,8 +399,8 @@ def get_branching_points(skeleton: ArrayLike) -> NDArray[np.bool_]:
 
 
 def draw_branch_point_circles(
-    skeleton: ArrayLike,
-    branching_points: ArrayLike,
+    skeleton: NDArray[np.bool_],
+    branching_points: NDArray[np.bool_],
     output_dir: str,
     filename: str = "skeleton_circled.png",
 ) -> None:
@@ -428,7 +428,7 @@ def draw_branch_point_circles(
 
 
 def compute_average_diameter(
-    mask: ArrayLike, skeleton: ArrayLike, voxel_size: float = 0.65
+    mask: NDArray[np.number], skeleton: NDArray[np.bool_], voxel_size: float = 0.65
 ) -> float:
     """Compute the average diameter of the vessels in a mask.
 
@@ -462,10 +462,12 @@ def compute_average_diameter(
     ValueError
         If the vessel mask is empty or no positive radii are found in the
         skeleton.
+    TypeError
+        If the computed average diameter is not a float.
     """
     if mask.sum() == 0:
         raise ValueError("Empty tissue mask: mean diameter is undefined")
-    distance = distance_transform_edt(mask)
+    distance = distance_transform_edt(mask.astype(np.float64))
     radii = distance * skeleton.astype(bool)
     positive_radii = radii[radii > 0]
     if positive_radii.size == 0:
@@ -474,10 +476,13 @@ def compute_average_diameter(
         )
     mean_radius = np.mean(positive_radii)
     mean_diameter = 2 * mean_radius
-    return mean_diameter * voxel_size
+    result = mean_diameter * voxel_size
+    if not isinstance(result, float):
+        raise TypeError(f"Expected float, got {type(result)}")
+    return result
 
 
-def create_heatmap(image: ArrayLike, output_dir: str, square_size: int = 150) -> None:
+def create_heatmap(image: NDArray[np.number], output_dir: str, square_size: int = 150) -> None:
     """Create and save a heatmap of the vessel density in a brain slice.
 
     Parameters
@@ -547,6 +552,11 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
     -------
     list[int]
         The list of itk ids for the region and its descendants.
+
+    Raises
+    ------
+    TypeError
+        If the extracted itk ids are not a list.
     """
     # Setup temporary directory if not given. Track whether WE created it
     # so the cleanup runs unconditionally (the pre-fix code reassigned
@@ -560,6 +570,7 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
         temp_dir = tempfile.TemporaryDirectory()
         data_dir = temp_dir.name
 
+    itk_ids: list[Any] = []
     try:
         # Construct reference space and get itk ids
         from liom_toolkit.utils import construct_reference_space
@@ -569,8 +580,8 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
         _, labels = rs.export_itksnap_labels()
 
         # Get the itk ids for the region
-        region = structure_tree.get_structures_by_name([region])
-        region_id = region[0]["id"]
+        region_structures = structure_tree.get_structures_by_name([region])
+        region_id = region_structures[0]["id"]
         region_sub = structure_tree.descendant_ids([region_id])
         region_sub_acronyms = [
             region["acronym"] for region in structure_tree.get_structures_by_id(region_sub[0])
@@ -580,7 +591,9 @@ def generate_itk_id_list_of_region(region: str, data_dir: str = "") -> list[int]
         if use_temp and temp_dir is not None:
             temp_dir.cleanup()
 
-    return itk_ids
+    if not isinstance(itk_ids, list):
+        raise TypeError(f"Expected list, got {type(itk_ids)}")
+    return [int(x) for x in itk_ids]
 
 
 def create_filter_image(atlas: da.Array | Future[Any], region_ids: list[int]) -> da.Array:
@@ -597,10 +610,18 @@ def create_filter_image(atlas: da.Array | Future[Any], region_ids: list[int]) ->
     -------
     da.Array
         The filter image.
+
+    Raises
+    ------
+    TypeError
+        If the gathered filter image is not a Dask array.
     """
     client = dask_client_manager.get_client()
     filter_image = client.submit(da.isin, atlas, region_ids)
-    return client.gather(filter_image)
+    result = client.gather(filter_image)
+    if not isinstance(result, da.Array):
+        raise TypeError(f"Expected dask Array, got {type(result)}")
+    return result
 
 
 def filter_image_to_region(image_filter: da.Array, data: da.Array | Future[Any]) -> da.Array:
@@ -617,10 +638,18 @@ def filter_image_to_region(image_filter: da.Array, data: da.Array | Future[Any])
     -------
     da.Array
         The filtered image.
+
+    Raises
+    ------
+    TypeError
+        If the gathered filtered image is not a Dask array.
     """
     client = dask_client_manager.get_client()
     filtered_image = client.submit(da.where, image_filter, data, 0)
-    return client.gather(filtered_image)
+    result = client.gather(filtered_image)
+    if not isinstance(result, da.Array):
+        raise TypeError(f"Expected dask Array, got {type(result)}")
+    return result
 
 
 def compute_mask_area(mask: da.Array | Future[Any]) -> np.uint64:
@@ -639,4 +668,5 @@ def compute_mask_area(mask: da.Array | Future[Any]) -> np.uint64:
     client = dask_client_manager.get_client()
     total_area = client.submit(da.sum, mask)
     total_area = client.gather(total_area)
-    return total_area.compute()
+    result = total_area.compute()
+    return np.uint64(result)

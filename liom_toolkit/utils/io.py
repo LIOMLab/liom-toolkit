@@ -10,7 +10,7 @@ import dask.array as da
 import imageio.v3 as iio
 import numpy as np
 import zarr
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
@@ -47,8 +47,16 @@ def load_zarr(zarr_file: str) -> list[Node]:
     -------
     list[Node]
         The loaded zarr file.
+
+    Raises
+    ------
+    ValueError
+        If the zarr URL cannot be parsed.
     """
-    reader = Reader(parse_url(zarr_file))
+    zarr_location = parse_url(zarr_file)
+    if zarr_location is None:
+        raise ValueError(f"Could not parse zarr URL: {zarr_file}")
+    reader = Reader(zarr_location)
     return list(reader())
 
 
@@ -84,8 +92,16 @@ def load_zarr_transform_from_node(node: Node, resolution_level: int = 1) -> list
     -------
     list[float]
         The coordinate transform matching the resolution level.
+
+    Raises
+    ------
+    TypeError
+        If the loaded scale value is not a list.
     """
-    return node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
+    scale = node.metadata["coordinateTransformations"][resolution_level][0]["scale"]
+    if not isinstance(scale, list):
+        raise TypeError(f"Expected list for scale, got {type(scale)}")
+    return [float(s) for s in scale]
 
 
 def load_omero_channels(zarr_file: str) -> list[dict[str, Any]] | None:
@@ -128,7 +144,7 @@ def load_omero_channels(zarr_file: str) -> list[dict[str, Any]] | None:
 
 def save_atlas_to_zarr(
     zarr_file: str,
-    atlas: ArrayLike,
+    atlas: da.Array | NDArray[np.generic],
     scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
     chunks: tuple[int, int, int] = (128, 128, 128),
     resolution_level: int = 0,
@@ -241,7 +257,7 @@ def create_mask_from_zarr(
 
 
 def save_label_to_zarr(
-    label: ArrayLike,
+    label: da.Array | NDArray[np.generic],
     zarr_file: str,
     color_dict: list[dict[str, Any]],
     name: str,
@@ -300,9 +316,14 @@ def save_label_to_zarr(
         target_shape = nodes[0].data[0].shape
         if len(target_shape) == 4:
             target_shape = target_shape[1:]
+        if not isinstance(label, da.Array):
+            label = da.from_array(label)
         label = dask_resize(label, target_shape, order=0, preserve_range=True, anti_aliasing=False)
 
-    file = parse_url(zarr_file, mode="w").store
+    zarr_location = parse_url(zarr_file, mode="w")
+    if zarr_location is None:
+        raise ValueError(f"Could not parse zarr URL: {zarr_file}")
+    file = zarr_location.store
     root = zarr.group(store=file)
 
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axis_names)

@@ -13,7 +13,7 @@ import nrrd
 import numpy as np
 import zarr
 from natsort import natsorted
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 from ome_zarr.dask_utils import resize
 from ome_zarr.io import parse_url
 from tqdm.auto import tqdm
@@ -56,6 +56,11 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     -------
     da.Array
         The stacked channel data from the HDF5 file.
+
+    Raises
+    ------
+    TypeError
+        If the persisted result is not a Dask array.
     """
     client = dask_client_manager.get_client()
 
@@ -76,7 +81,10 @@ def load_hdf5(hdf5_file: str) -> da.Array:
     # case so the rechunk does not raise on shape/chunk dimension mismatch.
     chunks = (1, 128, 128, 128) if data.ndim == 4 else (128, 128, 128)
     data = da.rechunk(data, chunks=chunks)
-    return client.persist(data)
+    result = client.persist(data)
+    if not isinstance(result, da.Array):
+        raise TypeError(f"Expected dask Array, got {type(result)}")
+    return result
 
 
 def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
@@ -99,7 +107,7 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
 
 
 def save_zarr(
-    data: ArrayLike,
+    data: da.Array | NDArray[np.generic],
     zarr_file: str,
     scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
     chunks: tuple[int, int, int] = (128, 128, 128),
@@ -147,7 +155,10 @@ def save_zarr(
     # clearing primitive — not os.remove which only handles flat files).
     # Imported at module top to avoid a circular import with utils.zarr_writer.
     create_directory(Path(zarr_file), overwrite=True)
-    store = parse_url(zarr_file, mode="w").store
+    zarr_location = parse_url(zarr_file, mode="w")
+    if zarr_location is None:
+        raise ValueError(f"Could not parse zarr URL: {zarr_file}")
+    store = zarr_location.store
     root = zarr.group(store=store)
 
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, data.shape, axis_names)
@@ -238,10 +249,21 @@ def convert_nifti_to_zarr(
         The chunk size to use in the zarr file.
     transpose : bool
         Whether to transpose the data or not.
+
+    Raises
+    ------
+    ValueError
+        If the loaded NIfTI file is not a valid image.
     """
     print("Loading...")
     ni_img = nib.load(nifti_file)
-    data = da.from_array(ni_img.get_fdata())
+    # nib.load returns FileBasedImage; get_fdata is defined on SpatialImage
+    # subclasses. Access it via getattr to satisfy the type checker without
+    # changing runtime behavior.
+    get_fdata = getattr(ni_img, "get_fdata", None)
+    if get_fdata is None:
+        raise ValueError(f"Loaded NIfTI file is not a valid image: {nifti_file}")
+    data = da.from_array(np.asarray(get_fdata()))
     if transpose:
         data = da.transpose(data, (2, 1, 0))
     save_zarr(data, zarr_file, scales=scales, chunks=chunks)
@@ -346,6 +368,8 @@ def create_full_zarr_volume(
     ------
     ImportError
         If ANTsPy is not installed.
+    ValueError
+        If the atlas node is not found in the zarr file.
     """
     try:
         import ants
@@ -434,10 +458,12 @@ def create_full_zarr_volume(
     pbar.set_postfix({"step": "Creating final mask"})
     nodes = load_zarr(zarr_file)
     atlas_node = load_node_by_name(nodes, "atlas")
+    if atlas_node is None:
+        raise ValueError(f"Atlas node not found in {zarr_file}")
     atlas = load_zarr_image_from_node(atlas_node, 0)
 
     # Set all non-zero pixels of the atlas to 1
-    atlas[atlas > 0] = 1
+    atlas = da.where(atlas > 0, 1, atlas)
 
     # Save to zarr
     atlas = atlas.astype("int8")

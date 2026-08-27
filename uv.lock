@@ -1393,6 +1393,7 @@ dev = [
     { name = "sphinxcontrib-apidoc" },
     { name = "ty" },
     { name = "types-opencv-python" },
+    { name = "types-openpyxl" },
     { name = "types-tqdm" },
 ]
 
@@ -1443,6 +1444,7 @@ dev = [
     { name = "sphinxcontrib-apidoc" },
     { name = "ty", specifier = "==0.0.74" },
     { name = "types-opencv-python", specifier = ">=1.0.11" },
+    { name = "types-openpyxl", specifier = ">=3.1.5.20260827" },
     { name = "types-tqdm" },
 ]
 
@@ -3449,6 +3451,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/be/62/40b12e04eef75538df58d30a9b10a62633348570387747a977de92935a2a/types_opencv_python-1.0.11.tar.gz", hash = "sha256:9ddbe4bd60750a1994c1069b0bad3890b3101c9c4dc35d7eb8bbf53936f65c8b", size = 155646, upload-time = "2026-02-23T09:49:17.531Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/17/3d/7442e465136b4912df2768bd99feb4105cc7cc903f8d972b33194fc36116/types_opencv_python-1.0.11-py3-none-any.whl", hash = "sha256:d23cd8e834bff5f0568289391949951aa6d038ff847cbb8489aa7dfac2bb8fd3", size = 172911, upload-time = "2026-02-23T09:49:15.834Z" },
+]
+
+[[package]]
+name = "types-openpyxl"
+version = "3.1.5.20260827"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/6b/ce650ce7754a2bce3ca1dfbce7f7441df092e2dc6047d00e04f840c2b56e/types_openpyxl-3.1.5.20260827.tar.gz", hash = "sha256:be8b605fb99cfd7d5f5576d4a508e8ec44be2dd15b85157c559080de6384be34", size = 101985, upload-time = "2026-08-27T12:06:18.927Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/23/9708c0895d237205ab2b31c06f97d72294f69789ff9923ff7f4aa2126d6b/types_openpyxl-3.1.5.20260827-py3-none-any.whl", hash = "sha256:94e176d871d12e3cbc34f8fb03dc14db2a4245a6690791daf16fc7b08fd67869", size = 165885, upload-time = "2026-08-27T12:06:17.88Z" },
 ]
 
 [[package]]

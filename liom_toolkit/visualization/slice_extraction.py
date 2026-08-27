@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 import imageio.v3 as iio
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from ome_zarr.reader import Node
 
 from liom_toolkit.utils import convert_to_png_for_saving
@@ -207,7 +207,7 @@ def extract_and_save_slices_from_zarr(
 
 
 def colour_image(
-    slice_image: ArrayLike, colour_dict: list[dict[str, int | Sequence[int]]]
+    slice_image: NDArray[np.generic], colour_dict: list[dict[str, int | Sequence[int]]]
 ) -> NDArray[np.uint8]:
     """Colour a labelled slice image based on a colour dictionary.
 
@@ -229,6 +229,11 @@ def colour_image(
     -------
     NDArray[np.uint8]
         RGB-coloured image of shape ``(H, W, 3)`` with uint8 dtype.
+
+    Raises
+    ------
+    TypeError
+        If a label's ``rgba`` entry is not a sequence.
     """
     slice_png = np.zeros_like(slice_image, dtype="uint8")
 
@@ -238,6 +243,9 @@ def colour_image(
     # Apply colour dict to image
     for i in range(len(colour_dict)):
         x, y = np.where(slice_image == colour_dict[i]["label-value"])
-        slice_png[x, y, :] = colour_dict[i]["rgba"][0:3]
+        rgba = colour_dict[i]["rgba"]
+        if not isinstance(rgba, Sequence):
+            raise TypeError(f"Expected rgba to be a sequence, got {type(rgba)}")
+        slice_png[x, y, :] = rgba[0:3]
 
     return slice_png

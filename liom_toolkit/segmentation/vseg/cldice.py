@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
 from skimage.morphology import skeletonize
 
 
-def cl_score(image: ArrayLike, skeleton: ArrayLike) -> float:
+def cl_score(image: NDArray[np.number], skeleton: NDArray[np.number]) -> float:
     """Compute the skeleton volume intersection.
 
     Parameters
@@ -22,10 +22,10 @@ def cl_score(image: ArrayLike, skeleton: ArrayLike) -> float:
     float
         The computed skeleton volume intersection ratio.
     """
-    return np.sum(image * skeleton) / np.sum(skeleton)
+    return float(np.sum(image * skeleton) / np.sum(skeleton))
 
 
-def cl_dice(image_predicted: ArrayLike, image_truth: ArrayLike) -> float:
+def cl_dice(image_predicted: NDArray[np.number], image_truth: NDArray[np.number]) -> float:
     """Compute the clDice metric.
 
     Parameters

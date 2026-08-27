@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import imageio.v3 as iio
 import natsort
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from PIL import Image
 from skimage.color import rgb2gray
 from skimage.exposure import equalize_adapthist
@@ -32,7 +32,7 @@ def create_dir(path: str) -> None:
         Path(path).mkdir(parents=True)
 
 
-def calculate_metrics(y_true: ArrayLike, y_pred: ArrayLike) -> list[float]:
+def calculate_metrics(y_true: NDArray[np.number], y_pred: NDArray[np.number]) -> list[float]:
     """Calculate metrics between ground truth and prediction.
 
     Metrics are F1, Recall, Precision, Accuracy, and Jaccard.
@@ -68,24 +68,19 @@ def calculate_metrics(y_true: ArrayLike, y_pred: ArrayLike) -> list[float]:
             "segmentation metrics of the LIOM toolkit."
         ) from e
 
-    y_true = y_true > 0.5
-    y_true = y_true.astype(np.uint8)
-    y_true = y_true.reshape(-1)
+    y_true_bin = (y_true > 0.5).astype(np.uint8).reshape(-1)
+    y_pred_bin = (y_pred > 0.5).astype(np.uint8).reshape(-1)
 
-    y_pred = y_pred > 0.5
-    y_pred = y_pred.astype(np.uint8)
-    y_pred = y_pred.reshape(-1)
-
-    score_f1 = f1_score(y_true, y_pred)
-    score_recall = recall_score(y_true, y_pred)
-    score_precision = precision_score(y_true, y_pred)
-    score_acc = accuracy_score(y_true, y_pred)
-    score_jaccard = jaccard_score(y_true, y_pred)
+    score_f1 = f1_score(y_true_bin, y_pred_bin)
+    score_recall = recall_score(y_true_bin, y_pred_bin)
+    score_precision = precision_score(y_true_bin, y_pred_bin)
+    score_acc = accuracy_score(y_true_bin, y_pred_bin)
+    score_jaccard = jaccard_score(y_true_bin, y_pred_bin)
 
     return [score_f1, score_recall, score_acc, score_jaccard, score_precision]
 
 
-def process_image(image: ArrayLike, device: torch.device) -> torch.Tensor:
+def process_image(image: NDArray[np.generic], device: torch.device) -> torch.Tensor:
     """Process an image to present to the U-Net model.
 
     Parameters
@@ -145,13 +140,13 @@ def numeric_filesort(path: str, folder: str = "images", extension: str = "png") 
 
 # Add a inferred patch to empty array
 def add_patch_to_empty_array(
-    inference: NDArray[np.generic],
-    pred_y: NDArray[np.generic],
+    inference: NDArray[np.floating],
+    pred_y: NDArray[np.floating],
     coords: tuple[int, int],
     stride: int,
     overlap: int,
     size: tuple[int, int],
-) -> NDArray[np.generic]:
+) -> NDArray[np.floating]:
     """Add an inferred patch to an empty array.
 
     Parameters
@@ -184,6 +179,7 @@ def add_patch_to_empty_array(
     if (coords[1] > 0 or coords[0] > 0) and overlap > 0:
         x1 = patch_x1
         y1 = patch_y1
+        to_add: list[tuple[int, int, int, int]] = []
 
         # If this is the first row (cannot be the first patch)
         if coords[0] == 0:
@@ -223,7 +219,9 @@ def add_patch_to_empty_array(
     return inference
 
 
-def crop_image(image: ArrayLike, size: tuple[int, int], stride: int) -> NDArray[np.generic]:
+def crop_image(
+    image: NDArray[np.generic], size: tuple[int, int], stride: int
+) -> NDArray[np.generic]:
     """Crop an image to a specific size and stride.
 
     Parameters
@@ -265,7 +263,7 @@ def create_patches(
     size: tuple[int, int] = (256, 256),
     stride: int = 64,
     norm: bool = False,
-    norm_params: tuple[float, float] = (10, 0.05),
+    norm_params: tuple[int, float] = (10, 0.05),
 ) -> tuple[list[NDArray[np.generic]], tuple[int, ...], tuple[int, ...], NDArray[np.generic]]:
     """Create patches from an image.
 
@@ -325,7 +323,9 @@ def create_patches(
     return patches, image.shape, patch.shape, image_clahe
 
 
-def apply_clahe(image: ArrayLike, kernel_size: int, clip_limit: float) -> NDArray[np.generic]:
+def apply_clahe(
+    image: NDArray[np.generic], kernel_size: int, clip_limit: float
+) -> NDArray[np.generic]:
     """Apply CLAHE (adaptive histogram equalization) to an image.
 
     Parameters

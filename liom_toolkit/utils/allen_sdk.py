@@ -213,12 +213,14 @@ def _build_structure_metadata(structures: list[dict[str, Any]]) -> pd.DataFrame:
     ValueError
         If ``structures`` is empty (the download may have failed or the cache
         is corrupt).
+    TypeError
+        If the constructed metadata is not a pandas DataFrame.
     """
     if not structures:
         raise ValueError(
             "Structure tree is empty — the download may have failed or the cache is corrupt."
         )
-    return pd.DataFrame(
+    df = pd.DataFrame(
         [
             {
                 "IDX": node["id"],
@@ -233,12 +235,15 @@ def _build_structure_metadata(structures: list[dict[str, Any]]) -> pd.DataFrame:
             for node in structures
         ]
     ).loc[:, ("IDX", "-R-", "-G-", "-B-", "-A-", "VIS", "MSH", "LABEL")]
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"Expected DataFrame, got {type(df)}")
+    return df
 
 
 def _remap_to_id_type(
     annotation: NDArray[np.generic],
     label_description: pd.DataFrame,
-    id_type: type = np.uint16,
+    id_type: type[np.integer] = np.uint16,
 ) -> tuple[NDArray[np.generic], pd.DataFrame]:
     """Remap annotation-volume voxels and DataFrame IDX to fit ``id_type``.
 
@@ -294,7 +299,7 @@ def _remap_to_id_type(
 # ---------------------------------------------------------------------------
 
 
-def load_allen_template(atlas_file: str, resolution: int, padding: bool) -> ANTsImage:
+def load_allen_template(atlas_file: str, resolution: float, padding: bool) -> ANTsImage:
     """Load the allen template and set the resolution and direction (PIR).
 
     Parameters
@@ -703,7 +708,7 @@ class _ReferenceSpace:
         self.structure_tree = structure_tree
 
     def export_itksnap_labels(
-        self, id_type: type = np.uint16
+        self, id_type: type[np.integer] = np.uint16
     ) -> tuple[NDArray[np.generic], pd.DataFrame]:
         label_description = _build_structure_metadata(self.structure_tree.structures)
         return _remap_to_id_type(self.annotation, label_description, id_type)
