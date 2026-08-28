@@ -1,5 +1,9 @@
 name: CI
 
+# CI runs on PRs to main (the develop→main merge gate) and on pushes to
+# main (to confirm main stays green after a merge). Pushes to develop do
+# NOT trigger CI — work happens on develop and the gate fires when the PR
+# is opened.
 on:
   push:
     branches: [main]
@@ -43,21 +47,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Two gating legs, both with all extras (ai + antspy):
+        #   3.12+all — antspyx 0.6.3 from PyPI (cp312 wheel)
+        #   3.14+all — antspyx 0.6.4 from this repo's antspyx-cp314 wheel
+        #              release (flat index in [tool.uv.sources])
+        # Both legs install torch + ants, so importorskip-gated tests run
+        # for real and the 60% coverage gate (from pyproject.toml addopts)
+        # is enforced on both.
         python-version: ["3.12", "3.14"]
-        install-scope: ["core", "all"]
-        # 3.12+all and 3.14+core are GATING; 3.14+all is BEST-EFFORT.
-        # 3.12+core is redundant with 3.12+all (all includes core) — drop it
-        # to keep the matrix at 3 jobs: 3.12+all, 3.14+core, 3.14+all.
-        exclude:
-          - python-version: "3.12"
-            install-scope: "core"
-        include:
-          - python-version: "3.14"
-            install-scope: "all"
-            continue-on-error: true   # antspyx source build on 3.14 (no wheel) — non-gating
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.continue-on-error || false }}
-    timeout-minutes: 30   # antspyx source build can be slow on a cache miss
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,43 +66,13 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-          cache-suffix: "${{ matrix.python-version }}-${{ matrix.install-scope }}"
+          cache-suffix: "${{ matrix.python-version }}-all"
           cache-python: true
           python-version: "${{ matrix.python-version }}"
-      - name: Install dependencies (core)
-        if: matrix.install-scope == 'core'
-        run: uv sync --no-all-extras
-      - name: Install dependencies (all extras — 3.12)
-        if: matrix.install-scope == 'all' && matrix.python-version == '3.12'
-        run: uv sync --extra all
-      # 3.14+all: antspyx has no cp314 wheel and its source build fails
-      # (statsmodels 0.9.0 / ITK / VTK C++ compile). Drop the antspy extra on
-      # 3.14 and install only the ai extras so the leg still exercises torch.
-      # The leg keeps continue-on-error: true (best-effort). Registration
-      # tests on 3.14 are mock-only (see the -m "not antspy" flag below).
-      - name: Install dependencies (ai extras only — 3.14, antspy dropped)
-        if: matrix.install-scope == 'all' && matrix.python-version == '3.14'
-        run: uv sync --extra ai
-      # Run pytest on both 3.12 and 3.14 before publish. Optional-extra tests
-      # are marker-gated + pytest.importorskip, so they skip cleanly wherever
-      # the extra is absent (core install).
-      #
-      # Coverage gate: the 3.12+all leg enforces the 60% floor from
-      # pyproject.toml addopts. The 3.14+core and 3.14+all legs override to
-      # --cov-fail-under=0 because importorskip-gated tests skip there (their
-      # coverage sits at ~10-20%); a 60% gate on those legs would be
-      # permanently red and block releases. pytest-cov uses the last
-      # --cov-fail-under value, so the CLI override wins over addopts.
-      - name: Run pytest (3.12+all — 60% coverage gate enforced)
-        if: matrix.python-version == '3.12' && matrix.install-scope == 'all'
-        run: uv run pytest -q
-        env:
-          CI: "true"   # hypothesis CI profile auto-activates
-      - name: Run pytest (3.14 legs — coverage gate disabled, antspy deselected)
-        if: "!(matrix.python-version == '3.12' && matrix.install-scope == 'all')"
-        # antspyx is not installed on 3.14 (no cp314 wheel), so the
-        # @pytest.mark.antspy real round-trip tests are deselected. The
-        # mock-orchestration registration tests are unmarked and still run.
-        run: uv run pytest -q --cov-fail-under=0 -m "not antspy"
+      - run: uv sync --extra all
+      # Both legs run the full suite with the 60% coverage gate from
+      # pyproject.toml addopts. antspyx is installed on both, so
+      # @pytest.mark.antspy real round-trip tests run (not deselected).
+      - run: uv run pytest -q
         env:
           CI: "true"   # hypothesis CI profile auto-activates

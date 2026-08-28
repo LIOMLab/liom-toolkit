@@ -7,22 +7,75 @@ name: Release
 # github-release job is gated on publish success so a failed PyPI upload
 # cannot create an orphan GitHub Release.
 #
-# IMPORTANT: this workflow is tag-triggered and does NOT gate on the CI
-# workflow (no `workflow_run` dependency). The publish job uploads to PyPI
-# regardless of whether CI is green or red. Before cutting a release tag,
-# the operator MUST verify that the CI workflow on the commit being tagged
-# is fully green (especially the gating 3.12+all leg). Shipping a
-# 5-Production/Stable release from a red CI commit violates the pre-release
-# confidence gate.
+# CI gating: the lint + test jobs re-run the CI gates on the tagged commit
+# and publish is gated on their success (needs: [lint, test]). This verifies
+# the EXACT commit being shipped, not just "CI was green on main at some
+# point." The gating legs mirror ci.yml: lint (ruff + ty on 3.14), then a
+# 2-leg test matrix (3.12+all, 3.14+all) — both with all extras (ai + antspy)
+# and the 60% coverage gate.
 on:
   push:
     tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a release in progress — could leave PyPI/GitHub in a partial state
 
 permissions:
   contents: read   # least-privilege default; per-job overrides below grant write where needed
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags for dynamic-version metadata extraction during uv sync
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: "lint-3.14-release"
+          cache-python: true
+          python-version: "3.14"   # lint on the highest supported version
+      - run: uv sync                   # installs dev group (ruff, ty) + core deps
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run ty check
+
+  test:
+    needs: lint
+    strategy:
+      fail-fast: true   # a release gate should fail fast — no point running 3.14 if 3.12 is red
+      matrix:
+        # Two gating legs, both with all extras (ai + antspy) — mirrors ci.yml.
+        #   3.12+all — antspyx 0.6.3 from PyPI (cp312 wheel)
+        #   3.14+all — antspyx 0.6.4 from this repo's antspyx-cp314 wheel release
+        # Both legs enforce the 60% coverage gate from pyproject.toml addopts.
+        python-version: ["3.12", "3.14"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags for dynamic-version metadata extraction during uv sync
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: "${{ matrix.python-version }}-all-release"
+          cache-python: true
+          python-version: "${{ matrix.python-version }}"
+      - run: uv sync --extra all
+      - run: uv run pytest -q
+        env:
+          CI: "true"   # hypothesis CI profile auto-activates
+
   publish:
+    needs: [lint, test]   # CI gate: do not publish if lint or tests fail on the tagged commit
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
