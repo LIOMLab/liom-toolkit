@@ -70,9 +70,10 @@ def main() -> None:
 
     Note
     ----
-    The ``--resume`` flag is accepted by the shared parent parser but not yet
-    threaded into ``build_template_for_resolution`` — the resume hook is added
-    in a follow-up plan. The flag is honoured once that hook lands.
+    The ``--resume`` flag is threaded through to
+    ``build_template_for_resolution``: completed template-build iterations
+    (whose rolling-latest template NIfTI artifact validates) are skipped and
+    the build continues from the first incomplete iteration.
 
     Raises
     ------
@@ -110,6 +111,7 @@ def main() -> None:
         template_resolution=args.template_resolution,
         atlas_resolution=args.atlas_resolution,
         iterations=args.iterations,
+        resume=args.resume,
     )
 
 

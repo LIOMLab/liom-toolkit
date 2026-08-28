@@ -85,9 +85,10 @@ def main() -> None:
 
     Note
     ----
-    The ``--resume`` flag is accepted by the shared parent parser but not yet
-    threaded into ``train_model`` — the resume hook is added in a follow-up
-    plan. The flag is honoured once that hook lands.
+    The ``--resume`` flag is threaded through to ``train_model``: the
+    manifest's ``last_completed_epoch`` is read and training continues from
+    ``last_completed_epoch + 1`` using the existing per-epoch
+    ``checkpoint.{epoch}.pth`` weights artifact.
 
     Raises
     ------
@@ -135,6 +136,7 @@ def main() -> None:
         wandb_project=args.wandb_project,
         pretrained_artifact=args.pretrained_artifact,
         wandb_mode=args.wandb_mode,
+        resume=args.resume,
     )
 
 
