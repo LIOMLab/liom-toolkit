@@ -131,8 +131,9 @@ evaluation is needed; on 3.14 it is a no-op.
 
 ## Optional dependencies
 
-Heavy/optional deps (`ants`, `torch`, `allensdk`, `wandb`) are extras — not
-installed by default. Modules that need them must lazy-import so the package
+Heavy/optional deps (`ants`, `torch`, `wandb`) are extras — not
+installed by default. The Allen atlas is downloaded directly (no extra).
+Modules that need them must lazy-import so the package
 imports cleanly with only core deps:
 
 1. Wrap the import: `try: import ants except ImportError: raise

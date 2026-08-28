@@ -2,11 +2,11 @@ Example Notebooks
 =================
 
 The notebooks below demonstrate end-to-end usage of **LIOM Toolkit**.
-Lightweight notebooks (conversion, mask saving, vessel density) execute
-live during the documentation build; heavy notebooks (templating, vessel
-segmentation, full vseg pipeline) render their stored outputs because
-they require the ``[ai]`` or ``[antspy]`` extras which cannot run on the
-ReadTheDocs build environment.
+Each notebook carries ``nbsphinx.execute = "never"`` metadata, so the
+ReadTheDocs build renders the API-verified code without re-executing —
+the notebooks reference lab data paths and heavy extras (``ants``,
+``torch``) that are not available in the RTD build environment. To see
+real outputs, run them locally with all extras installed.
 
 To run them locally, install all extras:
 

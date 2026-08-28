@@ -114,9 +114,12 @@ intersphinx_mapping = {
 nitpicky = False
 
 # -- nbsphinx (D-04, linum-basic pattern) -----------------------------------
-# "auto" executes notebooks only when outputs are missing; committed
-# notebooks carry stored outputs so the RTD Python 3.14 build (which cannot
-# install antspyx — no cp314 wheel) renders them without execution.
+# The default is "auto" (execute only when outputs are missing), but every
+# committed notebook sets per-notebook ``nbsphinx.execute = "never"`` metadata
+# (overriding this default) because the source notebooks ship without stored
+# outputs and the lab data paths / heavy extras (ants, torch) are not
+# available on the RTD Python 3.14 build (antspyx has no cp314 wheel). nbsphinx
+# therefore renders the API-verified code without re-executing on RTD.
 nbsphinx_execute = "auto"
 nbsphinx_kernel_name = "python3"
 nbsphinx_allow_errors = False

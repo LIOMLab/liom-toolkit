@@ -10,8 +10,9 @@ load_zarr`` rather than ``from liom_toolkit.utils.io import load_zarr``.
 
 The top-level ``liom_toolkit/__init__.py`` is intentionally empty — importing
 the package root pulls nothing heavy. Heavy/optional dependencies
-(``ants``, ``torch``, ``allensdk``) are extras, lazy-imported at module top
-or inside the function that needs them (see :doc:`contributing`).
+(``ants``, ``torch``) are extras, lazy-imported at module top
+or inside the function that needs them (see :doc:`contributing`). The Allen
+atlas is downloaded directly — no extra is required for it.
 
 conversion/
 ===========

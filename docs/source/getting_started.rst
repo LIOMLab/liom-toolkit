@@ -27,8 +27,9 @@ Verify the install and inspect the available command-line tools:
    liom-create-mask --help
 
 The package imports cleanly with only the core dependencies installed —
-heavy/optional dependencies (``ants``, ``torch``, ``allensdk``) are extras
-that degrade gracefully (see `Optional extras`_).
+heavy/optional dependencies (``ants``, ``torch``) are extras
+that degrade gracefully (see `Optional extras`_). The Allen atlas is
+downloaded directly — no extra is required for it.
 
 Conda environment
 =================
