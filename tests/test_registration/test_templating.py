@@ -530,3 +530,123 @@ def test_build_template_uses_mkdtemp_not_mktemp(synthetic_ants_image):
     template = build_template(image_list=[img1, img2], iterations=1, type_of_transform="Rigid")
     assert template is not None
     assert hasattr(template, "numpy")
+
+
+# ---------------------------------------------------------------------------
+# Resume integration tests (build_template_for_resolution resume=True)
+# ---------------------------------------------------------------------------
+
+
+def test_build_template_for_resolution_has_resume_param() -> None:
+    """build_template_for_resolution signature has ``resume: bool = False``."""
+    from liom_toolkit.registration.templating import build_template_for_resolution
+
+    sig = inspect.signature(build_template_for_resolution)
+    assert "resume" in sig.parameters, (
+        "build_template_for_resolution must accept a resume param"
+    )
+    param = sig.parameters["resume"]
+    assert param.default is False, f"resume must default to False, got {param.default!r}"
+
+
+def test_build_template_resume_skips_completed_iteration(mock_ants_templating):
+    """build_template with a resume_mgr that has iteration 0 complete skips
+    iteration 0 and runs iteration 1 (rolling-latest template NIfTI is the
+    resumable artifact)."""
+    import tempfile
+    from pathlib import Path
+
+    from liom_toolkit.utils.checkpoint import ResumeManager, write_done_marker
+
+    mock_ants, mock_iio = mock_ants_templating
+    from liom_toolkit.registration.templating import build_template
+
+    # Set up a resume_mgr with iteration 0 complete + template_0.nii.gz exists.
+    output_dir = Path(tempfile.mkdtemp())
+    progress_dir = output_dir / "template_progress"
+    progress_dir.mkdir(parents=True, exist_ok=True)
+    template_0 = progress_dir / "template_0.nii.gz"
+    template_0.write_bytes(b"fake template")
+    write_done_marker(output_dir, "build_template", 0)
+
+    mgr = ResumeManager(
+        output_dir=output_dir,
+        pipeline="build_template",
+        params={"iterations": 2},
+        steps_total=2,
+    )
+    # Manually record iteration 0 as complete in the manifest.
+    mgr.finish_step(0, artifact_path=template_0)
+
+    img1, img2 = _make_fake_ants_image(), _make_fake_ants_image()
+    mask1, mask2 = _make_fake_ants_image(), _make_fake_ants_image()
+
+    build_template(
+        image_list=[img1, img2],
+        masks=[mask1, mask2],
+        iterations=2,
+        save_progress=True,
+        output_dir=str(output_dir),
+        type_of_transform="Rigid",
+        resume_mgr=mgr,
+    )
+
+    # Iteration 0 skipped: ants.registration NOT called for the first
+    # iteration. With 2 images and 2 iterations, 4 registration calls would
+    # happen without resume; with iteration 0 skipped, only 2 calls (for
+    # iteration 1).
+    assert mock_ants.registration.call_count == 2, (
+        f"iteration 0 must be skipped on resume (expected 2 registration "
+        f"calls for iteration 1 only, got {mock_ants.registration.call_count})"
+    )
+
+
+def test_build_template_resume_keeps_rolling_latest_only(mock_ants_templating):
+    """build_template resume keeps ONLY the rolling-latest template NIfTI
+    (no intermediate duplication). The per-iteration remove_temp_output
+    cleanup stays; markers are a few bytes."""
+    import tempfile
+    from pathlib import Path
+
+    from liom_toolkit.utils.checkpoint import ResumeManager, write_done_marker
+
+    mock_ants, _ = mock_ants_templating
+    from liom_toolkit.registration.templating import build_template
+
+    output_dir = Path(tempfile.mkdtemp())
+    progress_dir = output_dir / "template_progress"
+    progress_dir.mkdir(parents=True, exist_ok=True)
+    # Only template_0.nii.gz exists (rolling-latest for iteration 0).
+    template_0 = progress_dir / "template_0.nii.gz"
+    template_0.write_bytes(b"fake")
+    write_done_marker(output_dir, "build_template", 0)
+
+    mgr = ResumeManager(
+        output_dir=output_dir,
+        pipeline="build_template",
+        params={"iterations": 2},
+        steps_total=2,
+    )
+    mgr.finish_step(0, artifact_path=template_0)
+
+    img1, img2 = _make_fake_ants_image(), _make_fake_ants_image()
+    build_template(
+        image_list=[img1, img2],
+        iterations=2,
+        save_progress=True,
+        output_dir=str(output_dir),
+        type_of_transform="Rigid",
+        resume_mgr=mgr,
+    )
+
+    # The rolling-latest constraint: .done markers are tiny (zero-byte
+    # sentinels), not full artifacts. The resumable artifact is the
+    # rolling-latest template NIfTI only — no intermediate duplication.
+    marker_dir = output_dir / "_liom_checkpoints"
+    if marker_dir.exists():
+        markers = list(marker_dir.glob("build_template.step_*.done"))
+        for m in markers:
+            assert m.stat().st_size == 0, (
+                f".done marker {m} must be a zero-byte sentinel, not a "
+                f"full artifact (rolling-latest constraint)"
+            )

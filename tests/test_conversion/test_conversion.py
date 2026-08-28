@@ -37,6 +37,7 @@ patches at the import site inside ``conversion.py`` — NOT at
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import h5py
@@ -382,4 +383,222 @@ def test_load_hdf5_no_file_descriptor_leak(tmp_path):
         f"load_hdf5 leaked OS file descriptors: {fd_before} before -> "
         f"{fd_after} after 50 repeated calls (the with h5py.File context "
         "manager must release the fd on every exit path)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Resume integration tests (create_full_zarr_volume resume=True)
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_ants():
+    """Inject a MagicMock as the ``ants`` module so ``import ants`` succeeds.
+
+    Mirrors the conftest ``fake_ants`` fixture and the helper in
+    ``test_use_custom_atlas.py``. Returns the fake; caller MUST pop
+    ``sys.modules['ants']`` on teardown.
+    """
+    fake = MagicMock()
+    fake_image = MagicMock()
+    fake_image.numpy.return_value = np.zeros((4, 4, 4), dtype=np.uint16)
+    fake_image.orientation = "RAS"
+    fake.from_numpy.return_value = fake_image
+    fake.image_read.return_value = fake_image
+    fake.reorient_image2.return_value = fake_image
+    sys.modules["ants"] = fake
+    return fake
+
+
+def _write_partial_manifest(
+    output_dir,
+    pipeline,
+    params,
+    completed_steps,
+    complete=False,
+    steps_total=5,
+):
+    """Write a manifest + .done markers + a fake zarr artifact for the given steps."""
+    from pathlib import Path
+
+    from liom_toolkit.utils.checkpoint import compute_params_hash, write_done_marker, write_manifest
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    zarr_artifact = output_dir / "out.zarr"
+    zarr_artifact.mkdir(exist_ok=True)  # fake zarr store dir
+    manifest_path = output_dir / "_liom_checkpoints" / f"{pipeline}.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = {str(i): str(zarr_artifact) for i in completed_steps}
+    for i in completed_steps:
+        write_done_marker(output_dir, pipeline, i)
+    write_manifest(
+        manifest_path,
+        {
+            "params_hash": compute_params_hash(params),
+            "completed_steps": list(completed_steps),
+            "complete": complete,
+            "steps_total": steps_total,
+            "artifacts": artifacts,
+        },
+    )
+    return zarr_artifact
+
+
+def _run_create_full_zarr_volume_resume(output_dir, resume, params=None):
+    """Call create_full_zarr_volume with mocked deps; return the helper mocks.
+
+    Returns a dict of the patched pipeline-step mocks so the caller can assert
+    which steps ran (call_count) and which were skipped.
+    """
+    import contextlib
+
+    from liom_toolkit.conversion.conversion import create_full_zarr_volume
+
+    _install_fake_ants()
+    zarr_file = str(output_dir / "out.zarr")
+    base_params = {
+        "auto_fluo_file": "auto.h5",
+        "vascular_file": "vasc.h5",
+        "zarr_file": zarr_file,
+        "template_path": "template.nrrd",
+        "atlas_path": "atlas.nrrd",
+        "use_custom_atlas": True,
+        "scales": (6.5, 6.5, 6.5),
+        "chunks": (16, 16, 16),
+    }
+    if params is not None:
+        base_params.update(params)
+
+    targets = [
+        "liom_toolkit.conversion.conversion.create_multichannel_zarr",
+        "liom_toolkit.conversion.conversion.create_mask_from_zarr",
+        "liom_toolkit.conversion.conversion.save_atlas_to_zarr",
+        "liom_toolkit.conversion.conversion.load_node_by_name",
+        "liom_toolkit.conversion.conversion.load_zarr_image_from_node",
+        "liom_toolkit.conversion.conversion.generate_label_color_dict_mask",
+        "liom_toolkit.conversion.conversion.save_label_to_zarr",
+        "liom_toolkit.conversion.conversion.resize",
+    ]
+    stack = contextlib.ExitStack()
+    mocks = {}
+    for t in targets:
+        mocks[t.rsplit(".", 1)[-1]] = stack.enter_context(patch(t))
+    try:
+        with (
+            patch("liom_toolkit.utils.allen_sdk.download_allen_atlas") as dl_mock,
+            patch("liom_toolkit.registration.align_annotations_to_volume") as align_mock,
+            patch("liom_toolkit.utils.ants.load_ants_image_from_node") as load_ants_mock,
+            patch("liom_toolkit.conversion.conversion.load_zarr") as load_zarr_mock,
+        ):
+            target_image = MagicMock()
+            target_image.orientation = "RAS"
+            load_ants_mock.return_value = target_image
+            fake_atlas = MagicMock()
+            fake_atlas.numpy.return_value = np.zeros((4, 4, 4), dtype=np.uint16)
+            dl_mock.return_value = (fake_atlas, MagicMock())
+            mocks["load_zarr_image_from_node"].return_value = np.zeros((4, 4, 4), dtype=np.uint16)
+            node0 = MagicMock()
+            node0.data = [MagicMock()]
+            node0.data[0].shape = (4, 4, 4)
+            load_zarr_mock.return_value = [node0]
+
+            with stack:
+                create_full_zarr_volume(
+                    auto_fluo_file=base_params["auto_fluo_file"],
+                    vascular_file=base_params["vascular_file"],
+                    zarr_file=base_params["zarr_file"],
+                    template_path=base_params["template_path"],
+                    atlas_path=base_params["atlas_path"],
+                    use_custom_atlas=base_params["use_custom_atlas"],
+                    scales=base_params["scales"],
+                    chunks=base_params["chunks"],
+                    resume=resume,
+                )
+            mocks["download_allen_atlas"] = dl_mock
+            mocks["align_annotations_to_volume"] = align_mock
+    finally:
+        sys.modules.pop("ants", None)
+    return mocks
+
+
+def test_resume_create_full_zarr_skips_completed(tmp_path):
+    """create_full_zarr_volume(resume=True) skips completed step 0
+    (create_multichannel_zarr) and continues from step 1 (mask + align)."""
+    params = {
+        "auto_fluo_file": "auto.h5",
+        "vascular_file": "vasc.h5",
+        "zarr_file": str(tmp_path / "out.zarr"),
+        "template_path": "template.nrrd",
+        "atlas_path": "atlas.nrrd",
+        "use_custom_atlas": True,
+        "scales": (6.5, 6.5, 6.5),
+        "chunks": (16, 16, 16),
+    }
+    _write_partial_manifest(tmp_path, "create_full_zarr_volume", params, completed_steps=[0])
+    mocks = _run_create_full_zarr_volume_resume(tmp_path, resume=True, params=params)
+    # Step 0 skipped (create_multichannel_zarr NOT called).
+    assert mocks["create_multichannel_zarr"].call_count == 0, (
+        "step 0 (create_multichannel_zarr) must be skipped on resume"
+    )
+    # Step 1 ran (mask + align — create_mask_from_zarr + align called).
+    assert mocks["create_mask_from_zarr"].called, (
+        "step 1 (create_mask_from_zarr) must run on resume from completed_steps=[0]"
+    )
+    assert mocks["align_annotations_to_volume"].called, (
+        "step 1 (align_annotations) must run on resume from completed_steps=[0]"
+    )
+
+
+def test_resume_create_full_zarr_complete_noop(tmp_path):
+    """create_full_zarr_volume(resume=True) on a complete pipeline is a no-op
+    (all steps skipped — idempotent)."""
+    params = {
+        "auto_fluo_file": "auto.h5",
+        "vascular_file": "vasc.h5",
+        "zarr_file": str(tmp_path / "out.zarr"),
+        "template_path": "template.nrrd",
+        "atlas_path": "atlas.nrrd",
+        "use_custom_atlas": True,
+        "scales": (6.5, 6.5, 6.5),
+        "chunks": (16, 16, 16),
+    }
+    _write_partial_manifest(
+        tmp_path,
+        "create_full_zarr_volume",
+        params,
+        completed_steps=[0, 1, 2],
+        complete=True,
+    )
+    mocks = _run_create_full_zarr_volume_resume(tmp_path, resume=True, params=params)
+    # No step runs (idempotent).
+    assert mocks["create_multichannel_zarr"].call_count == 0
+    assert mocks["create_mask_from_zarr"].call_count == 0
+    assert mocks["align_annotations_to_volume"].call_count == 0
+    assert mocks["save_atlas_to_zarr"].call_count == 0
+    assert mocks["save_label_to_zarr"].call_count == 0
+
+
+def test_resume_create_full_zarr_stale_params(tmp_path):
+    """create_full_zarr_volume(resume=True) with a stale params_hash
+    invalidates the checkpoint and re-runs from scratch (all steps run)."""
+    stale_params = {
+        "auto_fluo_file": "different.h5",
+        "vascular_file": "vasc.h5",
+        "zarr_file": str(tmp_path / "out.zarr"),
+        "template_path": "template.nrrd",
+        "atlas_path": "atlas.nrrd",
+        "use_custom_atlas": True,
+        "scales": (6.5, 6.5, 6.5),
+        "chunks": (16, 16, 16),
+    }
+    # Write manifest with the stale params, then run with different params.
+    _write_partial_manifest(
+        tmp_path, "create_full_zarr_volume", stale_params, completed_steps=[0]
+    )
+    current_params = dict(stale_params)
+    current_params["auto_fluo_file"] = "auto.h5"  # different -> stale
+    mocks = _run_create_full_zarr_volume_resume(tmp_path, resume=True, params=current_params)
+    # Stale -> re-run from scratch (step 0 runs).
+    assert mocks["create_multichannel_zarr"].called, (
+        "stale params_hash must invalidate the checkpoint -> step 0 re-runs"
     )
