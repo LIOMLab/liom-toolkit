@@ -441,6 +441,12 @@ def create_full_zarr_volume(
     with tempfile.TemporaryDirectory() as temp_dir:
         resolution_level = 2
 
+        # Progress bar total is 4 (3 resumable steps + 1 cosmetic "Done"
+        # milestone), while ResumeManager steps_total=3 (only the resumable
+        # steps are checkpointed). The mismatch is intentional: the 4th
+        # pbar.update(1) below is a UI-only "Done" tick, not a checkpointable
+        # step. steps_total must stay 3 so is_complete() and start_step/
+        # finish_step align with the 3 real resumable stages.
         pbar = tqdm(total=4, desc="Creating zarr volume")
         pbar.set_postfix({"step": "Creating multichannel zarr"})
         if _should_run(0):
