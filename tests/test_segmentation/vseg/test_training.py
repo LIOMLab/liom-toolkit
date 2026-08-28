@@ -94,6 +94,11 @@ def _install_fake_wandb(epochs, learning_rate, batch_size):
     The fake ``wandb.config`` is populated with real values for the
     hyperparameters train_model reads (``config.epochs``, ``config.learning_rate``,
     ``config.batch_size``) so torch.optim.Adam gets a real float lr.
+
+    Saves the original ``sys.modules["wandb"]`` entry (if any) so
+    ``_run_train_model_resume`` can restore it on teardown instead of popping,
+    which would force a re-import of the real wandb on the next test in the
+    same worker.
     """
     fake = MagicMock()
     fake.init.return_value = MagicMock()
@@ -106,6 +111,7 @@ def _install_fake_wandb(epochs, learning_rate, batch_size):
     fake.log.return_value = None
     fake.Artifact.return_value = MagicMock()
     fake.run.dir = "/tmp/fake_wandb_run"
+    fake._saved = sys.modules.get("wandb")
     sys.modules["wandb"] = fake
     return fake
 
@@ -252,7 +258,11 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
             "manifest_path": Path(output_train) / "_liom_checkpoints" / "train_model.json",
         }
     finally:
-        sys.modules.pop("wandb", None)
+        saved = getattr(sys.modules.get("wandb"), "_saved", None)
+        if saved is None:
+            sys.modules.pop("wandb", None)
+        else:
+            sys.modules["wandb"] = saved
 
 
 def test_resume_train_model_loads_epoch(tmp_path):

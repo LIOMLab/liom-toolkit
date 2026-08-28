@@ -71,7 +71,8 @@ def fake_ants():
     Mirrors ``tests/test_conversion/test_use_custom_atlas.py:_install_fake_ants``.
     ``fake.from_numpy`` / ``fake.image_read`` / ``fake.reorient_image2`` return a
     MagicMock image whose ``.numpy()`` returns a small real numpy array. The fake
-    is popped from ``sys.modules`` on teardown so it does not leak across tests.
+    is restored to the original ``sys.modules`` entry on teardown so it does not
+    leak across tests.
 
     Note: mock-orchestration tests that use ``patch("liom_toolkit.registration.register.ants")``
     do NOT need this fixture — the per-module patch is the safer pattern for
@@ -88,52 +89,71 @@ def fake_ants():
     fake.from_numpy.return_value = fake_image
     fake.image_read.return_value = fake_image
     fake.reorient_image2.return_value = fake_image
+    saved = sys.modules.get("ants")
     sys.modules["ants"] = fake
     try:
         yield fake
     finally:
-        sys.modules.pop("ants", None)
+        if saved is None:
+            sys.modules.pop("ants", None)
+        else:
+            sys.modules["ants"] = saved
 
 
 @pytest.fixture
 def fake_torch():
     """Inject a MagicMock as the ``torch`` module in ``sys.modules`` for the test.
 
-    Sibling to ``fake_ants``. The fake is popped from ``sys.modules`` on
+    Sibling to ``fake_ants``. The original ``sys.modules`` entry is restored on
     teardown so it does not leak across tests (Pitfall 3). A minimal MagicMock
     suffices to pass a lazy-import guard like ``try: import torch`` in a CLI
     ``main()``; the goal is reaching the domain callee (e.g.
     ``train_model(...)``), not running the real training loop. Do NOT
     configure fake tensor returns here -- torch only needs to be importable
     for the guard to pass.
+
+    Restoration (not pop) is critical for torch: if real torch was already
+    imported by an earlier test in the same worker, popping ``sys.modules``
+    would force a full re-import on the next ``import torch``, which re-runs
+    torch's ``_TritonLibrary`` class body and crashes with
+    ``RuntimeError: Only a single TORCH_LIBRARY can be used to register the
+    namespace triton``. Restoring the original entry avoids the re-import.
     """
     from unittest.mock import MagicMock
 
     fake = MagicMock()
+    saved = sys.modules.get("torch")
     sys.modules["torch"] = fake
     try:
         yield fake
     finally:
-        sys.modules.pop("torch", None)
+        if saved is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = saved
 
 
 @pytest.fixture
 def fake_wandb():
     """Inject a MagicMock as the ``wandb`` module in ``sys.modules`` for the test.
 
-    Sibling to ``fake_ants`` / ``fake_torch``. The fake is popped from
-    ``sys.modules`` on teardown so it does not leak across tests (Pitfall 3).
+    Sibling to ``fake_ants`` / ``fake_torch``. The original ``sys.modules``
+    entry is restored on teardown so it does not leak across tests (Pitfall 3).
     A minimal MagicMock suffices to pass a lazy-import guard like
     ``try: import wandb`` in a CLI ``main()``.
     """
     from unittest.mock import MagicMock
 
     fake = MagicMock()
+    saved = sys.modules.get("wandb")
     sys.modules["wandb"] = fake
     try:
         yield fake
     finally:
-        sys.modules.pop("wandb", None)
+        if saved is None:
+            sys.modules.pop("wandb", None)
+        else:
+            sys.modules["wandb"] = saved
 
 
 @pytest.fixture(autouse=True)
