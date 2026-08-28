@@ -141,12 +141,23 @@ addopts = [
     # coverage gate here: pytest-cov uses the last --cov-fail-under value and
     # addopts is prepended to the CLI, so a zero in addopts would defeat the
     # ratchet everywhere.
-    # --maxprocesses=6 caps xdist workers: -n auto spawns one worker per CPU
-    # (10 on the dev box), but each worker pays full interpreter startup +
-    # torch/dask/zarr imports (~1.3s). On a now-fast suite the per-worker
+    # Parallelisation via pytest-xdist. -n auto spawns one worker per CPU,
+    # --maxprocesses=6 caps it: each worker pays full interpreter startup +
+    # torch/dask/zarr imports (~1.3s), and on a now-fast suite the per-worker
     # overhead dominates past ~6 workers. The cap does not reduce workers
     # below CPU count on smaller machines (CI 2-4 core runners get -n auto
-    # = their core count, unaffected by the cap).
+    # = their core count, unaffected by the cap). --dist=loadscope groups
+    # tests by module so each worker imports fewer modules.
+    #
+    # pytest-parallex was evaluated and rejected for this suite:
+    #  - fork mode segfaults on macOS (cv2/SimpleITK/torch pull in Apple
+    #    frameworks whose ObjC +initialize trap is not disarmable from inside
+    #    a running process — parallex's own fork-safety docs confirm this).
+    #  - process mode is fresh interpreters like xdist but hardcodes
+    #    round-robin scheduling with no loadscope equivalent, so it cannot
+    #    match xdist's module-grouped scheduling (~17s vs ~12s here).
+    #    parallex's benchmarks page states fork "is not a CI play" — the win
+    #    is a flat ~1.5-2.3s for the local inner loop only.
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",

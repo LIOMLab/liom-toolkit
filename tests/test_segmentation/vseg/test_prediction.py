@@ -12,6 +12,14 @@ Per AGENTS.md §5, heavy deps are mocked for orchestration tests:
 to return a real small uint8 array so the tiling loop runs end-to-end against
 real numpy arithmetic (the compute path under test) without a real model
 forward pass. ``numpy``/``cv2``/``scikit-image`` are real and unmocked.
+
+The ``torch`` importorskip and the ``predict_one`` import are deferred into a
+module-scoped fixture (not module-level) so torch is NOT imported during
+collection. torch spawns background threads at import, and importing it during
+collection would leave the controller multi-threaded — unsafe for any
+fork-based parallel runner and wasteful even under xdist (every worker that
+does not run this module would still pay the import). The fixture runs once
+per worker that needs it, so torch is imported lazily where it is used.
 """
 
 from __future__ import annotations
@@ -23,9 +31,19 @@ import imageio.v3 as iio
 import numpy as np
 import pytest
 
-pytest.importorskip("torch")  # vseg/ requires PyTorch (AGENTS §5, §9)
 
-from liom_toolkit.segmentation.vseg.prediction import predict_one
+@pytest.fixture(scope="module")
+def predict_one():
+    """Import predict_one lazily (torch is imported only where used).
+
+    Deferred from module-level so collection does not import torch. The
+    importorskip gates the whole module: if torch is not installed, every
+    test in this module skips.
+    """
+    pytest.importorskip("torch")  # vseg/ requires PyTorch (AGENTS §5, §9)
+    from liom_toolkit.segmentation.vseg.prediction import predict_one as _po
+
+    return _po
 
 
 def _write_synthetic_image(path: str, shape=(16, 16)) -> np.ndarray:
@@ -36,7 +54,7 @@ def _write_synthetic_image(path: str, shape=(16, 16)) -> np.ndarray:
     return arr
 
 
-def test_predict_one_n_patches_by_row_is_int(tmp_path):
+def test_predict_one_n_patches_by_row_is_int(tmp_path, predict_one):
     """predict_one computes n_patches_by_row as int (integer tiling arithmetic).
 
     The tiling-path arithmetic (``y1 % n_patches_by_row``) must use integer
@@ -77,7 +95,7 @@ def test_predict_one_n_patches_by_row_is_int(tmp_path):
     assert set(np.unique(result)).issubset({0, 255})
 
 
-def test_predict_one_modulo_no_float_rounding(tmp_path):
+def test_predict_one_modulo_no_float_rounding(tmp_path, predict_one):
     """predict_one tiling arithmetic uses int division/modulo (no float rounding).
 
     ``n_patches_by_row`` must be ``int(...)`` so ``y1 % n_patches_by_row`` is
@@ -111,7 +129,7 @@ def test_predict_one_modulo_no_float_rounding(tmp_path):
     assert (Path(save_path) / "synth_mod_segmented.png").exists()
 
 
-def test_predict_one_patching_true_raises_not_implemented(tmp_path):
+def test_predict_one_patching_true_raises_not_implemented(tmp_path, predict_one):
     """predict_one(patching=True) raises NotImplementedError (tiling not implemented).
 
     The int-modulo fix locks the tiling arithmetic for this future path; the
