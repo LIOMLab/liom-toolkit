@@ -129,25 +129,14 @@ testpaths = ["tests"]
 addopts = [
     "-ra",
     "--strict-markers",
-    # Parallelisation via pytest-xdist. -n auto spawns one worker per CPU;
-    # --maxprocesses=6 caps it (per-worker interpreter startup + heavy imports
-    # dominate past ~6 workers on this suite). The cap never reduces workers
-    # below CPU count on smaller CI runners. --dist=load dynamically balances
-    # pending tests to idle workers (benchmarked fastest: ~11.9s vs loadscope
-    # ~12.9s, loadfile ~13.0s, worksteal ~15.0s — loadscope's module-pinning
-    # buys nothing here as no module/class fixtures need it). --max-worker-
-    # restart=0 makes a crashed worker fail loud instead of silently restarting
-    # (xdist default: up to 4 restarts), matching the explicit-failure rule.
+    # xdist: -n auto capped at 6 workers (per-worker startup dominates past
+    # that here); --dist=load balances dynamically (fastest of the dist modes);
+    # --max-worker-restart=0 fails loud on a crash instead of silent restart.
     "-n", "auto",
     "--maxprocesses=6",
     "--dist=load",
     "--max-worker-restart=0",
-    # Coverage: source, report format, and the 60% gate live in
-    # [tool.coverage.run] / [tool.coverage.report] below. --cov enables
-    # pytest-cov with no inline source/report/gate flags. CI overrides the
-    # gate on 3.14 legs with --cov-fail-under=0 (pytest-cov reads the CLI
-    # value first, falling back to [tool.coverage.report] fail_under only
-    # when the flag is absent).
+    # Coverage source/report/gate live in [tool.coverage.*] below.
     "--cov",
 ]
 markers = [
@@ -178,20 +167,12 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-# Measure only the package — tests, deps, and the venv are excluded from the
-# report. pytest-cov's bare --cov (in addopts above) reads `source` from here.
 source = ["liom_toolkit"]
 
 [tool.coverage.report]
-# Show missing line numbers in the terminal report (equivalent to the old
-# --cov-report=term-missing flag).
 show_missing = true
-# Coverage gate: the suite must stay at or above this fraction. Ratcheted to
-# 60% with the Phase-2 TEST-01 suite. CI overrides to 0 on the 3.14+core and
-# 3.14+all legs (see ci.yml) via --cov-fail-under=0, because importorskip-
-# gated tests skip there and their coverage sits at ~10-20%. pytest-cov reads
-# the CLI flag first and falls back to this value only when it is absent, so
-# the CI override wins.
+# CI overrides to 0 on 3.14 legs via --cov-fail-under=0 (importorskip-gated
+# tests skip there). The CLI flag takes priority over this value.
 fail_under = 60
 
 [tool.ruff]
