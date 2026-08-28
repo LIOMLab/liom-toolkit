@@ -80,6 +80,7 @@ dev = [
     "pandas-stubs",
     "pyarrow>=25.0.1",
     "types-openpyxl>=3.1.5.20260827",
+    "pyyaml>=6.0",
 ]
 # Docs-build-only tooling (PEP 735 dependency group). Not a user-facing
 # extra — `pip install liom-toolkit[docs]` is intentionally not offered.
