@@ -95,7 +95,6 @@ docs = [
     "nbsphinx>=0.9,<1",
     "ipykernel>=6.29,<7",
     "ipywidgets>=8.0,<9",
-    "linkify-it-py>=2.0,<3",
     "nbconvert>=7.17.1,<8",
 ]
 

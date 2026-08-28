@@ -4,7 +4,7 @@ The LIOM Toolkit supports the full light-sheet fluorescence microscopy (LSFM)
 processing workflow: format conversion, brain registration to the Allen
 Atlas, vessel segmentation, and morphometric statistics. This page is a prose
 overview of how the pipeline stages fit together; for worked examples with
-code, see the [Example Notebooks](notebooks/index).
+code, see the {doc}`Example Notebooks <notebooks/index>`.
 
 ## Pipeline overview
 
@@ -52,7 +52,7 @@ stage reads and writes `.ome.zarr` stores.
 ## Entry points
 
 The command-line tools are the primary entry point for batch usage — see the
-[CLI Reference](cli) for the auto-generated argument list of every `liom-*`
+{doc}`CLI Reference <cli>` for the auto-generated argument list of every `liom-*`
 tool. For interactive or notebook-driven work, import the library functions
 directly from the relevant subpackage (e.g.
 `from liom_toolkit.conversion import convert_hdf5_to_zarr`). The package
@@ -61,8 +61,8 @@ extras that degrade gracefully.
 
 ## Worked examples
 
-The [Example Notebooks](notebooks/index) page contains end-to-end worked
+The {doc}`Example Notebooks <notebooks/index>` page contains end-to-end worked
 examples for each pipeline stage: conversion, mask generation, registration,
-segmentation, and stats. The notebooks are rendered with stored outputs
-during the documentation build, so you can read them without running the
-code.
+segmentation, and stats. The notebooks are rendered as code-only (without
+stored outputs) in the documentation build; run them locally with all extras
+installed to see real outputs.

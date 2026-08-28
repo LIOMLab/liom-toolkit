@@ -58,7 +58,6 @@ myst_enable_extensions = [
     "deflist",
     "dollarmath",
     "fieldlist",
-    "linkify",
     "substitution",
     "tasklist",
 ]
@@ -96,6 +95,22 @@ napoleon_attr_annotations = True
 # "duplicate object description" warnings when autoapi also documents
 # the same class attributes from their type annotations.
 napoleon_use_ivar = True
+
+# Normalize numpy type aliases whose trailing underscore (np.bool_, np.floating,
+# np.generic, np.integer, np.signedinteger) docutils misparses as anonymous
+# hyperlink references inside :rtype:/:type: fields ("Unknown target name:
+# np.bool"). Mapping them to their plain Python equivalents removes the
+# trailing underscore while keeping the type info readable. preprocess_types
+# must be True for the aliases to apply inside compound annotations like
+# NDArray[np.bool_].
+napoleon_preprocess_types = True
+napoleon_type_aliases = {
+    "np.bool_": "bool",
+    "np.floating": "float",
+    "np.integer": "int",
+    "np.signedinteger": "int",
+    "np.generic": "Any",
+}
 
 # -- intersphinx (verified targets) -----------------------------------------
 intersphinx_mapping = {

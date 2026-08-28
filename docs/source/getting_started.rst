@@ -1,6 +1,6 @@
-==============
+===============
 Getting Started
-==============
+===============
 
 This page covers installing the LIOM Toolkit, choosing the right optional
 extras for your workload, and running your first conversion or segmentation
