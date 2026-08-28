@@ -98,6 +98,13 @@ def test_liom_align_annotations_main_smoke(tmp_path, fake_ants, monkeypatch) -> 
 
     from liom_toolkit.scripts.liom_align_annotations import main
 
+    # The fake_ants fixture returns the same MagicMock image for every
+    # image_read call. Capture it so the assertions below verify IDENTITY
+    # (the exact mock passed by main()), not just non-None -- a bare
+    # `is not None` check would pass even if main() passed the wrong
+    # variable (e.g. target_volume=mask).
+    fake_image = fake_ants.image_read.return_value
+
     with patch("liom_toolkit.registration.align_annotations_to_volume") as spy:
         main()
 
@@ -110,8 +117,10 @@ def test_liom_align_annotations_main_smoke(tmp_path, fake_ants, monkeypatch) -> 
     assert kwargs["rigid_type"] == "Similarity"
     assert kwargs["deformable_type"] == "SyN"
     # The four image args are the MagicMock image returned by fake_ants.image_read
-    # (fake_ants returns the same mock for every image_read call).
-    assert kwargs["target_volume"] is not None
-    assert kwargs["mask"] is not None
-    assert kwargs["template"] is not None
-    assert kwargs["atlas"] is not None
+    # (fake_ants returns the same mock for every image_read call). Assert
+    # identity so a regression where main() passes the wrong variable
+    # (e.g. target_volume=mask) is caught.
+    assert kwargs["target_volume"] is fake_image
+    assert kwargs["mask"] is fake_image
+    assert kwargs["template"] is fake_image
+    assert kwargs["atlas"] is fake_image
