@@ -19,30 +19,16 @@ keywords = ["bioinformatics", "neuroinformatics", "lightsheet", "microscopy", "l
 
 dependencies = [
     "tqdm>=4.70.0",
-    'scikit-image>=0.26',
-    # scipy.ndimage is used directly in stats.py & plane_segmentation.py.
-    # On 3.12, antspyx 0.6.3 (PyPI) caps scipy<1.16, so the lock pins 1.15.x
-    # there (has cp312 wheels). On 3.14, antspyx 0.6.4 (from this repo's
-    # antspyx-cp314 wheel release) removed the cap, so we require scipy>=1.16.1
-    # — the first release with cp314 macOS arm64 wheels.
-    'scipy>=1.11.4; python_version < "3.14"',
-    'scipy>=1.16.1; python_version >= "3.14"',
     'imageio>=2.30',
     'ome-zarr>=0.18.0',
     "nibabel>=5.4.2",
     'zarr>=3.0',
     "h5py>=3.16.0",
     "pynrrd>=1.1.3",
-    "pandas>=3.0.5",
-    "requests>=2.34.2",
-    "pywavelets>=1.9.0",
-    "simpleitk>=2.5.6",
     "dask>=2026.8.0",
     "bokeh>=3.1.0", # Bokeh is used for the dask dashboard
     "distributed>=2026.8.0",
-    "opencv-python>=5.0.0.93",
     "natsort>=8.4.0",
-    "openpyxl>=3.1",
     "tifffile>=2024.0",
 ]
 
@@ -56,6 +42,28 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# [io] is a no-op extra: core IS the IO set (D-01). Declared for
+# discoverability so `pip install liom-toolkit[io]` is a documented, valid
+# command even though it pulls nothing beyond core.
+io = []
+seg = [
+    "scikit-image>=0.26",
+    "simpleitk>=2.5.6",
+    # scipy.ndimage is used directly in stats.py & plane_segmentation.py.
+    # On 3.12, antspyx 0.6.3 (PyPI) caps scipy<1.16, so the lock pins 1.15.x
+    # there (has cp312 wheels). On 3.14, antspyx 0.6.4 (from this repo's
+    # antspyx-cp314 wheel release) removed the cap, so we require scipy>=1.16.1
+    # — the first release with cp314 macOS arm64 wheels.
+    'scipy>=1.11.4; python_version < "3.14"',
+    'scipy>=1.16.1; python_version >= "3.14"',
+    "opencv-python>=5.0.0.93",
+]
+stats = [
+    "pandas>=3.0.5",
+    "openpyxl>=3.1",
+    'scipy>=1.11.4; python_version < "3.14"',
+    'scipy>=1.16.1; python_version >= "3.14"',
+]
 ai = [
     "torch>=2.13.0",
     "torchvision>=0.28.0",
@@ -70,11 +78,16 @@ antspy = [
     # on 3.14 it installs from this repo's antspyx-cp314 GitHub Release via the
     # uv flat index in [tool.uv.sources] (upstream has no cp314 wheels on PyPI).
     'antspyx>=0.6.3',
+    "pandas>=3.0.5",
+    "requests>=2.34.2",
 ]
-
+# Self-referential meta-extra (supported since pip 21.2): one-line install of
+# the full conversion→registration→segmentation→stats dep set. Preserves the
+# project's core value ("other labs pip install and run the full pipeline")
+# after core was slimmed to the IO set (D-01/D-04).
+pipeline = ["liom-toolkit[io,seg,stats,ai,antspy]"]
 all = [
-    "liom_toolkit[ai]",
-    "liom_toolkit[antspy]",
+    "liom-toolkit[ai,antspy,seg,stats]",
 ]
 
 [dependency-groups]
