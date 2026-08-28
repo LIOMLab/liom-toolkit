@@ -128,48 +128,27 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = [
     "-ra",
+    "--strict-markers",
+    # Parallelisation via pytest-xdist. -n auto spawns one worker per CPU;
+    # --maxprocesses=6 caps it (per-worker interpreter startup + heavy imports
+    # dominate past ~6 workers on this suite). The cap never reduces workers
+    # below CPU count on smaller CI runners. --dist=load dynamically balances
+    # pending tests to idle workers (benchmarked fastest: ~11.9s vs loadscope
+    # ~12.9s, loadfile ~13.0s, worksteal ~15.0s — loadscope's module-pinning
+    # buys nothing here as no module/class fixtures need it). --max-worker-
+    # restart=0 makes a crashed worker fail loud instead of silently restarting
+    # (xdist default: up to 4 restarts), matching the explicit-failure rule.
     "-n", "auto",
     "--maxprocesses=6",
     "--dist=load",
     "--max-worker-restart=0",
-    "--strict-markers",
-    "--cov=liom_toolkit",
-    "--cov-report=term-missing",
-    "--cov-fail-under=60",
-    # Coverage gate ratcheted to 60% with the Phase-2 TEST-01 suite; CI
-    # overrides the gate to 0 on the 3.14+core and 3.14+all legs (see ci.yml)
-    # because importorskip-gated tests skip there. Do NOT add a zero-value
-    # coverage gate here: pytest-cov uses the last --cov-fail-under value and
-    # addopts is prepended to the CLI, so a zero in addopts would defeat the
-    # ratchet everywhere.
-    # Parallelisation via pytest-xdist. -n auto spawns one worker per CPU,
-    # --maxprocesses=6 caps it: each worker pays full interpreter startup +
-    # torch/dask/zarr imports (~1.3s), and on a now-fast suite the per-worker
-    # overhead dominates past ~6 workers. The cap does not reduce workers
-    # below CPU count on smaller machines (CI 2-4 core runners get -n auto
-    # = their core count, unaffected by the cap).
-    #
-    # --dist=load (xdist default) dynamically sends pending tests to idle
-    # workers. Benchmarked against loadscope/loadfile/worksteal: load ~11.9s
-    # > loadscope ~12.9s > loadfile ~13.0s > worksteal ~15.0s. loadscope's
-    # module-pinning only helps when modules own expensive module/class
-    # fixtures that must stay set up on one worker; this suite has none (one
-    # trivial lazy-import module fixture, zero session fixtures) and tests
-    # are spread across many small modules, so dynamic balancing wins.
-    #
-    # --max-worker-restart=0 disables xdist's silent worker-restart (default
-    # up to 4 restarts), so a crashed worker fails the run loudly instead of
-    # masking a real failure. Matches the project's explicit-failure rule.
-    #
-    # pytest-parallex was evaluated and rejected for this suite:
-    #  - fork mode segfaults on macOS (cv2/SimpleITK/torch pull in Apple
-    #    frameworks whose ObjC +initialize trap is not disarmable from inside
-    #    a running process — parallex's own fork-safety docs confirm this).
-    #  - process mode is fresh interpreters like xdist but hardcodes
-    #    round-robin scheduling with no load equivalent, so it cannot match
-    #    xdist's dynamic balancing (~17s vs ~12s here). parallex's benchmarks
-    #    page states fork "is not a CI play" — the win is a flat ~1.5-2.3s
-    #    for the local inner loop only.
+    # Coverage: source, report format, and the 60% gate live in
+    # [tool.coverage.run] / [tool.coverage.report] below. --cov enables
+    # pytest-cov with no inline source/report/gate flags. CI overrides the
+    # gate on 3.14 legs with --cov-fail-under=0 (pytest-cov reads the CLI
+    # value first, falling back to [tool.coverage.report] fail_under only
+    # when the flag is absent).
+    "--cov",
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
@@ -197,6 +176,23 @@ filterwarnings = [
     # module), so the warning's frame module is not nrrd.writer.
     "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning",
 ]
+
+[tool.coverage.run]
+# Measure only the package — tests, deps, and the venv are excluded from the
+# report. pytest-cov's bare --cov (in addopts above) reads `source` from here.
+source = ["liom_toolkit"]
+
+[tool.coverage.report]
+# Show missing line numbers in the terminal report (equivalent to the old
+# --cov-report=term-missing flag).
+show_missing = true
+# Coverage gate: the suite must stay at or above this fraction. Ratcheted to
+# 60% with the Phase-2 TEST-01 suite. CI overrides to 0 on the 3.14+core and
+# 3.14+all legs (see ci.yml) via --cov-fail-under=0, because importorskip-
+# gated tests skip there and their coverage sits at ~10-20%. pytest-cov reads
+# the CLI flag first and falls back to this value only when it is absent, so
+# the CI override wins.
+fail_under = 60
 
 [tool.ruff]
 target-version = "py312"   # NOT py314 — load-bearing for 3.12 forward-ref support (from __future__ import annotations stays)
