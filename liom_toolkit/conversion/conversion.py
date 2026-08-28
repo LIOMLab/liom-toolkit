@@ -343,6 +343,7 @@ def create_full_zarr_volume(
     use_custom_atlas: bool = True,
     scales: tuple[float, float, float] = (6.5, 6.5, 6.5),
     chunks: tuple[int, int, int] = (128, 128, 128),
+    resume: bool = False,
 ) -> None:
     """Create a full zarr volume from the auto-fluorescence and vascular data.
 
@@ -368,6 +369,12 @@ def create_full_zarr_volume(
         The physical resolution of the volume per axis.
     chunks : tuple[int, int, int]
         The chunk size to use for the volume.
+    resume : bool
+        If True, resume from a previous checkpoint. Completed coarse steps
+        (whose ``.done`` marker + artifact validation pass) are skipped and
+        the pipeline re-runs from the first incomplete step. A params-hash
+        mismatch (code/param change between runs) invalidates the
+        checkpoint and re-runs from scratch.
 
     Raises
     ------
@@ -382,10 +389,45 @@ def create_full_zarr_volume(
         from liom_toolkit.registration import align_annotations_to_volume
         from liom_toolkit.utils.allen_sdk import download_allen_atlas
         from liom_toolkit.utils.ants import load_ants_image_from_node
+        from liom_toolkit.utils.checkpoint import ResumeManager
     except ImportError as e:
         raise ImportError(
             "Please install ANTsPy to create the full zarr volume of the LIOM toolkit."
         ) from e
+    # Resume bookkeeping: 4 coarse steps (multichannel zarr, temporary mask,
+    # atlas alignment, final mask). The manifest + .done markers live under
+    # {zarr_file.parent}/_liom_checkpoints/create_full_zarr_volume.json.
+    zarr_artifact = Path(zarr_file)
+    resume_mgr: ResumeManager | None = None
+    if resume:
+        resume_mgr = ResumeManager(
+            output_dir=zarr_artifact.parent,
+            pipeline="create_full_zarr_volume",
+            params={
+                "auto_fluo_file": auto_fluo_file,
+                "vascular_file": vascular_file,
+                "zarr_file": zarr_file,
+                "template_path": template_path,
+                "atlas_path": atlas_path,
+                "use_custom_atlas": use_custom_atlas,
+                "scales": scales,
+                "chunks": chunks,
+            },
+            steps_total=3,
+        )
+        if resume_mgr.is_complete():
+            logger.info("create_full_zarr_volume: checkpoint complete, nothing to do.")
+            return
+
+    def _should_run(step_idx: int) -> bool:
+        if resume_mgr is None:
+            return True
+        return resume_mgr.start_step(step_idx, artifact_path=zarr_artifact)
+
+    def _finish_step(step_idx: int) -> None:
+        if resume_mgr is not None:
+            resume_mgr.finish_step(step_idx, artifact_path=zarr_artifact)
+
     # Use a context manager so the temp directory is cleaned up even if any
     # step between creation and cleanup raises (multichannel creation, mask
     # creation, atlas alignment, atlas save). The pre-fix code called
@@ -393,96 +435,105 @@ def create_full_zarr_volume(
     with tempfile.TemporaryDirectory() as temp_dir:
         resolution_level = 2
 
-        pbar = tqdm(total=5, desc="Creating zarr volume")
+        pbar = tqdm(total=4, desc="Creating zarr volume")
         pbar.set_postfix({"step": "Creating multichannel zarr"})
-        create_multichannel_zarr(
-            auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks
-        )
-        pbar.update(1)
-
-        pbar.set_postfix({"step": "Creating temporary mask"})
-        # Load image for image information
-        nodes = load_zarr(zarr_file)
-        target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
-        # Create the temporary mask
-        mask = create_mask_from_zarr(zarr_file, resolution_level)
-        mask = mask.astype("uint32")
-        mask = ants.from_numpy(mask)
-        mask.set_direction(target_image.direction)
-        mask.set_spacing(target_image.spacing)
-        mask.set_origin(target_image.origin)
-
-        pbar.update(1)
-
-        pbar.set_postfix({"step": "Aligning annotations to volume"})
-        # Align the annotations to the volume
-        nodes = load_zarr(zarr_file)
-        target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
-        template = ants.image_read(template_path)
-
-        # Shared atlas resolution: the download and the align call MUST use the
-        # same resolution so the downloaded atlas matches the annotation volume
-        # produced by align_annotations_to_volume. A single local constant makes
-        # the invariant explicit instead of relying on two coincidentally-coupled
-        # literals; exposing it as a public parameter is a future API change.
-        atlas_resolution = 25
-        if not use_custom_atlas:
-            base_atlas, _ = download_allen_atlas(
-                temp_dir, resolution=atlas_resolution, keep_nrrd=False
+        if _should_run(0):
+            create_multichannel_zarr(
+                auto_fluo_file, vascular_file, zarr_file, scales=scales, chunks=chunks
             )
-        else:
-            base_atlas = ants.image_read(atlas_path)
-
-        atlas = align_annotations_to_volume(
-            target_volume=target_image,
-            mask=mask,
-            template=template,
-            atlas=base_atlas,
-            resolution=atlas_resolution,
-            keep_intermediary=False,
-            data_dir=temp_dir,
-        )
-
-        # Reorient the atlas to the same orientation as the target image
-        atlas = ants.reorient_image2(atlas, target_image.orientation)
-
-        # Resize the atlas to full size
-        atlas_target_shape = nodes[0].data[0].shape
-        if len(atlas_target_shape) == 4:
-            atlas_target_shape = atlas_target_shape[1:]
-        atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
-        atlas_resized = da.transpose(atlas, (2, 1, 0))
-        atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
-
-        save_atlas_to_zarr(
-            zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0
-        )
+            _finish_step(0)
         pbar.update(1)
 
-    # Creating final mask
+        pbar.set_postfix({"step": "Creating mask + aligning annotations"})
+        # Step 1 combines the temporary mask creation AND the atlas alignment
+        # into one resumable unit: the mask is an in-memory intermediate that
+        # is not persisted, so it cannot be skipped independently of the
+        # alignment that consumes it. The resumable artifact is the zarr_file
+        # with the atlas node written by save_atlas_to_zarr.
+        if _should_run(1):
+            # Load image for image information
+            nodes = load_zarr(zarr_file)
+            target_image = load_ants_image_from_node(nodes[0], resolution_level, channel=0)
+            # Create the temporary mask
+            mask = create_mask_from_zarr(zarr_file, resolution_level)
+            mask = mask.astype("uint32")
+            mask = ants.from_numpy(mask)
+            mask.set_direction(target_image.direction)
+            mask.set_spacing(target_image.spacing)
+            mask.set_origin(target_image.origin)
+
+            # Align the annotations to the volume
+            template = ants.image_read(template_path)
+
+            # Shared atlas resolution: the download and the align call MUST use the
+            # same resolution so the downloaded atlas matches the annotation volume
+            # produced by align_annotations_to_volume. A single local constant makes
+            # the invariant explicit instead of relying on two coincidentally-coupled
+            # literals; exposing it as a public parameter is a future API change.
+            atlas_resolution = 25
+            if not use_custom_atlas:
+                base_atlas, _ = download_allen_atlas(
+                    temp_dir, resolution=atlas_resolution, keep_nrrd=False
+                )
+            else:
+                base_atlas = ants.image_read(atlas_path)
+
+            atlas = align_annotations_to_volume(
+                target_volume=target_image,
+                mask=mask,
+                template=template,
+                atlas=base_atlas,
+                resolution=atlas_resolution,
+                keep_intermediary=False,
+                data_dir=temp_dir,
+            )
+
+            # Reorient the atlas to the same orientation as the target image
+            atlas = ants.reorient_image2(atlas, target_image.orientation)
+
+            # Resize the atlas to full size
+            atlas_target_shape = nodes[0].data[0].shape
+            if len(atlas_target_shape) == 4:
+                atlas_target_shape = atlas_target_shape[1:]
+            atlas = da.from_array(atlas.numpy(), chunks=(128, 128, 128))
+            atlas_resized = da.transpose(atlas, (2, 1, 0))
+            atlas_resized = resize(atlas_resized, atlas_target_shape, order=0)
+
+            save_atlas_to_zarr(
+                zarr_file, atlas_resized, scales=scales, chunks=chunks, resolution_level=0
+            )
+            _finish_step(1)
+        pbar.update(1)
+
+    # Creating final mask (step 2)
     pbar.set_postfix({"step": "Creating final mask"})
-    nodes = load_zarr(zarr_file)
-    atlas_node = load_node_by_name(nodes, "atlas")
-    if atlas_node is None:
-        raise ValueError(f"Atlas node not found in {zarr_file}")
-    atlas = load_zarr_image_from_node(atlas_node, 0)
+    if _should_run(2):
+        nodes = load_zarr(zarr_file)
+        atlas_node = load_node_by_name(nodes, "atlas")
+        if atlas_node is None:
+            raise ValueError(f"Atlas node not found in {zarr_file}")
+        atlas = load_zarr_image_from_node(atlas_node, 0)
 
-    # Set all non-zero pixels of the atlas to 1
-    atlas = da.where(atlas > 0, 1, atlas)
+        # Set all non-zero pixels of the atlas to 1
+        atlas = da.where(atlas > 0, 1, atlas)
 
-    # Save to zarr
-    atlas = atlas.astype("int8")
-    color_dict = generate_label_color_dict_mask()
-    save_label_to_zarr(
-        atlas,
-        zarr_file,
-        scales=scales,
-        chunks=chunks,
-        color_dict=color_dict,
-        name="mask",
-        resolution_level=0,
-    )
+        # Save to zarr
+        atlas = atlas.astype("int8")
+        color_dict = generate_label_color_dict_mask()
+        save_label_to_zarr(
+            atlas,
+            zarr_file,
+            scales=scales,
+            chunks=chunks,
+            color_dict=color_dict,
+            name="mask",
+            resolution_level=0,
+        )
+        _finish_step(2)
     pbar.update(1)
+
+    if resume_mgr is not None:
+        resume_mgr.mark_complete()
 
     pbar.set_postfix({"step": "Done"})
     pbar.update(1)

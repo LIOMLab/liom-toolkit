@@ -281,6 +281,7 @@ def train_model(
     wandb_entity: str | None = None,
     pretrained_artifact: str | None = None,
     pin_memory: bool = True,
+    resume: bool = False,
 ) -> None:
     """Train the vessel segmentation model.
 
@@ -318,6 +319,24 @@ def train_model(
         Whether to filter empty patches.
     pin_memory : bool
         Whether to pin memory in the data loader. Speeds up for CUDA.
+    resume : bool
+        If True, resume from a previous checkpoint. The manifest's
+        ``last_completed_epoch`` is read and the model loads
+        ``checkpoint.{last_completed_epoch}.pth`` (the existing per-epoch
+        weights artifact); the epoch loop continues from
+        ``last_completed_epoch + 1``. A params-hash mismatch (code/param
+        change between runs) invalidates the checkpoint and re-runs from
+        epoch 0.
+
+        .. note::
+            1.0.0 limitation: full-state ``.pth`` augmentation
+            (optimizer / scheduler / RNG / dataloader-epoch state) is
+            deferred to 1.1. Resume continues from epoch ``N+1`` with a
+            re-initialized optimizer state — this is a known, documented
+            limitation, not a silent wrong-data fallback. The manifest
+            records the epoch index (complementary to the per-epoch
+            ``checkpoint.*.pth`` weights artifact); the ``.pth`` is the
+            weights, the manifest is the bookkeeper.
 
     Raises
     ------
@@ -407,12 +426,61 @@ def train_model(
     checkpoint_path = f"{output_train}/files/checkpoint"
     create_dir(f"{output_train}/patch_seg")
 
+    # Resume bookkeeping: the manifest records last_completed_epoch
+    # (complementary to the per-epoch checkpoint.*.pth weights artifact).
+    # The manifest is the bookkeeper; the .pth is the weights.
+    from liom_toolkit.utils.checkpoint import ResumeManager
+
+    resume_mgr = ResumeManager(
+        output_dir=Path(output_train),
+        pipeline="train_model",
+        params={
+            "dataset_file": dataset_file,
+            "node_name": node_name,
+            "epochs": epochs,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+        },
+        steps_total=epochs,
+    )
+    if resume and resume_mgr.is_complete():
+        logger.info("train_model: checkpoint complete, nothing to do.")
+        run.finish()
+        return
+
     # Initialise the model. pretrained_artifact threads through to VsegModel;
     # None trains from scratch (no silent fallback to a hardcoded lab artifact).
     model = VsegModel(
         pretrained=pretrained_artifact is not None,
         pretrained_artifact=pretrained_artifact,
     )
+
+    # Resume: load the per-epoch checkpoint.{last_completed_epoch}.pth weights
+    # and continue from epoch N+1. 1.0.0 limitation: the optimizer / scheduler
+    # / RNG state is re-initialized (full-state .pth augmentation is deferred
+    # to 1.1 — resume is not bit-deterministic across optimizer/RNG state
+    # until 1.1). This is a known, documented limitation, not a silent
+    # wrong-data fallback.
+    start_epoch = 0
+    if resume:
+        last_epoch = resume_mgr.get_last_completed_epoch()
+        if last_epoch is not None:
+            ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
+            if Path(ckpt_file).exists():
+                model.load_state_dict(torch.load(ckpt_file))
+                start_epoch = last_epoch + 1
+                logger.info(
+                    "train_model: resuming from epoch %d (loaded %s).",
+                    start_epoch,
+                    ckpt_file,
+                )
+            else:
+                logger.warning(
+                    "train_model: manifest says last_completed_epoch=%d but "
+                    "%s is missing — starting from epoch 0.",
+                    last_epoch,
+                    ckpt_file,
+                )
 
     model = model.to(dev)
 
@@ -429,7 +497,8 @@ def train_model(
 
     best_valid_loss = float("inf")
 
-    for epoch in (pbar := tqdm(range(config.epochs), desc="Epochs", leave=False, position=0)):
+    epoch_range = range(start_epoch, config.epochs)
+    for epoch in (pbar := tqdm(epoch_range, desc="Epochs", leave=False, position=0)):
         train_loss, train_y, train_y_pred, x_train = train(
             model, train_loader, optimizer, loss_fn, dev
         )
@@ -451,6 +520,11 @@ def train_model(
         if epoch % 10 == 0:
             torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
 
+        # Record the epoch as complete (complementary to the per-epoch .pth).
+        # A crash after epoch N leaves last_completed_epoch=N; resume
+        # continues from N+1.
+        resume_mgr.set_last_completed_epoch(epoch)
+
         pbar.set_postfix(loss=f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         train_images = create_images(x_train, train_y, train_y_pred)
         val_images = create_images(x_val, val_y, val_y_pred)
@@ -468,6 +542,11 @@ def train_model(
                 },
             }
         )
+
+    # Atomic complete sentinel — written LAST, after all epochs done. A crash
+    # on the final epoch does NOT leave complete=True (write_manifest is
+    # atomic: temp + Path.replace).
+    resume_mgr.mark_complete()
 
     logger.info("Finished Training: Best Epoch = %s", best_epoch)
     artifact = wandb.Artifact("model", type="model")

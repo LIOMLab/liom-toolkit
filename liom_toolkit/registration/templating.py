@@ -34,6 +34,8 @@ def create_template(
     save_templating_progress: bool = False,
     pre_registration_type: str = "Rigid",
     templating_registration_type: str = "SyN",
+    resume_mgr: Any = None,
+    output_dir: str | None = None,
 ) -> ANTsImage:
     """Create a template from a folder of images.
 
@@ -126,6 +128,8 @@ def create_template(
             save_progress=save_templating_progress,
             remove_temp_output=remove_temp_output,
             type_of_transform=templating_registration_type,
+            resume_mgr=resume_mgr,
+            output_dir=output_dir,
         )
     else:
         template = build_template(
@@ -136,6 +140,8 @@ def create_template(
             save_progress=save_templating_progress,
             remove_temp_output=remove_temp_output,
             type_of_transform=templating_registration_type,
+            resume_mgr=resume_mgr,
+            output_dir=output_dir,
         )
     return template
 
@@ -219,6 +225,7 @@ def build_template(
     useNoRigid: bool = True,
     output_dir: str | None = None,
     type_of_transform: str = "SyN",
+    resume_mgr: Any = None,
     **kwargs: ANTsImage,
 ) -> ANTsImage:
     """Estimate an optimal template from an input image_list.
@@ -256,6 +263,13 @@ def build_template(
         the end; when set, the directory is kept.
     type_of_transform : str
         The type of transform to use for registration.
+    resume_mgr : ResumeManager or None
+        Optional resume bookkeeper. When provided, each iteration is wrapped
+        with ``resume_mgr.start_step`` / ``resume_mgr.finish_step`` so
+        completed iterations (whose rolling-latest template NIfTI artifact
+        validates) are skipped on resume. The resumable artifact is the
+        rolling-latest ``template_{i}.nii.gz`` (no intermediate duplication —
+        the per-iteration ``remove_temp_output`` cleanup stays).
     **kwargs : ANTsImage
         Extra arguments passed to ants registration (forwarded as-is).
 
@@ -345,6 +359,19 @@ def build_template(
             unit="iteration",
             position=1,
         ):
+            # Resume gating: skip completed iterations whose rolling-latest
+            # template NIfTI artifact validates. The resumable artifact is
+            # template_{i}.nii.gz (no intermediate duplication — the per-
+            # iteration remove_temp_output cleanup stays).
+            template_artifact = Path(progress_dir) / f"template_{i}.nii.gz"
+            if resume_mgr is not None and not resume_mgr.start_step(
+                i, artifact_path=template_artifact
+            ):
+                # Skipped: load the rolling-latest template as the init for
+                # the next iteration.
+                if template_artifact.exists():
+                    xavg = iio.image_read(str(template_artifact))
+                continue
             affinelist = []
             for k in range(len(image_list)):
                 if masks is None:
@@ -426,7 +453,14 @@ def build_template(
                 )
             if save_progress:
                 iio.image_write(xavg, str(Path(progress_dir) / f"template_{i}.nii.gz"))
+            # Record the iteration as complete (rolling-latest template NIfTI
+            # is the resumable artifact). finish_step writes the .done marker
+            # ONLY after the artifact validates.
+            if resume_mgr is not None:
+                resume_mgr.finish_step(i, artifact_path=template_artifact)
 
+        if resume_mgr is not None:
+            resume_mgr.mark_complete()
         return xavg
     finally:
         if output_dir is None:
@@ -444,6 +478,7 @@ def build_template_for_resolution(
     init_with_template: bool = False,
     register_to_template: bool = False,
     flipped_brains: bool = False,
+    resume: bool = False,
 ) -> None:
     """Create a template for a given resolution level and save it to disk.
 
@@ -473,6 +508,15 @@ def build_template_for_resolution(
         Whether to register the template to the atlas volume.
     flipped_brains : bool
         Whether to include flipped brains in the template.
+    resume : bool
+        If True, resume from a previous checkpoint. Completed iterations
+        (whose rolling-latest template NIfTI artifact validates) are skipped
+        and the template build continues from the first incomplete
+        iteration. A params-hash mismatch (code/param change between runs)
+        invalidates the checkpoint and re-runs from scratch. The resumable
+        artifact is the rolling-latest ``template_{i}.nii.gz`` only (no
+        intermediate duplication — the per-iteration remove_temp_output
+        cleanup stays).
 
     Raises
     ------
@@ -489,10 +533,36 @@ def build_template_for_resolution(
             "Please install ANTsPy to use the registration module of the LIOM toolkit."
         ) from e
     # atlas_resolution defaults to template_resolution for backward compat
-    # (closes the Phase 5 deferral — existing callers passing only
-    # template_resolution are unaffected).
+    # (existing callers passing only template_resolution are unaffected).
     if atlas_resolution is None:
         atlas_resolution = template_resolution
+    # Resume bookkeeping: the manifest + .done markers live under
+    # {output_file.parent}/_liom_checkpoints/build_template.json. The
+    # resumable artifact is the rolling-latest template NIfTI.
+    resume_mgr: Any = None
+    if resume:
+        from liom_toolkit.utils.checkpoint import ResumeManager
+
+        resume_mgr = ResumeManager(
+            output_dir=Path(output_file).parent,
+            pipeline="build_template",
+            params={
+                "output_file": output_file,
+                "zarr_files": zarr_files,
+                "brain_names": brain_names,
+                "resolution_level": resolution_level,
+                "template_resolution": template_resolution,
+                "atlas_resolution": atlas_resolution,
+                "iterations": iterations,
+                "init_with_template": init_with_template,
+                "register_to_template": register_to_template,
+                "flipped_brains": flipped_brains,
+            },
+            steps_total=iterations,
+        )
+        if resume_mgr.is_complete():
+            logger.info("build_template_for_resolution: checkpoint complete, nothing to do.")
+            return
     # Use a context manager so the temp dir is cleaned up on every exit
     # path, not just the success path. Without this, a download,
     # create_template, segment_3d, or image_write failure would leak the
@@ -542,6 +612,17 @@ def build_template_for_resolution(
                 brain_volumes.append(brain_volume)
                 masks.append(mask)
 
+        # When resume is enabled, pass a persistent output_dir + save_progress
+        # so the rolling-latest template NIfTI persists across runs (the
+        # resumable artifact). The work dir is under the output file's parent
+        # so it survives between runs.
+        template_work_dir = None
+        save_templating_progress = False
+        if resume_mgr is not None:
+            template_work_dir = str(Path(output_file).parent / "template_build_work")
+            Path(template_work_dir).mkdir(parents=True, exist_ok=True)
+            save_templating_progress = True
+
         if init_with_template:
             template = create_template(
                 brain_volumes,
@@ -551,6 +632,9 @@ def build_template_for_resolution(
                 template_resolution=resolution_mm,
                 iterations=iterations,
                 pre_registration_type="Rigid",
+                save_templating_progress=save_templating_progress,
+                resume_mgr=resume_mgr,
+                output_dir=template_work_dir,
             )
         else:
             template = create_template(
@@ -562,6 +646,9 @@ def build_template_for_resolution(
                 iterations=iterations,
                 init_with_template=init_with_template,
                 pre_registration_type="Rigid",
+                save_templating_progress=save_templating_progress,
+                resume_mgr=resume_mgr,
+                output_dir=template_work_dir,
             )
         if register_to_template:
             template_transform = ants.registration(
