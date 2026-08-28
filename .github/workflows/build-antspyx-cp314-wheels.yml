@@ -99,20 +99,56 @@ jobs:
         run: |
           echo "PACKAGE_VERSION=$( python -c "import toml; print(toml.load('pyproject.toml')['project']['version'])" )" >> $GITHUB_ENV
 
-      - name: Determine macOS deployment target
-        if: startsWith(matrix.os, 'macos-')
+      - name: Read pinned ITK tag (cache key input)
+        shell: bash
         run: |
-          macos_version=$(sw_vers -productVersion | awk -F '.' '{print $1".0"}')
-          echo "MACOSX_DEPLOYMENT_TARGET=${macos_version}" >> $GITHUB_ENV
+          itk_tag=$(grep -E '^itktag=' scripts/configure_ITK.sh | head -1 | cut -d'=' -f2 | awk '{print $1}')
+          echo "ITK_TAG=${itk_tag}" >> $GITHUB_ENV
+          echo "Pinned ITK tag: ${itk_tag}"
 
-      - name: Set cibuildwheel cache path (macOS / Windows)
-        if: ${{ startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
+      - name: Set cibuildwheel cache path
         shell: bash
         run: |
           set -euxo pipefail
           cache_dir="${RUNNER_TEMP}/cibw-cache"
           mkdir -p "${cache_dir}"
           echo "CIBW_CACHE_PATH=${cache_dir}" >> "${GITHUB_ENV}"
+
+      # Cache the compiled ITK build + source tree. ITK is the expensive part
+      # (~30-60 min C++ compile) and is pinned to a fixed tag in
+      # scripts/configure_ITK.sh, so the cache is keyed on that tag + OS + arch
+      # and only invalidates when upstream bumps ITK. configure_ITK.sh is
+      # idempotent: it skips cloning/building if itksource/ and itkbuild/ already
+      # exist, so a cache hit skips the entire ITK compile. cibuildwheel mounts
+      # the project dir into the Linux container, so the cached dirs are visible
+      # there too.
+      - name: Cache ITK build tree
+        id: itk-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            itkbuild
+            itksource
+          key: itk-${{ matrix.platform_id }}-${{ env.ITK_TAG }}
+          restore-keys: |
+            itk-${{ matrix.platform_id }}-
+
+      - name: Cache cibuildwheel + scikit-build build dirs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.CIBW_CACHE_PATH }}
+            build
+          key: cibw-${{ matrix.platform_id }}-${{ env.PACKAGE_VERSION }}-${{ env.ITK_TAG }}
+          restore-keys: |
+            cibw-${{ matrix.platform_id }}-${{ env.PACKAGE_VERSION }}-
+            cibw-${{ matrix.platform_id }}-
+
+      - name: Determine macOS deployment target
+        if: startsWith(matrix.os, 'macos-')
+        run: |
+          macos_version=$(sw_vers -productVersion | awk -F '.' '{print $1".0"}')
+          echo "MACOSX_DEPLOYMENT_TARGET=${macos_version}" >> $GITHUB_ENV
 
       - name: Build wheels
         env:
