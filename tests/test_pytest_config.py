@@ -21,6 +21,7 @@ Covers:
 
 from __future__ import annotations
 
+import subprocess  # ruff: ignore[suspicious-subprocess-import]  # subprocess is required to invoke git check-ignore
 import tomllib
 from pathlib import Path
 
@@ -29,6 +30,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+GITIGNORE = REPO_ROOT / ".gitignore"
 
 
 def _load_pyproject() -> dict:
@@ -181,8 +183,7 @@ class TestCIWorkflow:
         assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
         for required in ("lint", "test"):
             assert required in jobs, (
-                f"CI workflow is missing required job '{required}'. "
-                f"Present jobs: {sorted(jobs)!r}"
+                f"CI workflow is missing required job '{required}'. Present jobs: {sorted(jobs)!r}"
             )
 
     def test_ci_test_matrix_includes_python_312_and_314(self) -> None:
@@ -218,4 +219,93 @@ class TestCIWorkflow:
         needs_set = set(needs)
         assert {"lint", "test"}.issubset(needs_set), (
             f"CI publish job must depend on both 'lint' and 'test'; got {needs!r}"
+        )
+
+
+class TestTyConfig:
+    """The stale continue-on-error comment is gone from pyproject.toml
+    ``[tool.ty]``.
+
+    The comment referenced a CI gate that was removed in an earlier plan; it
+    misled maintainers into thinking the ty job still soft-failed on
+    warnings. The actual CI (``.github/workflows/ci.yml``) hard-gates ty:
+    only error-severity diagnostics fail the lint job (warnings are
+    non-gating via ``error-on-warning = false``, not via continue-on-error).
+
+    The comment is not parseable TOML, so a text check scoped to the
+    ``[tool.ty]`` section is the only way to verify its absence. This is
+    config-as-data validation (parsing a committed config file), not a
+    static-source test on a ``.py`` file (AGENTS.md §5 permits parsing
+    committed config files).
+    """
+
+    def test_no_continue_on_error_comment_in_tool_ty(self) -> None:
+        """The ``[tool.ty.*]`` config family must not mention
+        ``continue-on-error``.
+
+        Slices the ``[tool.ty.*]`` section block out of the raw
+        pyproject.toml text (everything from the first ``[tool.ty`` header
+        up to the next ``[tool.`` header that is NOT a ``tool.ty`` section)
+        and asserts the stale comment string is absent. The pyproject.toml
+        ty config uses subsection headers (``[tool.ty.rules]``,
+        ``[tool.ty.environment]``, ``[tool.ty.analysis]``,
+        ``[tool.ty.terminal]``, ``[[tool.ty.overrides]]``) rather than a
+        single bare ``[tool.ty]`` header, so the slice spans the whole
+        family. A regression (re-adding the misleading comment) fails this
+        test.
+        """
+        text = PYPROJECT.read_text(encoding="utf-8")
+        # Find the first [tool.ty* header and slice from there.
+        first_ty = text.find("[tool.ty")
+        assert first_ty != -1, "pyproject.toml is missing a [tool.ty*] section"
+        block = text[first_ty:]
+        # Drop everything from the first [tool. header that is NOT a ty
+        # section onward (i.e. the next non-ty tool section ends the block).
+        lines = block.splitlines(keepends=True)
+        ty_block_lines = []
+        for line in lines:
+            if line.startswith("[tool.") and not line.startswith("[tool.ty"):
+                break
+            ty_block_lines.append(line)
+        ty_block = "".join(ty_block_lines)
+        assert "continue-on-error" not in ty_block, (
+            "Stale continue-on-error comment still present in [tool.ty*]; the "
+            "CI gate was removed — delete the comment."
+        )
+
+
+class TestGitignore:
+    """The stray ``final_metrics.csv`` local-run output is gitignored.
+
+    The entry is repo-root-scoped (``/final_metrics.csv``), not a global
+    ``*.csv`` that would silently exclude future legitimate CSVs in
+    subdirs. A subprocess ``git check-ignore`` call guards against a
+    malformed pattern (e.g. a trailing-slash typo) that matches the
+    .gitignore text but does not actually ignore the file.
+    """
+
+    def test_final_metrics_csv_is_ignored(self) -> None:
+        """``.gitignore`` must contain ``final_metrics.csv`` AND
+        ``git check-ignore final_metrics.csv`` must exit 0.
+
+        The text check proves the entry is present; the subprocess check
+        proves the entry is effective (the pattern actually matches the
+        file at the repo root).
+        """
+        gitignore_text = GITIGNORE.read_text(encoding="utf-8")
+        assert "final_metrics.csv" in gitignore_text, ".gitignore missing final_metrics.csv entry"
+        # `check=False` is intentional: we assert on returncode ourselves
+        # rather than raising on non-zero, because check-ignore exits 1 when
+        # the path is NOT ignored, which is exactly the failure we want to
+        # surface as an assertion. `git` is invoked from PATH (S607).
+        result = subprocess.run(
+            ["git", "check-ignore", "final_metrics.csv"],  # ruff: ignore[start-process-with-partial-path]  # git is on PATH
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            "git check-ignore final_metrics.csv did not exit 0 — the "
+            ".gitignore entry is not effective. stderr: "
+            f"{result.stderr.decode().strip()!r}"
         )
