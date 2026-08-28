@@ -205,20 +205,23 @@ class TestCIWorkflow:
             f"CI test matrix python-version must include '3.14'; got {versions!r}"
         )
 
-    def test_ci_publish_gated_on_lint_and_test(self) -> None:
-        """The publish job must be gated on both lint and test jobs
-        (`needs: [lint, test]`), so a failing lint or test blocks release.
+    def test_ci_has_no_publish_job(self) -> None:
+        """ci.yml must NOT define a ``publish`` job.
+
+        The publish job moved to the tag-triggered ``release.yml`` workflow
+        (D-02): main pushes no longer attempt PyPI re-uploads, which was the
+        root cause of the silent red publish jobs during modernization. The
+        full publish-removal invariant is guarded by
+        ``tests/test_release_config.py::TestCiNoPublish``; this test keeps
+        the CI-workflow class self-consistent with the post-D-02 reality.
         """
         yaml = pytest.importorskip("yaml")
         parsed = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
-        publish_job = parsed.get("jobs", {}).get("publish", {})
-        assert publish_job, "CI workflow is missing the 'publish' job"
-        needs = publish_job.get("needs", [])
-        if isinstance(needs, str):
-            needs = [needs]
-        needs_set = set(needs)
-        assert {"lint", "test"}.issubset(needs_set), (
-            f"CI publish job must depend on both 'lint' and 'test'; got {needs!r}"
+        jobs = parsed.get("jobs", {})
+        assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
+        assert "publish" not in jobs, (
+            f"ci.yml must NOT contain a 'publish' job (moved to release.yml). "
+            f"Present jobs: {sorted(jobs)!r}"
         )
 
 

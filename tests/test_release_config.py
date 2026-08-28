@@ -28,9 +28,13 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]  # subprocess is
 import tomllib
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 GITIGNORE = REPO_ROOT / ".gitignore"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _load_pyproject() -> dict:
@@ -177,3 +181,186 @@ class TestReleaseConfig:
             "the .gitignore entry is not effective. stderr: "
             f"{result.stderr.decode().strip()!r}"
         )
+
+
+def _load_release_workflow() -> dict:
+    """Parse .github/workflows/release.yml as structured YAML data.
+
+    PyYAML is required (already a transitive dev dependency via the test
+    suite). The caller is expected to have invoked
+    ``pytest.importorskip("yaml")``.
+    """
+    import yaml
+
+    return yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _load_ci_workflow() -> dict:
+    """Parse .github/workflows/ci.yml as structured YAML data."""
+    import yaml
+
+    return yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+
+
+class TestReleaseWorkflow:
+    """REL-01-5: the tag-triggered release.yml workflow invariants.
+
+    The publish job moved OUT of ci.yml into a dedicated release.yml that
+    fires on ``git tag v*`` push. This class guards the workflow CONFIG as
+    data: the trigger, the publish job (PyPI upload via the pinned PyPA
+    action with the existing PYPI_TOKEN), the mandatory full-history
+    checkout (setuptools-scm needs git tags to derive the version), and the
+    separate GitHub Release job gated on publish success so a failed PyPI
+    upload cannot create an orphan GitHub Release.
+    """
+
+    def test_release_workflow_exists(self) -> None:
+        """The workflow file must exist at .github/workflows/release.yml."""
+        assert RELEASE_WORKFLOW.is_file(), (
+            f"Release workflow file missing: {RELEASE_WORKFLOW} (REL-01-5 "
+            "requires a tag-triggered release.yml)"
+        )
+
+    def test_release_workflow_parses_as_valid_yaml(self) -> None:
+        """The workflow file must parse as valid YAML (a malformed workflow
+        is a CI regression that GitHub would reject).
+        """
+        pytest.importorskip("yaml", reason="PyYAML required to parse workflow YAML")
+        parsed = _load_release_workflow()
+        assert isinstance(parsed, dict), (
+            f"release.yml did not parse to a mapping; got {type(parsed).__name__}"
+        )
+
+    def test_release_workflow_triggered_by_tags(self) -> None:
+        """The workflow ``on`` config must trigger on tag pushes matching
+        the ``v*`` pattern (e.g. ``v1.0.0``).
+
+        Accepts both the list form ``push: tags: ['v*']`` and any single
+        string entry containing ``v*``.
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        on = parsed.get("on") or parsed.get(True)  # YAML parses bare `on:` as bool True
+        assert on is not None, "release.yml is missing the 'on' trigger config"
+        push = on.get("push", {}) if isinstance(on, dict) else {}
+        tags = push.get("tags", []) if isinstance(push, dict) else []
+        tags_str = [str(t) for t in tags]
+        assert any("v*" in t for t in tags_str), (
+            f"release.yml on.push.tags must include a 'v*' pattern; got {tags_str!r}"
+        )
+
+    def test_release_workflow_has_publish_job(self) -> None:
+        """The workflow must define a ``publish`` job."""
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        jobs = parsed.get("jobs", {})
+        assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
+        assert "publish" in jobs, (
+            f"release.yml is missing the 'publish' job. Present jobs: {sorted(jobs)!r}"
+        )
+
+    def test_release_workflow_publish_uses_pypi_action(self) -> None:
+        """The publish job must use ``pypa/gh-action-pypi-publish`` (the
+        pinned PyPA action) in its steps.
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        publish = parsed.get("jobs", {}).get("publish", {})
+        steps = publish.get("steps", [])
+        uses = [str(s.get("uses", "")) for s in steps if isinstance(s, dict)]
+        assert any("pypa/gh-action-pypi-publish" in u for u in uses), (
+            f"release.yml publish job must use pypa/gh-action-pypi-publish; "
+            f"got uses={uses!r}"
+        )
+
+    def test_release_workflow_publish_has_fetch_depth_zero(self) -> None:
+        """The publish job's checkout step must set ``fetch-depth: 0``.
+
+        setuptools-scm walks git tags to derive the version; a shallow
+        checkout (default ``fetch-depth: 1``) has no tags and makes the
+        build fall back to ``0.0.0`` or fail.
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        publish = parsed.get("jobs", {}).get("publish", {})
+        steps = publish.get("steps", [])
+        checkout = next(
+            (s for s in steps if isinstance(s, dict) and "actions/checkout" in str(s.get("uses", ""))),
+            None,
+        )
+        assert checkout is not None, "release.yml publish job has no actions/checkout step"
+        with_block = checkout.get("with", {})
+        assert with_block.get("fetch-depth") == 0, (
+            f"release.yml publish checkout must set fetch-depth: 0; got with={with_block!r}"
+        )
+
+    def test_release_workflow_has_github_release_job(self) -> None:
+        """The workflow must define a ``github-release`` job gated on the
+        ``publish`` job via ``needs`` (so a failed PyPI upload cannot create
+        an orphan GitHub Release).
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        jobs = parsed.get("jobs", {})
+        assert "github-release" in jobs, (
+            f"release.yml is missing the 'github-release' job. Present jobs: {sorted(jobs)!r}"
+        )
+        gh_release = jobs["github-release"]
+        needs = gh_release.get("needs", [])
+        if isinstance(needs, str):
+            needs = [needs]
+        needs_set = {str(n) for n in needs}
+        assert "publish" in needs_set, (
+            f"release.yml github-release job must depend on 'publish'; got needs={needs!r}"
+        )
+
+    def test_release_workflow_github_release_uses_action(self) -> None:
+        """The github-release job must use ``softprops/action-gh-release``
+        (the stock action for tag→GitHub Release with body_path support).
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        gh_release = parsed.get("jobs", {}).get("github-release", {})
+        steps = gh_release.get("steps", [])
+        uses = [str(s.get("uses", "")) for s in steps if isinstance(s, dict)]
+        assert any("softprops/action-gh-release" in u for u in uses), (
+            f"release.yml github-release job must use softprops/action-gh-release; "
+            f"got uses={uses!r}"
+        )
+
+
+class TestCiNoPublish:
+    """REL-01-6: the publish job has been removed from ci.yml.
+
+    The publish job moved to the tag-triggered release.yml (D-02). ci.yml
+    keeps only the ``lint`` and ``test`` jobs on push/PR to main — main
+    pushes no longer attempt PyPI re-uploads (the root cause of the silent
+    red publish jobs during modernization). This class guards that ci.yml
+    does NOT carry a publish job and that lint+test remain.
+    """
+
+    def test_ci_no_publish_job(self) -> None:
+        """ci.yml jobs must NOT contain a ``publish`` key (the entire
+        publish job block was moved to release.yml).
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_ci_workflow()
+        jobs = parsed.get("jobs", {})
+        assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
+        assert "publish" not in jobs, (
+            f"ci.yml must NOT contain a 'publish' job (moved to release.yml). "
+            f"Present jobs: {sorted(jobs)!r}"
+        )
+
+    def test_ci_still_has_lint_and_test(self) -> None:
+        """ci.yml jobs must still contain ``lint`` and ``test`` keys
+        (unchanged by the publish-job removal).
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_ci_workflow()
+        jobs = parsed.get("jobs", {})
+        assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
+        for required in ("lint", "test"):
+            assert required in jobs, (
+                f"ci.yml is missing required job '{required}'. Present jobs: {sorted(jobs)!r}"
+            )
