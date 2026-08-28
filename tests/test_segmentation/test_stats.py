@@ -676,12 +676,21 @@ def test_compute_mask_area_returns_scalar():
     """
     pytest.importorskip("dask.distributed")
     import dask.array as da
-    from dask.distributed import Client
+    from dask.distributed import Client, LocalCluster
 
     from liom_toolkit.segmentation.stats import compute_mask_area
     from liom_toolkit.utils.dask_client import dask_client_manager
 
-    client = Client(n_workers=1, threads_per_worker=1, dashboard_address=":0")
+    # The dashboard is disabled (dashboard_address=False) because the bokeh
+    # TornadoServerApplication.stop() raises "Cannot synchronously wait on a
+    # running event loop" when the scheduler's dashboard service is torn down
+    # synchronously inside client.close() (bokeh 3.x + distributed 2026.x on
+    # Python 3.12). The error propagates as a RuntimeError out of Client.close()
+    # when a dashboard port is configured. The test does not exercise the
+    # dashboard, so disabling it avoids the spurious teardown error while still
+    # exercising the real gather/submit/compute path.
+    cluster = LocalCluster(n_workers=1, threads_per_worker=1, dashboard_address=False)
+    client = Client(cluster)
     saved_client = dask_client_manager.client
     dask_client_manager.client = client
     try:
@@ -691,5 +700,12 @@ def test_compute_mask_area_returns_scalar():
         assert isinstance(result, np.uint64), f"expected np.uint64, got {type(result)}"
         assert int(result) == 2
     finally:
+        # Restore the saved client first, then close the test-created client
+        # and cluster directly. The previous code restored saved_client (None)
+        # before calling dask_client_manager.close(), so close() saw
+        # self.client is None and did nothing -- leaking the Client/LocalCluster
+        # every run. Closing the local ``client`` variable directly drains
+        # in-flight tasks and shuts down the worker process.
         dask_client_manager.client = saved_client
-        dask_client_manager.close()
+        client.close()
+        cluster.close()
