@@ -427,7 +427,15 @@ def test_compute_slice_metrics_overwrite(tmp_path):
     openpyxl is now a declared core dependency at pyproject.toml, so the
     monkeypatch that previously intercepted ``to_excel`` to avoid the
     undeclared openpyxl runtime dependency is removed -- the real xlsx is
-    written and asserted to exist)."""
+    written and asserted to exist).
+
+    Scope note: this test removes the ``to_excel`` monkeypatch because it
+    asserts the xlsx file exists on disk. The other row-omission tests in
+    this file (vessel_free_region_omits_diameter, vessel_region_has_diameter,
+    vessel_free_slice_omits_total_diameter, total_density_excludes_out_of_tissue_vessels)
+    keep the ``to_excel`` monkeypatch intentionally -- they only inspect the
+    DataFrame rows, not the xlsx file, so intercepting ``to_excel`` avoids
+    unnecessary xlsx IO while still exercising the real row-omission logic."""
     import os
 
     mask = np.ones((30, 30), dtype=np.uint8)
