@@ -7,6 +7,14 @@ from .allen_sdk import (
     convert_allen_nrrd_to_ants,
     download_allen_template,
 )
+from .checkpoint import (
+    ResumeManager,
+    compute_params_hash,
+    is_step_done,
+    read_manifest,
+    write_done_marker,
+    write_manifest,
+)
 from .dask_client import (
     DaskClientManager,
     dask_client_manager,
@@ -31,6 +39,8 @@ __all__ = [
     "AnalysisOmeZarrWriter",
     "DaskClientManager",
     "OmeZarrWriter",
+    "ResumeManager",
+    "compute_params_hash",
     "construct_reference_space",
     "convert_allen_nrrd_to_ants",
     "convert_to_png_for_saving",
@@ -38,8 +48,12 @@ __all__ = [
     "dask_client_manager",
     "download_allen_template",
     "extract_zarr_to_image",
+    "is_step_done",
     "load_node_by_name",
     "load_zarr",
+    "read_manifest",
     "save_atlas_to_zarr",
     "save_label_to_zarr",
+    "write_done_marker",
+    "write_manifest",
 ]
