@@ -18,27 +18,44 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read   # least-privilege default; per-job overrides below grant write where needed
+
 jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi   # gates the job behind an environment (protection rules can be added later; required for future trusted-publishing switch)
+    permissions:
+      contents: read   # PyPI upload uses the token secret, not the GITHUB_TOKEN
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0   # setuptools-scm needs full history + tags to derive the version
-      - uses: astral-sh/setup-uv@v8.3.2
-      - run: uv python install 3.12
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+          # No enable-cache: the default 'auto' disables cache for tag-push
+          # events, which avoids cache poisoning on release builds.
       - run: uv sync
       - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
           password: ${{ secrets.PYPI_TOKEN }}
+          # TODO(follow-up): switch to PyPI trusted publishing (OIDC) once a trusted
+          # publisher is configured on PyPI. That removes the PYPI_TOKEN secret and
+          # requires permissions: id-token: write + environment: pypi on this job.
 
   github-release:
     needs: publish   # gate: do not create a GitHub Release if PyPI upload failed
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # creates a GitHub Release — requires write access to the repo
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Extract changelog section
         run: |
           # Extract the changelog section matching the tag's version into a
@@ -53,7 +70,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           awk -v ver="$VERSION" 'index($0,"## ["ver"]")==1{flag=1} /^## \[/{if(flag){if(first){exit}; first=1}} flag' \
             CHANGELOG.md > /tmp/release-notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           body_path: /tmp/release-notes.md
           generate_release_notes: false
