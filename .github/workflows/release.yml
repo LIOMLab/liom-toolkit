@@ -30,7 +30,7 @@ jobs:
     permissions:
       contents: read   # PyPI upload uses the token secret, not the GITHUB_TOKEN
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # setuptools-scm needs full history + tags to derive the version
       - name: Set up uv
@@ -41,7 +41,7 @@ jobs:
           # events, which avoids cache poisoning on release builds.
       - run: uv sync
       - run: uv build
-      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
         with:
           password: ${{ secrets.PYPI_TOKEN }}
           # TODO(follow-up): switch to PyPI trusted publishing (OIDC) once a trusted
@@ -55,7 +55,7 @@ jobs:
     permissions:
       contents: write   # creates a GitHub Release — requires write access to the repo
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Extract changelog section
         run: |
           # Extract the changelog section matching the tag's version into a
