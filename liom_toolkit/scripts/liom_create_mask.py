@@ -51,6 +51,13 @@ def main() -> None:
     logger, optionally connects to a remote Dask scheduler when
     ``--dask_scheduler`` is given, and delegates the mask creation + write to
     :func:`liom_toolkit.utils.create_and_write_mask`.
+
+    Note
+    ----
+    The ``--resume`` flag is accepted by the shared parent parser but ignored
+    by this CLI: ``create_and_write_mask`` is a single-step transform with no
+    checkpointable stages. The flag is honoured by the multi-stage pipeline
+    CLIs that consume the same parent parser.
     """
     parser = _build_argument_parser()
     args = parser.parse_args()

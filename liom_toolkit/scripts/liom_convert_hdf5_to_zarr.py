@@ -49,6 +49,13 @@ def main() -> None:
     logger, optionally connects to a remote Dask scheduler when
     ``--dask_scheduler`` is given, and delegates the conversion to
     :func:`liom_toolkit.conversion.convert_hdf5_to_zarr`.
+
+    Note
+    ----
+    The ``--resume`` flag is accepted by the shared parent parser but ignored
+    by this CLI: ``convert_hdf5_to_zarr`` is a single-step conversion with no
+    checkpointable stages. The flag is honoured by the multi-stage pipeline
+    CLIs that consume the same parent parser.
     """
     parser = _build_argument_parser()
     args = parser.parse_args()
