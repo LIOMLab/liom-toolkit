@@ -364,3 +364,136 @@ class TestCiNoPublish:
             assert required in jobs, (
                 f"ci.yml is missing required job '{required}'. Present jobs: {sorted(jobs)!r}"
             )
+
+
+# --- Changelog + docs/source/changelog.md config-as-data tests -------------
+
+CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+DOCS_CHANGELOG = REPO_ROOT / "docs" / "source" / "changelog.md"
+INDEX_RST = REPO_ROOT / "docs" / "source" / "index.rst"
+
+
+class TestChangelog:
+    """REL-01 changelog invariants parsed from the root CHANGELOG.md.
+
+    The changelog is the single source of truth for the v0.5 -> 1.0.0
+    breaking-change narrative. It must follow the Keep a Changelog 1.1.0
+    convention (preamble + reverse-chrono release headers + the six fixed
+    section headers), declare an ``[Unreleased]`` section for forward-looking
+    hygiene, and ship a ``[1.0.0]`` section with Added / Changed / Removed /
+    Fixed subsections mapping the modernization's breaking changes.
+    """
+
+    def test_changelog_exists(self) -> None:
+        """CHANGELOG.md must exist at the repo root (single source of truth
+        for breaking changes; discovered on the GitHub repo view, the PyPI
+        Changelog project-URL, and via ``git grep`` by downstream consumers).
+        """
+        assert CHANGELOG.is_file(), (
+            f"CHANGELOG.md missing at repo root ({CHANGELOG})"
+        )
+
+    def test_changelog_has_keep_a_changelog_header(self) -> None:
+        """The preamble must reference both Keep a Changelog and Semantic
+        Versioning (the convention links the file declares up top).
+        """
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "Keep a Changelog" in text, (
+            "CHANGELOG.md preamble must reference 'Keep a Changelog' "
+            "(convention attribution)"
+        )
+        assert "Semantic Versioning" in text, (
+            "CHANGELOG.md preamble must reference 'Semantic Versioning' "
+            "(convention attribution)"
+        )
+
+    def test_changelog_has_1_0_0_section(self) -> None:
+        """The changelog must declare a ``## [1.0.0]`` release header
+        (the release this plan ships).
+        """
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "## [1.0.0]" in text, (
+            "CHANGELOG.md must contain a '## [1.0.0]' release header"
+        )
+
+    def test_changelog_has_added_section(self) -> None:
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "### Added" in text, (
+            "CHANGELOG.md must contain an '### Added' subsection"
+        )
+
+    def test_changelog_has_changed_section(self) -> None:
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "### Changed" in text, (
+            "CHANGELOG.md must contain an '### Changed' subsection"
+        )
+
+    def test_changelog_has_removed_section(self) -> None:
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "### Removed" in text, (
+            "CHANGELOG.md must contain an '### Removed' subsection"
+        )
+
+    def test_changelog_has_fixed_section(self) -> None:
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "### Fixed" in text, (
+            "CHANGELOG.md must contain an '### Fixed' subsection"
+        )
+
+    def test_changelog_has_unreleased_section(self) -> None:
+        """Keep a Changelog 1.1.0 recommends an ``[Unreleased]`` section at
+        the top for accumulating changes between releases (forward-looking
+        hygiene).
+        """
+        text = CHANGELOG.read_text(encoding="utf-8")
+        assert "## [Unreleased]" in text, (
+            "CHANGELOG.md must contain a '## [Unreleased]' section at the top"
+        )
+
+
+class TestDocsChangelog:
+    """REL-01 RTD wiring invariants for docs/source/changelog.md + index.rst.
+
+    The root CHANGELOG.md is pulled into the RTD toctree via a 3-line myst
+    stub that ``{include}``s ``../CHANGELOG.md``. The ``:orphan: true``
+    frontmatter removes the stub from the sidebar toctree (avoiding a
+    duplicate "Changelog" entry) while the include still renders the content
+    inline. ``index.rst`` must list ``changelog`` in its hidden toctree so
+    the page is reachable.
+    """
+
+    def test_docs_changelog_stub_exists(self) -> None:
+        assert DOCS_CHANGELOG.is_file(), (
+            f"docs/source/changelog.md stub missing ({DOCS_CHANGELOG})"
+        )
+
+    def test_docs_changelog_stub_includes_root(self) -> None:
+        """The stub must use the myst ``{include}`` directive to pull in
+        ``../CHANGELOG.md`` (the root source of truth).
+        """
+        text = DOCS_CHANGELOG.read_text(encoding="utf-8")
+        assert "{include}" in text, (
+            "docs/source/changelog.md must use the myst {include} directive"
+        )
+        assert "../CHANGELOG.md" in text, (
+            "docs/source/changelog.md must {include} ../CHANGELOG.md"
+        )
+
+    def test_docs_changelog_stub_is_orphan(self) -> None:
+        """The stub must declare ``orphan: true`` frontmatter so it does not
+        create a duplicate "Changelog" entry in the RTD sidebar toctree.
+        """
+        text = DOCS_CHANGELOG.read_text(encoding="utf-8")
+        assert "orphan" in text, (
+            "docs/source/changelog.md must declare 'orphan' frontmatter "
+            "(removes the stub from the sidebar toctree)"
+        )
+
+    def test_index_rst_toctree_has_changelog(self) -> None:
+        """``docs/source/index.rst`` must list ``changelog`` in its toctree
+        block so the changelog page is reachable from the docs root.
+        """
+        text = INDEX_RST.read_text(encoding="utf-8")
+        assert "changelog" in text, (
+            "docs/source/index.rst toctree must include a 'changelog' entry"
+        )
