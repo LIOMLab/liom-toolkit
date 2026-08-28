@@ -429,6 +429,14 @@ def train_model(
     # Resume bookkeeping: the manifest records last_completed_epoch
     # (complementary to the per-epoch checkpoint.*.pth weights artifact).
     # The manifest is the bookkeeper; the .pth is the weights.
+    #
+    # NOTE: steps_total=epochs is passed for manifest completeness, but
+    # train_model does NOT call start_step/finish_step per epoch — it uses
+    # set_last_completed_epoch + the complete sentinel instead. The
+    # completed_steps set in the manifest is therefore always empty for
+    # this pipeline; last_completed_epoch is the authoritative epoch index.
+    # Future maintainers should not expect completed_steps to track epoch
+    # completion here.
     from liom_toolkit.utils.checkpoint import ResumeManager
 
     resume_mgr = ResumeManager(
