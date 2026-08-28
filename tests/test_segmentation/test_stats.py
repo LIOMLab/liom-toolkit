@@ -145,32 +145,45 @@ def test_compute_average_diameter_no_nan_escapes():
 
 
 def test_compute_average_diameter_known_answer():
-    """Known-answer on a synthetic straight tube: a horizontal band of known
-    half-width ``r`` skeletonized down its centerline yields a mean
-    diameter approximately ``2 * r * voxel_size`` (the EDT at the skeleton
-    center equals the half-width)."""
+    """Known-answer on a synthetic straight tube with an exactly-known EDT.
+
+    A horizontal band of foreground (height ``2r + 1``) is embedded in a
+    larger array with zero margin above and below. The skeleton is a single
+    centerline row, restricted to the central columns where the EDT is
+    constant and exactly equal to ``r + 1`` (the distance from the centerline
+    to the nearest zero pixel above/below the band). The mean diameter is
+    then exactly ``2 * (r + 1) * voxel_size``.
+
+    The skeleton is hand-built (not produced by ``skeletonize``) because
+    ``skeletonize`` of a filled rectangle yields its boundary, not a single
+    centerline, and the resulting EDT values vary along the boundary. A
+    hand-built single-row skeleton over the region where the EDT is constant
+    gives a true known-answer: the assertion uses a tight tolerance
+    (``rel=1e-9``) so a wrong voxel_size factor or an off-by-2 in the
+    diameter computation fails the test.
+    """
     r = 5
     voxel_size = 0.65
-    mask = np.zeros((2 * r + 1, 2 * r + 1), dtype=np.uint8)
-    # A horizontal band of height 2*r+1 (full height) and width 2*r+1 (full
-    # width) makes the EDT at the centerline equal to r -- the diameter is
-    # then 2 * r * voxel_size.
-    mask[:, :] = 1
-    skeleton = skeletonize(mask)
-    # skeletonize of a fully-filled square leaves only the boundary; build a
-    # thin horizontal tube instead so the skeleton is a single centerline.
-    mask = np.zeros((2 * r + 1, 2 * r + 1), dtype=np.uint8)
-    mask[r - r // 2 : r + r // 2 + 1, :] = 1
-    skeleton = skeletonize(mask)
+    margin = r  # zero rows above and below the band
+    band_height = 2 * r + 1
+    H = band_height + 2 * margin
+    W = 4 * r + 1  # wide enough that left/right edges do not reach the center
+    mask = np.zeros((H, W), dtype=np.uint8)
+    mask[margin : margin + band_height, :] = 1  # horizontal band of foreground
+    # Skeleton: single centerline row, restricted to columns where the EDT
+    # equals (r + 1) exactly (far enough from the left/right array edges that
+    # the nearest zero is above/below the band, not to the side).
+    skeleton = np.zeros((H, W), dtype=bool)
+    center_row = margin + r
+    skeleton[center_row, r : W - r] = True
 
     result = compute_average_diameter(mask, skeleton, voxel_size)
 
-    # The EDT at the skeleton centerline is approximately the half-height of
-    # the band; the diameter is 2 * half-height * voxel_size. Assert it is
-    # positive and within a generous tolerance of the band height.
-    band_height = (r // 2) * 2 + 1
-    expected_diameter = band_height * voxel_size
-    assert result == pytest.approx(expected_diameter, rel=0.5)
+    # The EDT along the restricted centerline is constant at (r + 1); the
+    # mean diameter is 2 * (r + 1) * voxel_size, exact to floating point.
+    expected_radius = float(r + 1)
+    expected_diameter = 2 * expected_radius * voxel_size
+    assert result == pytest.approx(expected_diameter, rel=1e-9)
     assert result > 0
 
 
