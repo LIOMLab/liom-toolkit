@@ -129,14 +129,10 @@ testpaths = ["tests"]
 addopts = [
     "-ra",
     "--strict-markers",
-    # xdist: -n auto capped at 6 workers (per-worker startup dominates past
-    # that here); --dist=load balances dynamically (fastest of the dist modes);
-    # --max-worker-restart=0 fails loud on a crash instead of silent restart.
     "-n", "auto",
     "--maxprocesses=6",
     "--dist=load",
     "--max-worker-restart=0",
-    # Coverage source/report/gate live in [tool.coverage.*] below.
     "--cov",
 ]
 markers = [
@@ -145,24 +141,8 @@ markers = [
     "slow: slow test, auto-deselected from fast iteration by convention",
     "real_process_map: opt out of the fast serial process_map fixture (test_dataset.py) — the test must exercise the real forked-worker path",
 ]
-# No blanket deprecation-warning filter: real third-party deprecations must
-# surface so upcoming breaking dependency changes are visible. Add targeted
-# filters (by message/module) here only when a specific noisy warning is
-# observed during a test run.
 filterwarnings = [
-    # pynrrd 1.1.3 (latest) calls datetime.utcnow() inside nrrd.write
-    # (nrrd/writer.py:148), which is deprecated in Python 3.12+. This is
-    # purely upstream — we cannot fix nrrd's code and cannot upgrade
-    # (already latest). Scope by exact message so any other nrrd
-    # deprecation still surfaces. AGENTS.md §5 sanctions this targeted
-    # filter for unfixable upstream deprecations.
-    #
-    # Note: Python's warnings filter matches the message with re.match
-    # (anchored at the start), and the actual warning text begins
-    # "datetime.datetime.utcnow() is deprecated" — the regex must include
-    # the "datetime." prefix to match. A module scope cannot be used
-    # because datetime.utcnow() raises the warning from C code (_datetime
-    # module), so the warning's frame module is not nrrd.writer.
+    # pynrrd 1.1.3 calls datetime.utcnow() (deprecated in 3.12+); unfixable upstream.
     "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning",
 ]
 
@@ -171,8 +151,7 @@ source = ["liom_toolkit"]
 
 [tool.coverage.report]
 show_missing = true
-# CI overrides to 0 on 3.14 legs via --cov-fail-under=0 (importorskip-gated
-# tests skip there). The CLI flag takes priority over this value.
+# CI overrides to 0 on 3.14 legs via --cov-fail-under=0.
 fail_under = 60
 
 [tool.ruff]
