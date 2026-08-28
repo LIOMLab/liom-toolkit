@@ -2,13 +2,15 @@
 
 Exercises the end-to-end path: argparse → basicConfig → segment_2d_image →
 output files written. Uses a small synthetic 2D image saved as a TIFF in
-``tmp_path`` and invokes the console script via ``uv run`` so the installed
-entry point is exercised (not just the in-process function).
+``tmp_path`` and invokes ``liom_segment_2d.main()`` in-process with
+``sys.argv`` set via ``monkeypatch`` (no subprocess) — the same pattern used
+by ``test_liom_create_mask.py``. This avoids the ``uv run`` subprocess
+overhead (~3s for venv-reconcile + interpreter startup) while exercising the
+real ``main()`` → ``segment_2d_image`` path.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -16,7 +18,7 @@ import imageio.v3 as iio
 import numpy as np
 
 
-def test_liom_segment_2d_smoke(tmp_path: Path) -> None:
+def test_liom_segment_2d_smoke(tmp_path: Path, monkeypatch) -> None:
     """liom-segment-2d on a synthetic 2D image writes the expected output files."""
     # Build a small synthetic 2D image with a bright square on a dark
     # background — the same bimodal pattern used by the bimodal_2d fixture,
@@ -27,23 +29,22 @@ def test_liom_segment_2d_smoke(tmp_path: Path) -> None:
     iio.imwrite(str(input_file), img)
 
     output_dir = tmp_path / "out"
-    result = subprocess.run(
+    monkeypatch.setattr(
+        sys,
+        "argv",
         [
-            "uv",
-            "run",
             "liom-segment-2d",
             str(input_file),
             str(output_dir),
             "--log-level",
             "INFO",
         ],
-        capture_output=True,
-        text=True,
     )
-    assert result.returncode == 0, (
-        f"liom-segment-2d failed: rc={result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+
+    from liom_toolkit.scripts.liom_segment_2d import main
+
+    main()
+
     # segment_2d_image writes {name}_mask.tif and {name}_vessel_mask.tif
     # where name defaults to the input file stem.
     assert (output_dir / "input_mask.tif").exists()

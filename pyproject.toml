@@ -145,6 +145,7 @@ markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
     "antspy: requires the antspy extra (antspyx) - 3.12-only, skip with -m 'not antspy'",
     "slow: slow test, auto-deselected from fast iteration by convention",
+    "real_process_map: opt out of the fast serial process_map fixture (test_dataset.py) — the test must exercise the real forked-worker path",
 ]
 # No blanket deprecation-warning filter: real third-party deprecations must
 # surface so upcoming breaking dependency changes are visible. Add targeted

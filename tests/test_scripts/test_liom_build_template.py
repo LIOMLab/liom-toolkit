@@ -17,27 +17,24 @@ Exercises:
 Per D-01: no ``pytest.importorskip``; the ``ants`` leaf is mocked via
 ``fake_ants`` (``sys.modules`` injection with mandatory teardown), NOT the
 liom domain callee in a way that absorbs arbitrary kwargs.
+
+The ``--help`` smoke check invokes the script's ``_build_argument_parser()``
+in-process and formats its help text, rather than spawning a ``uv run``
+subprocess (avoids the per-invocation venv-reconcile + interpreter-startup
+cost).
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from unittest.mock import patch
 
 
 def test_liom_build_template_help_exits_0() -> None:
-    """liom-build-template --help exits 0 with shared + curated flags."""
-    result = subprocess.run(
-        ["uv", "run", "liom-build-template", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"liom-build-template --help failed: rc={result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    out = result.stdout + result.stderr
+    """liom-build-template --help contains shared + curated flags."""
+    from liom_toolkit.scripts.liom_build_template import _build_argument_parser
+
+    out = _build_argument_parser().format_help()
     for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
         assert flag in out, f"liom-build-template --help missing {flag}"
     for flag in ("output_file", "zarr_files", "brain_names"):

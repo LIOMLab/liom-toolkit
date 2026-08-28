@@ -13,12 +13,16 @@ Per D-01: no ``pytest.importorskip``; no ``sys.modules`` heavy-dep mock
 (core-deps-only CLI). Per AGENTS section 5, ``imageio``/``numpy``/``pandas``/
 ``openpyxl`` are NOT mocked -- the smoke writes real TIFFs and reads the real
 xlsx output.
+
+The ``--help`` smoke check invokes the script's ``_build_argument_parser()``
+in-process and formats its help text, rather than spawning a ``uv run``
+subprocess (avoids the per-invocation venv-reconcile + interpreter-startup
+cost).
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,17 +31,12 @@ import numpy as np
 
 
 def test_liom_compute_slice_metrics_help_exits_0() -> None:
-    """liom-compute-slice-metrics --help exits 0 with shared + curated flags."""
-    result = subprocess.run(
-        ["uv", "run", "liom-compute-slice-metrics", "--help"],
-        capture_output=True,
-        text=True,
+    """liom-compute-slice-metrics --help contains shared + curated flags."""
+    from liom_toolkit.scripts.liom_compute_slice_metrics import (
+        _build_argument_parser,
     )
-    assert result.returncode == 0, (
-        f"liom-compute-slice-metrics --help failed: rc={result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    out = result.stdout + result.stderr
+
+    out = _build_argument_parser().format_help()
     for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
     for flag in ("output_dir", "image", "--voxel_size"):

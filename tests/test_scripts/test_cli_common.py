@@ -4,11 +4,16 @@ Covers the cross-cutting flag contract consumed by every CLI via
 ``parents=[build_common_parser()]``: ``--dask_scheduler``, ``--n_workers``,
 ``--log-level``, ``--resume``. Also smoke-tests the existing retrofitted CLIs'
 ``--help`` to confirm the shared flags are present.
+
+The ``--help`` smoke checks invoke each script's ``_build_argument_parser()``
+in-process and format its help text, rather than spawning a ``uv run``
+subprocess. This avoids the per-invocation venv-reconcile + interpreter-startup
+cost (~2s each) while exercising the exact same parser construction the CLI
+uses at runtime.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 
 from liom_toolkit.scripts._common import build_common_parser
@@ -68,27 +73,30 @@ def test_dask_scheduler_default_none() -> None:
     assert args.dask_scheduler is None
 
 
-def _help_stdout(entry_point: str) -> str:
-    """Run a console-script --help via uv and return combined stdout+stderr."""
-    result = subprocess.run(
-        ["uv", "run", entry_point, "--help"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout + result.stderr
+def _help_text(module_name: str) -> str:
+    """Build the script's argparse parser in-process and return its --help text.
+
+    Imports ``liom_toolkit.scripts.<module_name>``, calls its
+    ``_build_argument_parser()``, and returns ``parser.format_help()`` — the
+    exact text ``--help`` would print without the subprocess overhead.
+    """
+    import importlib
+
+    mod = importlib.import_module(f"liom_toolkit.scripts.{module_name}")
+    parser = mod._build_argument_parser()
+    return parser.format_help()
 
 
 def test_liom_segment_2d_help_exits_0() -> None:
-    """liom-segment-2d --help exits 0 and contains the 4 shared flags."""
-    out = _help_stdout("liom-segment-2d")
+    """liom-segment-2d --help contains the 4 shared flags."""
+    out = _help_text("liom_segment_2d")
     for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
         assert flag in out, f"liom-segment-2d --help missing {flag}"
 
 
 def test_existing_clis_have_common_flags() -> None:
     """liom-convert-hdf5-to-zarr and liom-create-mask --help contain the shared flags."""
-    for entry_point in ("liom-convert-hdf5-to-zarr", "liom-create-mask"):
-        out = _help_stdout(entry_point)
-        assert "--log-level" in out, f"{entry_point} --help missing --log-level"
-        assert "--resume" in out, f"{entry_point} --help missing --resume"
+    for module_name in ("liom_convert_hdf5_to_zarr", "liom_create_mask"):
+        out = _help_text(module_name)
+        assert "--log-level" in out, f"{module_name} --help missing --log-level"
+        assert "--resume" in out, f"{module_name} --help missing --resume"

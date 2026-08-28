@@ -49,7 +49,7 @@ Endpoint and tampering surface
 ------------------------------
 The structure-tree JSON endpoint is plain HTTP (no HTTPS variant exists on the
 static-file server). The CCF2017 content has been frozen since 2020, and the
-25μm regression fixture in ``tests/test_utils/fixtures/allen_itksnap_25um/``
+100μm regression fixture in ``tests/test_utils/fixtures/allen_itksnap_100um/``
 catches any divergence from the known-good ``allensdk`` output, which is the
 mitigation for the HTTP tampering surface.
 """

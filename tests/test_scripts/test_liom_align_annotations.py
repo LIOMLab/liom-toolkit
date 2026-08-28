@@ -6,27 +6,24 @@ Exercises:
   --resolution, --rigid_type, --deformable_type).
 * The CLI surfaces a clear ``ImportError`` mentioning ``antspy`` when the
   ``ants`` extra is not importable (lazy-import guard pattern).
+
+The ``--help`` smoke check invokes the script's ``_build_argument_parser()``
+in-process and formats its help text, rather than spawning a ``uv run``
+subprocess (avoids the per-invocation venv-reconcile + interpreter-startup
+cost).
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from unittest.mock import patch
 
 
 def test_liom_align_annotations_help_exits_0() -> None:
-    """liom-align-annotations --help exits 0 with shared + curated flags."""
-    result = subprocess.run(
-        ["uv", "run", "liom-align-annotations", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"liom-align-annotations --help failed: rc={result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    out = result.stdout + result.stderr
+    """liom-align-annotations --help contains shared + curated flags."""
+    from liom_toolkit.scripts.liom_align_annotations import _build_argument_parser
+
+    out = _build_argument_parser().format_help()
     for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
         assert flag in out, f"liom-align-annotations --help missing {flag}"
     for flag in ("target_volume", "mask", "template", "atlas", "data_dir"):

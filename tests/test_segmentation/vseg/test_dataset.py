@@ -25,6 +25,35 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fast_process_map(request, monkeypatch):
+    """Replace ``process_map`` with a fast serial version for tests that don't
+    need the real forked-worker path.
+
+    ``OmeZarrLabelDataSet.get_valid_indices`` calls ``tqdm.contrib.concurrent.
+    process_map``, which spawns a process pool. On spawn-start-method runtimes
+    (macOS), each worker re-imports torch/dask/zarr (~2.7s startup per pool
+    invocation), dominating test runtime for the cache/indexing tests that
+    don't care about fork semantics.
+
+    This fixture replaces ``process_map`` with a serial list comprehension that
+    produces identical results (the validity bits are deterministic) without
+    spawning workers. Tests that MUST exercise the real forked-worker path
+    (the D-11 fork-mutation regression) opt out via
+    ``@pytest.mark.real_process_map``.
+    """
+    if request.node.get_closest_marker("real_process_map"):
+        yield
+        return
+    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
+
+    def fast_pm(fn, *iterables, **kwargs):
+        return [fn(*args) for args in zip(*iterables)]
+
+    monkeypatch.setattr(dataset_mod, "process_map", fast_pm)
+    yield
+
+
 def _make_tiny_zarr(tmp_path) -> str:
     """Build a 16x16x16 single-channel uint16 zarr in tmp_path.
 
@@ -175,6 +204,7 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
     # NOT idx % 4. Phase 6/8 fixes this — update assertions then, do not xfail.
 
 
+@pytest.mark.real_process_map
 def test_get_valid_indices_fork_mutation(tmp_path):
     """Regression for the D-11 fork-mutation bug in ``get_valid_indices``.
 
