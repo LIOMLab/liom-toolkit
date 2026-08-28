@@ -83,6 +83,9 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+# autoapi-generated API reference stubs (autoapi_keep_files=True is for
+# incremental-build speed, not for committing — regenerated every build).
+docs/source/reference/autoapi/
 
 # PyBuilder
 .pybuilder/

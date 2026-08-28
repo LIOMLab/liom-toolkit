@@ -1,16 +1,18 @@
-# Required
+# Read the Docs configuration — native uv build (April 2026).
+# Supersedes the older pip + requirements.txt + Python 3.11 setup.
 version: 2
 
 build:
-  os: ubuntu-22.04
+  os: ubuntu-24.04
   tools:
-    python: "3.11"
+    python: "3.14"
 
 sphinx:
   configuration: docs/source/conf.py
+  fail_on_warning: false
 
 python:
   install:
-    - method: pip
-      path: .
-    - requirements: docs/requirements.txt
+    - method: uv
+      command: sync
+      groups: [docs]

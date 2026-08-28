@@ -68,9 +68,6 @@ all = [
 
 [dependency-groups]
 dev = [
-    "sphinx",
-    "sphinx-rtd-theme",
-    "sphinxcontrib-apidoc",
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
@@ -83,6 +80,21 @@ dev = [
     "pandas-stubs",
     "pyarrow>=25.0.1",
     "types-openpyxl>=3.1.5.20260827",
+]
+# Docs-build-only tooling (PEP 735 dependency group). Not a user-facing
+# extra — `pip install liom-toolkit[docs]` is intentionally not offered.
+# RTD installs this group via `.readthedocs.yaml` (`groups: [docs]`).
+docs = [
+    "sphinx>=9.1",
+    "pydata-sphinx-theme>=0.17",
+    "sphinx-autoapi>=3.8",
+    "sphinx-argparse>=0.5",
+    "sphinx-design>=0.7",
+    "sphinx-copybutton>=0.5",
+    "myst-parser>=5.0",
+    "nbsphinx>=0.9",
+    "ipykernel>=6.29",
+    "ipywidgets>=8.0",
 ]
 
 [project.scripts]

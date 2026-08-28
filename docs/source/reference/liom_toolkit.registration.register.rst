@@ -1,7 +1,0 @@
-liom\_toolkit.registration.register module
-==========================================
-
-.. automodule:: liom_toolkit.registration.register
-   :members:
-   :show-inheritance:
-   :undoc-members:
