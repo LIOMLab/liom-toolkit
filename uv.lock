@@ -1704,7 +1704,6 @@ wheels = [
 
 [[package]]
 name = "liom-toolkit"
-version = "2025.6.12"
 source = { editable = "." }
 dependencies = [
     { name = "bokeh" },

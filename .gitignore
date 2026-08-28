@@ -34,6 +34,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# setuptools-scm-generated version file (written to the source tree at build
+# time by [tool.setuptools_scm].write_to_source = true; not committed).
+liom_toolkit/_version.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
