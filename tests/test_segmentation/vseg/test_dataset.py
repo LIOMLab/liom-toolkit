@@ -552,16 +552,19 @@ def test_valid_indices_cache_atomic_write(tmp_path, monkeypatch):
     assert _Path(sidecar).exists()
 
     # Now simulate a crash during the atomic write by patching
-    # pathlib.Path.replace to raise once. The cache helper must unlink the
-    # .partial temp file and re-raise, leaving the existing sidecar intact
-    # (no corrupt sidecar).
+    # pathlib.Path.replace to raise once -- but ONLY for the cache sidecar
+    # path, so concurrent tests doing their own zarr atomic writes (which
+    # also call Path.replace) are not affected. Patching Path.replace
+    # globally would crash any other Path.replace in the same process.
     real_replace = _Path.replace
+    sidecar_path = _Path(sidecar)
     replace_calls = {"n": 0}
 
     def crashing_replace(self, target):
-        replace_calls["n"] += 1
-        if replace_calls["n"] == 1:
-            raise OSError("simulated crash mid-write")
+        if _Path(target) == sidecar_path:
+            replace_calls["n"] += 1
+            if replace_calls["n"] == 1:
+                raise OSError("simulated crash mid-write")
         return real_replace(self, target)
 
     monkeypatch.setattr(_Path, "replace", crashing_replace)
