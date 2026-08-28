@@ -45,6 +45,9 @@ MANIFEST
 # committed fixture; it is not needed by the regression test).
 tests/test_utils/fixtures/allen_itksnap_25um/manifest.json
 
+# Stray metric-output CSV from local CLI runs (not a committed artifact).
+/final_metrics.csv
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

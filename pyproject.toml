@@ -506,9 +506,6 @@ replace-imports-with-any = [
     "allensdk.**",
 ]
 
-# Warnings don't fail CI — only error diagnostics do. The CI ty step keeps
-# continue-on-error: true until the annotation waves are done; the hard
-# gate (removing continue-on-error) lands after all annotations are done.
 [tool.ty.terminal]
 error-on-warning = false
 
