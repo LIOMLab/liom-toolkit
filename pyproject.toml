@@ -524,6 +524,13 @@ rules = { possibly-missing-attribute = "ignore", unresolved-attribute = "warn" }
 include = ["tests/**", "**/test_*.py", "**/conftest.py"]
 rules = { possibly-unresolved-reference = "ignore", unresolved-attribute = "ignore", invalid-assignment = "ignore", missing-type-argument = "ignore", unresolved-import = "ignore", invalid-argument-type = "ignore", invalid-return-type = "ignore", not-subscriptable = "ignore", unsupported-operator = "ignore", unsound-return-statement = "ignore", missing-argument = "ignore", no-matching-overload = "ignore", unknown-argument = "ignore", not-iterable = "ignore", missing-override-decorator = "ignore", unsound-assignment = "ignore" }
 
+# docs/ is excluded from ruff (extend-exclude) and contains Sphinx config
+# + notebooks where try-block imports and Node|None unions fire type
+# warnings that are out of scope for shipped package code.
+[[tool.ty.overrides]]
+include = ["docs/**"]
+rules = { possibly-unresolved-reference = "ignore", unresolved-attribute = "ignore" }
+
 [tool.setuptools.package-data]
 liom_toolkit = ["py.typed"]
 
