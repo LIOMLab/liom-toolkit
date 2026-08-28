@@ -71,6 +71,7 @@ def test_n_workers_default_cap(monkeypatch):
         kwargs = fake_cluster_cls.call_args.kwargs
         assert kwargs["n_workers"] == expected, f"cpu_count={cpu}"
         assert isinstance(kwargs["n_workers"], int), "n_workers must be int, not float"
+        assert kwargs["dashboard_address"] is False, "dashboard must be disabled (teardown noise)"
         fake_cluster_cls.reset_mock()
 
 
@@ -82,6 +83,7 @@ def test_n_workers_explicit(monkeypatch):
     mgr.__create_local_cluster__(2)
 
     assert fake_cluster_cls.call_args.kwargs["n_workers"] == 2
+    assert fake_cluster_cls.call_args.kwargs["dashboard_address"] is False
 
 
 def test_n_workers_zero_raises(monkeypatch):

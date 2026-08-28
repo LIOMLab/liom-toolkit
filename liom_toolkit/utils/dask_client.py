@@ -99,7 +99,15 @@ class DaskClientManager:
             n_workers = min(multiprocessing.cpu_count() - 1, 8)
         if n_workers < 1:
             raise ValueError(f"n_workers must be >= 1, got {n_workers}")
-        self.cluster = LocalCluster(n_workers=n_workers, threads_per_worker=1)
+        # dashboard_address=False disables the bokeh dashboard. The dashboard's
+        # TornadoServerApplication.stop() raises "Cannot synchronously wait on a
+        # running event loop" during synchronous teardown (bokeh 3.x +
+        # distributed 2026.x), which propagates as a RuntimeError out of
+        # Client.close(). The dashboard is a development/debugging web UI and is
+        # not needed for the library's use case.
+        self.cluster = LocalCluster(
+            n_workers=n_workers, threads_per_worker=1, dashboard_address=False
+        )
         self.client = Client(self.cluster)
 
     def __connect_to_cluster__(self, address: str) -> None:

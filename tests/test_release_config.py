@@ -326,6 +326,51 @@ class TestReleaseWorkflow:
             f"got uses={uses!r}"
         )
 
+    def test_release_workflow_publish_gated_on_lint_and_test(self) -> None:
+        """The publish job must depend on both ``lint`` and ``test`` jobs
+        via ``needs`` so a tag pushed against a red CI commit cannot publish
+        to PyPI.
+
+        The release workflow re-runs the CI gates (lint + test matrix) on
+        the tagged commit and gates publish on their success. This verifies
+        the EXACT commit being shipped, not just "CI was green on main at
+        some point." Removing this gate would allow shipping a
+        5-Production/Stable release from a broken commit.
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        publish = parsed.get("jobs", {}).get("publish", {})
+        needs = publish.get("needs", [])
+        if isinstance(needs, str):
+            needs = [needs]
+        needs_set = {str(n) for n in needs}
+        assert "lint" in needs_set, (
+            f"release.yml publish job must depend on 'lint'; got needs={needs!r}"
+        )
+        assert "test" in needs_set, (
+            f"release.yml publish job must depend on 'test'; got needs={needs!r}"
+        )
+
+    def test_release_workflow_has_lint_job(self) -> None:
+        """The release workflow must define a ``lint`` job (re-runs ruff +
+        ty on the tagged commit as a release gate)."""
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        jobs = parsed.get("jobs", {})
+        assert "lint" in jobs, (
+            f"release.yml is missing the 'lint' job (CI gate). Present jobs: {sorted(jobs)!r}"
+        )
+
+    def test_release_workflow_has_test_job(self) -> None:
+        """The release workflow must define a ``test`` job (re-runs pytest
+        on the tagged commit as a release gate)."""
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        jobs = parsed.get("jobs", {})
+        assert "test" in jobs, (
+            f"release.yml is missing the 'test' job (CI gate). Present jobs: {sorted(jobs)!r}"
+        )
+
 
 class TestCiNoPublish:
     """REL-01-6: the publish job has been removed from ci.yml.
