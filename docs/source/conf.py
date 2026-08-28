@@ -17,10 +17,16 @@ copyright = f"{datetime.now().year}, LIOM Toolkit Developers"
 
 # Pull version from installed package metadata when available.
 try:
-    from importlib.metadata import version as _get_version
+    from importlib.metadata import PackageNotFoundError, version as _get_version
 
     release = _get_version("liom-toolkit")
-except Exception:
+except ImportError:
+    # importlib.metadata unavailable (should not happen on 3.12+, but
+    # keep the guard for safety).
+    release = "0.0.0"
+except PackageNotFoundError:
+    # Package not installed (e.g. building docs from a source checkout
+    # without `uv sync`). Fall back to a placeholder version.
     release = "0.0.0"
 version = ".".join(release.split(".")[:2])
 
