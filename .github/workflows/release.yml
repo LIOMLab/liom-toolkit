@@ -113,15 +113,15 @@ jobs:
         run: |
           # Extract the changelog section matching the tag's version into a
           # release notes file. The version is derived from the git tag
-          # (GITHUB_REF_NAME, e.g. "v1.0.0" -> "1.0.0"). The awk script sets a
-          # flag at the matching "## [ver]" header and prints until the next
-          # "## [" header is seen. `first` is set BEFORE the exit check so the
-          # first matching header sets the flag and the SECOND "## [" header
-          # triggers the exit (the original exit-before-flag bug produced an
-          # empty file). awk `-v` does NOT interpolate inside /regex/, so the
-          # header match uses index($0, "## [" ver "]") == 1 instead.
+          # (GITHUB_REF_NAME, e.g. "v1.0" -> "1.0"). The awk script sets a
+          # flag at the matching "## [ver" header prefix and prints until the
+          # next "## [" header is seen. Prefix matching handles the case where
+          # the tag is "v1.0" but the CHANGELOG header is "## [1.0.0]" —
+          # "## [1.0" is a prefix of "## [1.0.0]". `first` is set BEFORE the
+          # exit check so the first matching header sets the flag and the
+          # SECOND "## [" header triggers the exit.
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v ver="$VERSION" 'index($0,"## ["ver"]")==1{flag=1} /^## \[/{if(flag){if(first){exit}; first=1}} flag' \
+          awk -v ver="$VERSION" 'index($0,"## ["ver)==1{flag=1} /^## \[/{if(flag){if(first){exit}; first=1}} flag' \
             CHANGELOG.md > /tmp/release-notes.md
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
