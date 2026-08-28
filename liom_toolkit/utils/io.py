@@ -623,10 +623,23 @@ def extract_zarr_to_image(
             photometric="minisblack",
         )
     elif format == "png":
-        for z in tqdm(range(volume.shape[0])):
-            image = volume[z, :, :]
-            image = convert_to_png_for_saving(image)
+        # Parallel per-slice PNG writes via a thread pool. Each slice z gets
+        # a unique filename {z}.png -- no shared file, no clobber. The
+        # GIL-releasing C PNG encode means threads progress concurrently; a
+        # single tqdm bar over the map results preserves the progress UI.
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _write_slice_png(z: int) -> None:
+            image = convert_to_png_for_saving(volume[z, :, :])
             iio.imwrite(f"{target_dir}/{z!s}.png", image)
+
+        with ThreadPoolExecutor() as executor:
+            list(
+                tqdm(
+                    executor.map(_write_slice_png, range(volume.shape[0])),
+                    total=volume.shape[0],
+                )
+            )
     else:
         raise ValueError(
             f"Unsupported format: {format!r}. Use 'tiff' or 'png'."

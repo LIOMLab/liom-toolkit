@@ -19,6 +19,8 @@ The tiny zarr fixture is written via ``liom_toolkit.conversion.conversion.save_z
 each test process is independent — no shared file, no runtime coupling.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -298,3 +300,258 @@ def test_get_valid_indices_rotate_patches_false_validates_all_grid_patches(tmp_p
         "(rotate_patches=False indexing bug)"
     )
     assert np.array_equal(np.sort(np.asarray(ds.valid_indices)), np.array([1]))
+
+
+# ---------------------------------------------------------------------------
+# get_valid_indices disk cache (PERF-01d). The cache sidecar lives next to
+# the zarr file and is keyed by (zarr_file, node_name, patch_size, filter_empty)
+# + zarr array metadata (shape, dtype, chunks) hashed via sha256. A cache hit
+# skips the expensive process_map validation; a cache miss re-validates and
+# writes the sidecar atomically.
+# ---------------------------------------------------------------------------
+
+
+def _cache_sidecar_path(zarr_path: str) -> str:
+    """Return the expected cache sidecar path for a zarr dataset."""
+    return f"{zarr_path}.valid_indices_cache.json"
+
+
+def test_valid_indices_cache_hit(tmp_path, monkeypatch):
+    """A second dataset instance with the same params loads from the cache
+    sidecar -- process_map is NOT called (call_count == 0 on the second
+    instance)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+
+    zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
+
+    # First instance populates the cache.
+    ds1 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    expected = np.sort(np.asarray(ds1.valid_indices))
+    sidecar = _cache_sidecar_path(zarr_path)
+    assert Path(sidecar).exists(), "first instance did not write the cache sidecar"
+
+    # Track process_map calls for the second instance.
+    call_count = {"n": 0}
+    real_process_map = dataset_mod.process_map
+
+    def tracking_process_map(*args, **kwargs):
+        call_count["n"] += 1
+        return real_process_map(*args, **kwargs)
+
+    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+
+    ds2 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    assert call_count["n"] == 0, "process_map was called on a cache hit (should be skipped)"
+    assert np.array_equal(np.sort(np.asarray(ds2.valid_indices)), expected)
+
+
+def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
+    """Same dataset but a different patch_size -> cache miss -> process_map IS
+    called (call_count >= 1) and the result reflects the new patch_size."""
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+
+    zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
+
+    # First instance with patch_size=(8,8,8) populates the cache.
+    ds1 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    first_indices = np.sort(np.asarray(ds1.valid_indices))
+
+    # Track process_map calls for the second instance with a different patch_size.
+    call_count = {"n": 0}
+    real_process_map = dataset_mod.process_map
+
+    def tracking_process_map(*args, **kwargs):
+        call_count["n"] += 1
+        return real_process_map(*args, **kwargs)
+
+    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+
+    ds2 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(4, 4, 4),  # different patch_size -> cache miss
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    assert call_count["n"] >= 1, "process_map was NOT called on a cache miss"
+    # The valid set for a 4x4x4 patch grid differs from the 8x8x8 grid.
+    second_indices = np.sort(np.asarray(ds2.valid_indices))
+    assert not np.array_equal(second_indices, first_indices), (
+        "different patch_size produced the same valid set (cache did not miss)"
+    )
+
+
+def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch):
+    """Same params but the zarr array content/metadata changed (different
+    shape) -> cache miss -> re-validation runs (process_map called)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
+    from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+    from liom_toolkit.utils.io import generate_label_color_dict_mask
+
+    # First dataset: 16x16x16 volume.
+    zarr_path = str(tmp_path / "ds.zarr")
+    arr = np.zeros((16, 16, 16), dtype=np.uint16)
+    arr[4:12, 4:12, 4:12] = 1000
+    save_zarr(arr, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+    label = np.zeros((16, 16, 16), dtype=np.uint8)
+    label[4:12, 4:12, 4:12] = 1
+    save_label_to_zarr(
+        label, zarr_path, generate_label_color_dict_mask(), "training",
+        scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16),
+    )
+
+    ds1 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    sidecar = _cache_sidecar_path(zarr_path)
+    assert Path(sidecar).exists()
+
+    # Overwrite the zarr with a DIFFERENT shape (24x16x16) -- the metadata hash
+    # changes, so the cache must miss.
+    arr2 = np.zeros((24, 16, 16), dtype=np.uint16)
+    arr2[4:12, 4:12, 4:12] = 1000
+    save_zarr(arr2, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(24, 16, 16))
+    label2 = np.zeros((24, 16, 16), dtype=np.uint8)
+    label2[4:12, 4:12, 4:12] = 1
+    save_label_to_zarr(
+        label2, zarr_path, generate_label_color_dict_mask(), "training",
+        scales=(6.5, 6.5, 6.5), chunks=(24, 16, 16),
+    )
+
+    call_count = {"n": 0}
+    real_process_map = dataset_mod.process_map
+
+    def tracking_process_map(*args, **kwargs):
+        call_count["n"] += 1
+        return real_process_map(*args, **kwargs)
+
+    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+
+    ds2 = OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    assert call_count["n"] >= 1, (
+        "process_map was NOT called after dataset metadata change (stale cache)"
+    )
+
+
+def test_valid_indices_cache_atomic_write(tmp_path, monkeypatch):
+    """The cache sidecar is written atomically: if the write fails mid-flight,
+    the temp .partial file is cleaned up and no corrupt sidecar remains."""
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
+    from pathlib import Path as _Path
+
+    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
+
+    zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
+    sidecar = _cache_sidecar_path(zarr_path)
+
+    # First instance: populate the cache normally.
+    OmeZarrLabelDataSet(
+        zarr_path,
+        label_node_name="training",
+        patch_size=(8, 8, 8),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        filter_empty=True,
+        empty_percentage=0.0,
+    )
+    assert _Path(sidecar).exists()
+
+    # Now simulate a crash during the atomic write by patching
+    # pathlib.Path.replace to raise once. The cache helper must unlink the
+    # .partial temp file and re-raise, leaving the existing sidecar intact
+    # (no corrupt sidecar).
+    real_replace = _Path.replace
+    replace_calls = {"n": 0}
+
+    def crashing_replace(self, target):
+        replace_calls["n"] += 1
+        if replace_calls["n"] == 1:
+            raise OSError("simulated crash mid-write")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(_Path, "replace", crashing_replace)
+
+    # Force a cache miss by changing patch_size so the write path runs.
+    try:
+        OmeZarrLabelDataSet(
+            zarr_path,
+            label_node_name="training",
+            patch_size=(4, 4, 4),  # different -> cache miss -> write attempt
+            device="cpu",
+            pre_process=False,
+            normalise=False,
+            rotate_patches=False,
+            filter_empty=True,
+            empty_percentage=0.0,
+        )
+    except OSError:
+        pass  # expected: the simulated crash propagates
+    # The .partial temp file must be cleaned up.
+    assert not _Path(f"{sidecar}.partial").exists(), (
+        "temp .partial file was not cleaned up after a failed atomic write"
+    )

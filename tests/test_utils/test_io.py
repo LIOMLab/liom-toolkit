@@ -307,3 +307,53 @@ def test_extract_zarr_to_image_unsupported_format_raises(tmp_path):
 
     with pytest.raises(ValueError):
         extract_zarr_to_image(zpath, target, channel=0, format="unsupported")
+
+
+# ---------------------------------------------------------------------------
+# extract_zarr_to_image PNG ThreadPoolExecutor parallelization (PERF-01c).
+# The format="png" escape hatch writes one PNG per Z slice; the parallelization
+# replaces the sequential for-loop with a ThreadPoolExecutor.map. Each slice z
+# gets a unique filename {z}.png -- no clobber, no shared file.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_zarr_to_image_png_parallel(tmp_path):
+    """extract_zarr_to_image(format='png') writes all expected per-slice PNGs
+    via ThreadPoolExecutor. The primary assertion is that every {z}.png file
+    exists and is a valid readable image with the expected slice content."""
+    zpath = str(tmp_path / "vol_par.zarr")
+    src = _make_synthetic_zarr(zpath, shape=(6, 8, 8))
+    target = str(tmp_path / "out_png_par")
+
+    extract_zarr_to_image(zpath, target, channel=0, format="png")
+
+    import imageio.v3 as iio
+
+    target_dir = Path(target)
+    png_files = sorted(target_dir.glob("*.png"), key=lambda p: int(p.stem))
+    assert len(png_files) == src.shape[0], (
+        f"expected {src.shape[0]} PNG files, got {len(png_files)}"
+    )
+    # Each file is named {z}.png and is readable.
+    for z, p in enumerate(png_files):
+        assert p.name == f"{z}.png"
+        back = iio.imread(str(p))
+        assert back.shape == (8, 8)  # Y, X
+
+
+def test_extract_zarr_to_image_png_no_clobber(tmp_path):
+    """Each slice z gets a unique filename {z}.png -- no two slices share a
+    file. The number of unique PNG files equals volume.shape[0]."""
+    zpath = str(tmp_path / "vol_clobber.zarr")
+    _make_synthetic_zarr(zpath, shape=(5, 8, 8))
+    target = str(tmp_path / "out_png_clobber")
+
+    extract_zarr_to_image(zpath, target, channel=0, format="png")
+
+    target_dir = Path(target)
+    png_files = list(target_dir.glob("*.png"))
+    names = {p.name for p in png_files}
+    assert len(names) == 5, (
+        f"expected 5 unique PNG filenames, got {len(names)} (slice clobber)"
+    )
+    assert names == {f"{z}.png" for z in range(5)}

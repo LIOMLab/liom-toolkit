@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import pathlib
 from collections.abc import Iterator
 from multiprocessing import cpu_count
 
@@ -67,6 +70,144 @@ def _level0_component(zarr_path: str, group_path: str = "") -> str:
     multiscales = multiscales_raw
     level0_path = str(multiscales[0]["datasets"][0]["path"])
     return f"{group_path}/{level0_path}" if group_path else level0_path
+
+
+def _valid_indices_cache_key(
+    zarr_path: str,
+    node_name: str,
+    patch_size: tuple[int, int, int],
+    filter_empty: bool,
+    label_data: da.Array,
+) -> str:
+    """Compute the sha256 cache key for the valid-indices sidecar.
+
+    The key is the sha256 of a canonicalized JSON dict of
+    ``(zarr_path, node_name, patch_size, filter_empty)`` plus the zarr array
+    METADATA (shape, dtype, chunks) -- NOT a full-volume content hash. A
+    metadata change (different shape/dtype/chunks) invalidates the cache; a
+    content change without a metadata change does not (the cache is keyed on
+    metadata, not content, so there is no full-volume re-materialization per
+    training run -- PERF-01d). The trade-off is documented: a same-shape
+    content edit is not detected; users editing label content in place must
+    delete the sidecar manually.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store.
+    node_name : str
+        Label node name (``labels/{node_name}``).
+    patch_size : tuple[int, int, int]
+        The patch size used for grid validation.
+    filter_empty : bool
+        Whether empty-patch filtering is active.
+    label_data : da.Array
+        The label Dask array (read for its shape/dtype/chunks metadata only --
+        NOT computed, so no full-volume materialization).
+
+    Returns
+    -------
+    str
+        The hex sha256 digest of the canonicalized cache key.
+    """
+    key = {
+        "zarr_path": str(pathlib.Path(zarr_path).resolve()),
+        "node_name": node_name,
+        "patch_size": tuple(int(p) for p in patch_size),
+        "filter_empty": bool(filter_empty),
+        "array_shape": tuple(int(s) for s in label_data.shape),
+        "array_dtype": str(label_data.dtype),
+        "array_chunks": tuple(tuple(int(c) for c in ch) for ch in (label_data.chunks or ())),
+    }
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _valid_indices_cache_path(zarr_path: str) -> str:
+    """Return the cache sidecar path for a zarr dataset.
+
+    The sidecar lives next to the zarr file as
+    ``{zarr_path}.valid_indices_cache.json``.
+
+    Returns
+    -------
+    str
+        The sidecar path.
+    """
+    return f"{zarr_path}.valid_indices_cache.json"
+
+
+def _load_valid_indices_cache(
+    zarr_path: str, expected_hash: str
+) -> NDArray[np.int_] | None:
+    """Load valid_indices from the cache sidecar if the hash matches.
+
+    Returns ``None`` on a cache miss (no sidecar, unreadable sidecar, or hash
+    mismatch -- a hash mismatch means the dataset metadata changed and the
+    cached indices are stale, so they MUST NOT be returned per AGENTS section 2
+    no-silent-wrong-data).
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store (the sidecar is derived from this).
+    expected_hash : str
+        The sha256 hash the cached entry must match.
+
+    Returns
+    -------
+    NDArray[np.int_] | None
+        The cached valid_indices array, or ``None`` on a cache miss.
+    """
+    sidecar = pathlib.Path(_valid_indices_cache_path(zarr_path))
+    if not sidecar.exists():
+        return None
+    try:
+        with sidecar.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # Corrupt sidecar -- treat as a cache miss (do not return wrong data).
+        return None
+    if not isinstance(payload, dict) or payload.get("hash") != expected_hash:
+        return None
+    indices = payload.get("valid_indices")
+    if not isinstance(indices, list):
+        return None
+    return np.asarray(indices, dtype=np.int_)
+
+
+def _save_valid_indices_cache(
+    zarr_path: str, cache_hash: str, valid_indices: NDArray[np.int_]
+) -> None:
+    """Write the valid_indices cache sidecar atomically.
+
+    Writes to a ``{sidecar}.partial`` temp file first, then renames it into
+    place via :func:`pathlib.Path.replace` so an interrupted write never leaves
+    a corrupt sidecar. The temp file is removed on any exception (copied from
+    the atomic-write pattern in ``utils/allen_sdk.py``).
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store (the sidecar is derived from this).
+    cache_hash : str
+        The sha256 cache key to store (used for invalidation on the next load).
+    valid_indices : NDArray[np.int_]
+        The valid_indices array to cache (stored as a JSON list).
+    """
+    sidecar = pathlib.Path(_valid_indices_cache_path(zarr_path))
+    tmp = sidecar.with_suffix(sidecar.suffix + ".partial")
+    payload = {
+        "hash": cache_hash,
+        "valid_indices": np.asarray(valid_indices).astype(np.int_).tolist(),
+    }
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        tmp.replace(sidecar)
+    except BaseException:
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 class OmeZarrDataset(Dataset):
@@ -293,6 +434,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
     """
 
     label_data: da.Array
+    label_node_name: str
     normalise_label: bool
     max_label_value: int = 255
     valid_indices: NDArray[np.int_]
@@ -328,6 +470,7 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             z_range,
         )
         self.filter_empty = filter_empty
+        self.label_node_name = label_node_name
         self.label_data = da.from_zarr(
             self.zarr_path,
             component=_level0_component(self.zarr_path, group_path=f"labels/{label_node_name}"),
@@ -422,7 +565,28 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         Used to remove patches that are not suitable for training. Populates
         ``self.valid_indices`` with the dataset indices of patches kept for
         training (valid patches plus a small percentage of empty patches).
+
+        A disk cache (sidecar JSON next to the zarr file) skips the expensive
+        ``process_map`` validation on a cache hit. The cache key is a sha256
+        of ``(zarr_path, node_name, patch_size, filter_empty)`` plus the zarr
+        array metadata (shape, dtype, chunks) -- a metadata change invalidates
+        the cache (no stale indices, AGENTS section 2). No full-volume content
+        hash is computed (no re-materialization per training run, PERF-01d).
         """
+        # Cache lookup: if a sidecar with a matching metadata hash exists,
+        # load valid_indices directly and skip the process_map validation.
+        cache_hash = _valid_indices_cache_key(
+            self.zarr_path,
+            self.label_node_name,
+            self.patch_size,
+            self.filter_empty,
+            self.label_data,
+        )
+        cached = _load_valid_indices_cache(self.zarr_path, cache_hash)
+        if cached is not None:
+            self.valid_indices = cached
+            return
+
         # dataset_length is the number of GRID patches to validate. When
         # rotate_patches=True the dataset length is grid_product * 4 (each
         # grid patch occupies 4 rotation indices), so dividing by 4 yields
@@ -482,6 +646,10 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         else:
             valid_indices = valid_grid
         self.valid_indices = valid_indices
+
+        # Cache write: persist valid_indices atomically so the next dataset
+        # instance with the same metadata hash skips the process_map pass.
+        _save_valid_indices_cache(self.zarr_path, cache_hash, valid_indices)
 
     def check_patch(self, patch: NDArray[np.generic]) -> bool:
         """Check if the patch is valid for training (non-empty).
