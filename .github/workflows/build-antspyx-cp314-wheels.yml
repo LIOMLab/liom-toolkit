@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       antspy_ref:
-        description: 'ANTsX/ANTsPy git ref to build from (default: master)'
+        description: 'ANTsX/ANTsPy git ref to build from (default: main)'
         required: false
-        default: 'master'
+        default: 'main'
 
 permissions:
   contents: write # to create/update the antspyx-cp314 release + assets
