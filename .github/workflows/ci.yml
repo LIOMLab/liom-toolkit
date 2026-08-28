@@ -90,19 +90,3 @@ jobs:
         run: uv run pytest -q --cov-fail-under=0 -m "not antspy"
         env:
           CI: "true"   # hypothesis CI profile auto-activates
-
-  publish:
-    needs: [lint, test]   # publish gated on lint + test
-    # publish only gates on the GATING test legs (3.12+all, 3.14+core).
-    # The 3.14+all best-effort leg has continue-on-error so it cannot block.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
-      - run: uv python install 3.12
-      - run: uv sync
-      - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}

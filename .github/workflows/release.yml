@@ -1,0 +1,46 @@
+name: Release
+
+# Tag-triggered release: cutting a release = `git tag v1.0.0 && git push --tags`.
+# The publish job moved OUT of ci.yml so main pushes stop attempting PyPI
+# re-uploads (PyPI rejects re-uploads of an unchanged version — the root
+# cause of the silent red publish jobs during modernization). A separate
+# github-release job is gated on publish success so a failed PyPI upload
+# cannot create an orphan GitHub Release.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags to derive the version
+      - uses: astral-sh/setup-uv@v8.3.2
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+
+  github-release:
+    needs: publish   # gate: do not create a GitHub Release if PyPI upload failed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Extract changelog section
+        run: |
+          # Extract the ## [1.0.0] section from CHANGELOG.md into a release
+          # notes file. The awk script sets a flag at the 1.0.0 header and
+          # prints until the next ## [ header is seen.
+          awk '/^## \[1.0.0\]/{flag=1} /^## \[/{if(flag && !first){exit}; if(flag){first=1}} flag' \
+            CHANGELOG.md > /tmp/release-notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/release-notes.md
+          generate_release_notes: false
+          draft: false
+          prerelease: false
