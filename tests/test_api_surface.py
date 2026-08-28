@@ -20,6 +20,8 @@ segmentation.vseg, utils, visualization. All 6 must import with core deps only
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
+from collections.abc import Callable
 
 import pytest
 
@@ -97,3 +99,49 @@ def test_star_import_matches_all(dotted: str, name: str) -> None:
         f"{sorted(expected)} -- mismatch (extra: {sorted(exported - expected)}, "
         f"missing: {sorted(expected - exported)})"
     )
+
+
+# ---------------------------------------------------------------------------
+# CLI entry-point resolution guard (CLOSE-02)
+# ---------------------------------------------------------------------------
+
+# The 7 console scripts registered in pyproject.toml [project.scripts]. The
+# entry_points test guards the CLI contract (every registered name resolves to
+# an importable callable) WITHOUT growing the curated library __all__ surface
+# -- compute_slice_metrics and train_model are deliberately NOT re-exported by
+# any subpackage __init__ (D-02 locked decision: the entry_points test and the
+# __all__ guard are decoupled by design).
+EXPECTED_SCRIPTS: set[str] = {
+    "liom-align-annotations",
+    "liom-build-template",
+    "liom-compute-slice-metrics",
+    "liom-convert-hdf5-to-zarr",
+    "liom-create-mask",
+    "liom-segment-2d",
+    "liom-train-model",
+}
+
+
+def test_all_console_scripts_resolve_to_callables() -> None:
+    """Every registered liom console script resolves to an importable callable.
+
+    Reads installed-package metadata via ``importlib.metadata.entry_points``
+    (the editable install exposes the [project.scripts] entries), filters to
+    the 7 EXPECTED_SCRIPTS, asserts the set matches exactly (no curation
+    drift -- a missing or extra entry point is a CLI contract violation), and
+    asserts each ``ep.load()`` returns a callable. Runs on core-only CI: the
+    metadata is read from the installed package, not from the optional deps.
+    """
+    eps = importlib.metadata.entry_points(group="console_scripts")
+    liom_eps = {ep for ep in eps if ep.name in EXPECTED_SCRIPTS}
+    found = {ep.name for ep in liom_eps}
+    assert found == EXPECTED_SCRIPTS, (
+        f"console_scripts curation drift: expected {sorted(EXPECTED_SCRIPTS)} "
+        f"but found {sorted(found)} -- symmetric difference: "
+        f"{sorted(EXPECTED_SCRIPTS ^ found)}"
+    )
+    for ep in liom_eps:
+        func: Callable = ep.load()
+        assert callable(func), (
+            f"{ep.name} -> {ep.value} is not callable (ep.load() returned {type(func).__name__})"
+        )

@@ -392,7 +392,7 @@ def test_create_heatmap_non_square(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_compute_slice_metrics_overwrite(tmp_path, monkeypatch):
+def test_compute_slice_metrics_overwrite(tmp_path):
     """compute_slice_metrics called twice with the same output_dir succeeds
     on the second call (no FileExistsError) and produces the expected output
     files.
@@ -401,18 +401,13 @@ def test_compute_slice_metrics_overwrite(tmp_path, monkeypatch):
     creation through the symlink-aware ``create_directory(overwrite=True)``
     helper, which ``shutil.rmtree``'s the existing output_dir then recreates
     it before the metrics are written. The test exercises real IO in
-    ``tmp_path`` (no mocking of numpy/scipy/skimage/os per AGENTS section 5);
-    ``pd.DataFrame.to_excel`` is intercepted only to avoid the undeclared
-    openpyxl runtime dependency (a pre-existing BUG-02 finding, not
-    introduced here)."""
-    import pandas as pd
-
-    captured = {}
-
-    def fake_to_excel(self, path, index=False):
-        captured["df"] = self
-
-    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel)
+    ``tmp_path`` (no mocking of numpy/scipy/skimage/os per AGENTS section 5)
+    AND the real ``pd.DataFrame.to_excel`` -> openpyxl path (CLOSE-03:
+    openpyxl is now a declared core dependency at pyproject.toml, so the
+    monkeypatch that previously intercepted ``to_excel`` to avoid the
+    undeclared openpyxl runtime dependency is removed -- the real xlsx is
+    written and asserted to exist)."""
+    import os
 
     mask = np.ones((30, 30), dtype=np.uint8)
     vessel_mask = np.zeros((30, 30), dtype=np.uint8)
@@ -441,15 +436,11 @@ def test_compute_slice_metrics_overwrite(tmp_path, monkeypatch):
         voxel_size=0.65,
     )
 
-    # The second run produced a DataFrame with the expected per-region row.
-    df = captured["df"]
-    region_rows = df[df["region"] == 0]
-    assert len(region_rows) == 1
     # Expected output files exist after the second run (the directory was
     # recreated by create_directory(overwrite=True), so these are the
-    # second-run files, not stale first-run files).
-    import os
-
+    # second-run files, not stale first-run files). The real df.to_excel ->
+    # openpyxl path writes regions.xlsx (CLOSE-03: no monkeypatch).
+    assert os.path.isfile(output_dir + "regions.xlsx")
     assert os.path.isfile(output_dir + "regions.png")
     assert os.path.isfile(output_dir + "vessels.png")
 
