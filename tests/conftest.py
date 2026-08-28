@@ -95,6 +95,47 @@ def fake_ants():
         sys.modules.pop("ants", None)
 
 
+@pytest.fixture
+def fake_torch():
+    """Inject a MagicMock as the ``torch`` module in ``sys.modules`` for the test.
+
+    Sibling to ``fake_ants``. The fake is popped from ``sys.modules`` on
+    teardown so it does not leak across tests (Pitfall 3). A minimal MagicMock
+    suffices to pass a lazy-import guard like ``try: import torch`` in a CLI
+    ``main()``; the goal is reaching the domain callee (e.g.
+    ``train_model(...)``), not running the real training loop. Do NOT
+    configure fake tensor returns here -- torch only needs to be importable
+    for the guard to pass.
+    """
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    sys.modules["torch"] = fake
+    try:
+        yield fake
+    finally:
+        sys.modules.pop("torch", None)
+
+
+@pytest.fixture
+def fake_wandb():
+    """Inject a MagicMock as the ``wandb`` module in ``sys.modules`` for the test.
+
+    Sibling to ``fake_ants`` / ``fake_torch``. The fake is popped from
+    ``sys.modules`` on teardown so it does not leak across tests (Pitfall 3).
+    A minimal MagicMock suffices to pass a lazy-import guard like
+    ``try: import wandb`` in a CLI ``main()``.
+    """
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    sys.modules["wandb"] = fake
+    try:
+        yield fake
+    finally:
+        sys.modules.pop("wandb", None)
+
+
 @pytest.fixture(autouse=True)
 def _reset_pil_max_image_pixels():
     """Reset PIL.Image.MAX_IMAGE_PIXELS to the package's finite limit around every test.
