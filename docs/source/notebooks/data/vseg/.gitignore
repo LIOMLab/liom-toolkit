@@ -1,0 +1,12 @@
+# Generated outputs from notebook runs — not committed
+patches/
+training/
+prediction/
+LSFM_predictions/
+output/
+eroded/
+clahe/
+validation/
+brainslices.nii
+__pycache__/
+.ipynb_checkpoints/

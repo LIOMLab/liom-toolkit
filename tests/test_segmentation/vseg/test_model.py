@@ -1,0 +1,370 @@
+"""Import-smoke + weights_only round-trip tests for
+``liom_toolkit/segmentation/vseg/model.py``.
+
+These tests close the Wave-0 test gap identified for DEP-01: before Phase 3,
+``test_model.py`` did not exist, so the ``torch.load`` ``weights_only=True``
+audit landed in the dependency-adaptation work had no automated regression
+coverage.
+
+``model.py`` imports ``torch`` and ``wandb`` at module top. Per the
+established optional-dep gating pattern (AGENTS section 5), each test calls
+``pytest.importorskip`` BEFORE importing from ``vseg.model`` so the tests run
+for real on the 3.12-full CI leg (where the ``ai`` extra is installed) and
+cleanly skip on the 3.14-core leg (where it is not).
+
+Coverage:
+
+* ``test_vsegmodel_imports`` -- ``VsegModel`` is callable and is a subclass
+  of ``torch.nn.Module``.
+* ``test_vsegmodel_state_dict_round_trip_weights_only_true`` -- a plain
+  ``state_dict`` saved and reloaded with ``weights_only=True`` loads back
+  via ``load_state_dict`` without raising, proving the
+  ``weights_only=True``-first branch works for the same object shape the
+  production checkpoint load path expects.
+"""
+
+import pytest
+
+
+def test_vsegmodel_imports():
+    """VsegModel is callable and subclasses torch.nn.Module."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    import torch
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    assert callable(VsegModel)
+    assert issubclass(VsegModel, torch.nn.Module)
+
+
+# --- pretrained_artifact parameterization (CLI-01) ---------------------------
+#
+# VsegModel.__init__ replaced the hardcoded ``pre_trained_project`` default
+# ("liom-lab/model-registry/Vessel Segmentation:latest") with
+# ``pretrained_artifact: str | None = None``. ``pretrained=True`` with
+# ``pretrained_artifact=None`` must raise ValueError — no silent fallback to
+# the old hardcoded lab artifact (AGENTS section 2 -- no silent wrong-data).
+# All tests are torch-gated per AGENTS section 5.
+
+
+def test_vseg_model_has_pretrained_artifact_param_none_default() -> None:
+    """VsegModel.__init__ has ``pretrained_artifact: str | None = None``
+    (not the old ``pre_trained_project`` with a hardcoded lab default)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    import inspect
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    sig = inspect.signature(VsegModel.__init__)
+    assert "pretrained_artifact" in sig.parameters, (
+        "VsegModel.__init__ must accept pretrained_artifact"
+    )
+    param = sig.parameters["pretrained_artifact"]
+    assert param.default is None, f"pretrained_artifact must default to None, got {param.default!r}"
+    # The old hardcoded-lab-default param name must be gone.
+    assert "pre_trained_project" not in sig.parameters, (
+        "VsegModel.__init__ must NOT keep the old pre_trained_project param "
+        "(replaced by pretrained_artifact)"
+    )
+
+
+def test_vseg_model_pretrained_true_none_artifact_raises_value_error() -> None:
+    """VsegModel(pretrained=True, pretrained_artifact=None) raises ValueError
+    mentioning pretrained_artifact — no silent fallback to the old hardcoded
+    lab artifact (AGENTS section 2)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    with pytest.raises(ValueError, match="pretrained_artifact"):
+        VsegModel(pretrained=True, pretrained_artifact=None)
+
+
+def test_vseg_model_no_liom_lab_hardcoded() -> None:
+    """No ``"liom-lab"`` string remains in model.py source (lab-config-free)."""
+    pytest.importorskip("torch")
+    pytest.importorskip("wandb")
+
+    import inspect
+
+    from liom_toolkit.segmentation.vseg import model as model_mod
+
+    source = inspect.getsource(model_mod)
+    assert "liom-lab" not in source, (
+        "model.py must not hardcode the 'liom-lab' wandb artifact path — "
+        "the toolkit is lab-config-free per PROJECT.md core value"
+    )
+
+
+def test_vsegmodel_state_dict_round_trip_weights_only_true(tmp_path):
+    """A plain state_dict round-trips through torch.save/torch.load with
+    weights_only=True and reloads via load_state_dict without raising --
+    proves the weights_only=True-first branch works for the object shape the
+    production checkpoint load path expects."""
+    pytest.importorskip("torch")
+
+    import torch
+
+    from liom_toolkit.segmentation.vseg.model import VsegModel
+
+    model = VsegModel(pretrained=False)
+    checkpoint = tmp_path / "checkpoint.pth"
+    torch.save(model.state_dict(), str(checkpoint))
+
+    state = torch.load(str(checkpoint), map_location="cpu", weights_only=True)
+    # load_state_dict succeeds without raising -- the state_dict shape
+    # matches the model exactly.
+    model.load_state_dict(state)
+
+
+# --- predict_one norm/patching regression (BUG-01) ---------------------------
+#
+# predict_one is called by validate_model (vseg/validation.py) as
+# predict_one(..., norm=True, patching=False), but predict_one historically
+# did not accept ``norm`` or ``patching`` parameters, so the spec caller
+# raised TypeError. The fix adds the two named parameters and defines their
+# semantics: ``norm`` gates CLAHE (default True preserves the shipped
+# always-CLAHE behavior; False skips CLAHE and uses the min-max uint8 image);
+# ``patching=False`` runs the existing single full-image pass, while
+# ``patching=True`` raises NotImplementedError pointing to predict_volume
+# (no silent single-pass fallback when tiled inference was requested).
+#
+# All three tests are torch-gated per AGENTS section 5: each calls
+# pytest.importorskip("torch") as the first line so the tests run on the
+# ai-extra leg and skip cleanly on the core leg. torch/numpy are NOT mocked
+# (a real torch.nn.Module stub model is used); cv2.createCLAHE is spied on
+# via monkeypatch for the norm=False test, which is permitted (cv2 is not
+# torch/numpy).
+
+
+def _write_tiny_png(tmp_path, name: str = "tiny.png", size: int = 16):
+    """Write a tiny seeded-random uint8 PNG and return its path."""
+    import imageio.v3 as iio
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    arr = rng.integers(1, 256, size=(size, size), dtype=np.uint8)
+    path = tmp_path / name
+    iio.imwrite(str(path), arr)
+    return path
+
+
+def _make_stub_model():
+    """Build a minimal torch.nn.Module returning segmentation-shaped logits.
+
+    Must be called AFTER pytest.importorskip("torch") so torch is available.
+    Returns a tensor shaped (1, 1, H, W) matching the input spatial shape so
+    that do_predict's squeeze/index arithmetic produces a valid 2D array.
+    Output is filled with zeros (below the 0.5 threshold -> background), which
+    is a valid segmentation result for a synthetic image.
+    """
+    import torch
+
+    class _StubSegModel(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            n, _, h, w = x.shape
+            return torch.zeros((n, 1, h, w), dtype=torch.float32, device=x.device)
+
+    return _StubSegModel()
+
+
+def test_predict_one_norm_true_patching_false(tmp_path):
+    """validate_model's call shape (norm=True, patching=False) works end-to-end
+    on a tiny synthetic PNG with a stub torch.nn.Module model. This is the
+    BUG-01 D-05 spec-caller proof: the call returns a uint8 ndarray instead of
+    raising TypeError on the missing norm/patching parameters."""
+    pytest.importorskip("torch")
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    img_path = _write_tiny_png(tmp_path)
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_norm_true"
+
+    result = predict_one(
+        model=model,
+        img_path=str(img_path),
+        save_path=str(out_dir),
+        norm=True,
+        dev="cpu",
+        patching=False,
+    )
+
+    import numpy as np
+
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.uint8
+
+
+def test_predict_one_patching_true_raises(tmp_path):
+    """predict_one(..., patching=True) raises NotImplementedError whose message
+    mentions predict_volume (the tiled-prediction alternative). This is the
+    BUG-01 D-06 explicit-failure proof: patching=True must NOT silently fall
+    back to single-pass (AGENTS section 2 -- no silent wrong-data fallback)."""
+    pytest.importorskip("torch")
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    img_path = _write_tiny_png(tmp_path)
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_patch"
+
+    with pytest.raises(NotImplementedError) as excinfo:
+        predict_one(
+            model=model,
+            img_path=str(img_path),
+            save_path=str(out_dir),
+            dev="cpu",
+            patching=True,
+        )
+
+    assert "predict_volume" in str(excinfo.value)
+
+
+def test_predict_one_norm_false_skips_clahe(tmp_path, monkeypatch):
+    """predict_one(..., norm=False, patching=False) produces output without
+    applying CLAHE. cv2.createCLAHE is spied on via monkeypatch (a cv2
+    function, not torch/numpy -- permitted by AGENTS section 5) and asserted
+    not to be called. The output must still be a valid uint8 ndarray (the
+    min-max-only path). This is the BUG-01 D-06 norm-gate proof: norm=False
+    must skip CLAHE, not silently apply it."""
+    pytest.importorskip("torch")
+
+    import liom_toolkit.segmentation.vseg.prediction as prediction_mod
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    img_path = _write_tiny_png(tmp_path)
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_norm_false"
+
+    calls: list = []
+
+    def _fake_create_clahe(*args, **kwargs):
+        calls.append((args, kwargs))
+
+        class _AHE:
+            def apply(self, image):
+                return image
+
+        return _AHE()
+
+    monkeypatch.setattr(prediction_mod.cv2, "createCLAHE", _fake_create_clahe)
+
+    result = predict_one(
+        model=model,
+        img_path=str(img_path),
+        save_path=str(out_dir),
+        norm=False,
+        dev="cpu",
+        patching=False,
+    )
+
+    import numpy as np
+
+    assert calls == [], "CLAHE must not be applied when norm=False"
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.uint8
+
+
+def test_predict_one_all_zero_inference_no_runtime_warning(tmp_path):
+    """predict_one on a model that predicts no vessels (all-zero output)
+    must not emit a RuntimeWarning from divide-by-zero, and must return a
+    valid all-zero uint8 mask.
+
+    An all-zero inference is a VALID model output (the model predicted no
+    vessels for a vessel-free image) -- the correct segmentation mask is
+    all-zero. The pre-fix code does ``inference / inference.max()`` which
+    divides by zero when ``inference.max() == 0``, producing ``NaN`` +
+    ``RuntimeWarning: invalid value encountered in divide``, then
+    ``.astype(np.uint8)`` silently converts ``NaN`` to ``0`` (undefined
+    behavior in NumPy, implementation-defined across platforms). The fix
+    skips the division when ``inference.max() == 0`` and returns the
+    all-zero mask directly via the same bool->uint8*255 path the non-zero
+    branch uses -- the correct output, computed without the NaN path.
+
+    This test uses the same _make_stub_model() that returns all-zeros (the
+    model output is below the 0.5 threshold -> all-background), so the
+    inference array is all-zero before the normalization line.
+    """
+    pytest.importorskip("torch")
+
+    import warnings
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    img_path = _write_tiny_png(tmp_path)
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_zero_inf"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = predict_one(
+            model=model,
+            img_path=str(img_path),
+            save_path=str(out_dir),
+            norm=True,
+            dev="cpu",
+            patching=False,
+        )
+
+    import numpy as np
+
+    # Output is a valid all-zero uint8 mask (correct for a vessel-free
+    # prediction -- the model predicted no vessels, so the mask is empty).
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.uint8
+    assert result.sum() == 0
+
+    # No RuntimeWarning (divide-by-zero) may escape predict_one on an
+    # all-zero inference. The pre-fix code emits one from
+    # `inference / inference.max()`; the fix skips the division.
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert len(runtime_warnings) == 0, (
+        f"RuntimeWarning(s) escaped predict_one on all-zero inference: "
+        f"{[str(w.message) for w in runtime_warnings]}"
+    )
+
+
+def test_predict_one_all_zero_input_raises_value_error(tmp_path):
+    """predict_one on an all-zero INPUT image must raise ValueError, not
+    silently produce an all-zero uint8 image that flows through CLAHE and
+    the model as a plausible-looking all-zero segmentation.
+
+    This is the input-image normalization guard mirroring the
+    inference.max() == 0 guard tested above and the create_patches
+    max_val == 0 guard in vseg/utils.py. The pre-fix code does
+    `image / image.max()` which divides by zero on an all-zero input,
+    producing NaN + RuntimeWarning, then `.astype(np.uint8)` silently
+    converts NaN to 0 (undefined behavior, implementation-defined across
+    platforms) -- the canonical AGENTS section 2 silent-data-corruption
+    anti-pattern. The fix raises ValueError explicitly so the caller
+    learns their input was degenerate.
+    """
+    pytest.importorskip("torch")
+
+    import imageio.v3 as iio
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_one
+
+    # Write an all-zero PNG (max == 0).
+    zero_path = tmp_path / "zero.png"
+    iio.imwrite(str(zero_path), np.zeros((16, 16), dtype=np.uint8))
+
+    model = _make_stub_model()
+    out_dir = tmp_path / "out_zero_input"
+
+    with pytest.raises(ValueError, match="all-zero"):
+        predict_one(
+            model=model,
+            img_path=str(zero_path),
+            save_path=str(out_dir),
+            norm=True,
+            dev="cpu",
+            patching=False,
+        )

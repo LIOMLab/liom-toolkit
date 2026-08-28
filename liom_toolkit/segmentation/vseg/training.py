@@ -1,40 +1,69 @@
-import os
+"""Training loop, evaluation, and visualisation for the vessel segmentation U-Net."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-import torch.nn
-import wandb
-from skimage.color import label2rgb, gray2rgb
-from torch import device
-from torch.utils.data import DataLoader, random_split, Subset
+from numpy.typing import NDArray
+from skimage.color import gray2rgb, label2rgb
 from tqdm.auto import tqdm
 
-from .dataset import OmeZarrLabelDataSet
-from .loss import DiceBCELoss
-from .model import VsegModel
 from .utils import calculate_metrics, create_dir
 
+if TYPE_CHECKING:
+    import torch
+    from torch import device
+    from torch.utils.data import DataLoader
 
-def train(model: VsegModel, loader: DataLoader, optimizer: torch.optim.Optimizer, loss_fn: torch.nn.Module,
-          device: torch.device) -> (float, torch.Tensor, torch.Tensor, torch.Tensor):
-    """
-    Train the model for an epoch
+    from .model import VsegModel
 
-    :param model: The model to train
-    :type model: VsegModel
-    :param loader: The data loader
-    :type loader: torch.utils.data.DataLoader
-    :param optimizer: The optimizer
-    :type optimizer: torch.optim.Optimizer
-    :param loss_fn: The loss function
-    :type loss_fn: torch.nn.Module
-    :param device: The device to use for training
-    :type device: torch.device
-    :return: The loss, the true labels, the predicted labels, and the input
-    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor)
+logger = logging.getLogger(__name__)
+
+
+def train(
+    model: VsegModel,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    loss_fn: torch.nn.Module,
+    device: torch.device,
+) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Train the model for an epoch.
+
+    Parameters
+    ----------
+    model : VsegModel
+        The model to train.
+    loader : torch.utils.data.DataLoader
+        The data loader.
+    optimizer : torch.optim.Optimizer
+        The optimizer.
+    loss_fn : torch.nn.Module
+        The loss function.
+    device : torch.device
+        The device to use for training.
+
+    Returns
+    -------
+    epoch_loss : float
+        The mean epoch loss.
+    y : torch.Tensor
+        The true labels from the last batch.
+    y_pred : torch.Tensor
+        The predicted labels from the last batch.
+    x : torch.Tensor
+        The inputs from the last batch.
     """
-    # Initialize epoch loss to 0
+    # Initialize epoch loss to 0. Pre-bind the loop variables to None so an
+    # empty loader does not raise UnboundLocalError at the return statement
+    # (the for-loop body never assigns them when the loader yields nothing).
     epoch_loss = 0.0
+    y = None
+    y_pred = None
+    x = None
 
     # Put in training mode
     model.train()
@@ -50,34 +79,70 @@ def train(model: VsegModel, loader: DataLoader, optimizer: torch.optim.Optimizer
         optimizer.step()
         epoch_loss += loss.item()
 
-    # Normalize cumulative loss for number of examples
-    epoch_loss = epoch_loss / len(loader)
+    # Normalize cumulative loss for number of examples. Guard the
+    # divide-by-zero when the loader is empty (len(loader) == 0).
+    if len(loader) > 0:
+        epoch_loss = epoch_loss / len(loader)
     return epoch_loss, y, y_pred, x
 
 
-def evaluate(model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, device: torch.device) -> (
-        float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float):
-    """
-    Evaluate the model for an epoch
+def evaluate(
+    model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, device: torch.device
+) -> tuple[float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float]:
+    """Evaluate the model for an epoch.
 
-    :param model: The model to evaluate
-    :type model: VsegModel
-    :param loader: The data loader
-    :type loader: torch.utils.data.DataLoader
-    :param loss_fn: The loss function
-    :type loss_fn: torch.nn.Module
-    :param device: The device to use for evaluation
-    :type device: torch.device
-    :return: The loss, the true labels, the predicted labels, the input, and the metrics
-    :rtype: (float, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float)
+    Parameters
+    ----------
+    model : VsegModel
+        The model to evaluate.
+    loader : torch.utils.data.DataLoader
+        The data loader.
+    loss_fn : torch.nn.Module
+        The loss function.
+    device : torch.device
+        The device to use for evaluation.
+
+    Returns
+    -------
+    epoch_loss : float
+        The mean epoch loss.
+    y : torch.Tensor
+        The true labels from the last batch.
+    y_pred : torch.Tensor
+        The predicted labels from the last batch.
+    x : torch.Tensor
+        The inputs from the last batch.
+    f1 : float
+        The mean F1 score.
+    accuracy : float
+        The mean accuracy.
+    jaccard : float
+        The mean Jaccard score.
+    recall : float
+        The mean recall.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
+    try:
+        import torch
+    except ImportError as e:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        ) from e
     # Initialize epoch loss to 0
-    # Added metrics
+    # Added metrics. Pre-bind the loop variables to None so an empty loader
+    # does not raise UnboundLocalError at the return statement.
     epoch_loss = 0.0
     f1 = 0.0
     accuracy = 0.0
     jaccard = 0.0
     recall = 0.0
+    y = None
+    y_pred = None
+    x = None
 
     # Put in eval mode
     model.eval()
@@ -94,44 +159,54 @@ def evaluate(model: VsegModel, loader: DataLoader, loss_fn: torch.nn.Module, dev
             y_m = y_m.numpy()
             y_pred_m = y_pred.to("cpu")
             y_pred_m = y_pred_m.numpy()
-            [score_f1, score_recall, score_acc, score_jaccard, score_precision] = calculate_metrics(y_m, y_pred_m)
+            [score_f1, score_recall, score_acc, score_jaccard, _score_precision] = (
+                calculate_metrics(y_m, y_pred_m)
+            )
             f1 += score_f1
             accuracy += score_acc
             jaccard += score_jaccard
             recall += score_recall
 
-        # Normalize cumulative loss for number of examples
-        epoch_loss = epoch_loss / len(loader)
-        f1 = f1 / len(loader)
-        accuracy = accuracy / len(loader)
-        jaccard = jaccard / len(loader)
-        recall = recall / len(loader)
+        # Normalize cumulative loss for number of examples. Guard the
+        # divide-by-zero when the loader is empty (len(loader) == 0).
+        if len(loader) > 0:
+            epoch_loss = epoch_loss / len(loader)
+            f1 = f1 / len(loader)
+            accuracy = accuracy / len(loader)
+            jaccard = jaccard / len(loader)
+            recall = recall / len(loader)
 
     return epoch_loss, y, y_pred, x, f1, accuracy, jaccard, recall
 
 
-def create_images(x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_images: int = 4) -> list[np.ndarray]:
-    """
-    Create images for visualization
+def create_images(
+    x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_images: int = 4
+) -> list[NDArray[np.generic]]:
+    """Create images for visualization.
 
-    :param x: The input tensor
-    :type x: torch.Tensor
-    :param y: The true labels
-    :type y: torch.Tensor
-    :param pred: The predicted labels
-    :type pred: torch.Tensor
-    :param num_images: The number of images to create
-    :type num_images: int
-    :return: The images
-    :rtype: List[np.ndarray]
+    Parameters
+    ----------
+    x : torch.Tensor
+        The input tensor.
+    y : torch.Tensor
+        The true labels.
+    pred : torch.Tensor
+        The predicted labels.
+    num_images : int
+        The number of images to create.
+
+    Returns
+    -------
+    list[NDArray[np.generic]]
+        The list of visualisation images (RGB composites from ``label2rgb``).
     """
     y_mask = y.cpu().detach().numpy()
     pred_mask = pred.cpu().detach().numpy()
     x = x.cpu().detach().numpy()
-    images = []
-    num_images = min(num_images, x.shape[0])
+    images: list[NDArray[np.generic]] = []
+    num_images = int(min(num_images, x.shape[0]))
     i = 0
-    while len(images) < num_images or i - 1 == x.shape[0]:
+    while len(images) < num_images:
         img = mask_image(x, y_mask, pred_mask, i)
         images.append(img)
         i += 1
@@ -139,7 +214,30 @@ def create_images(x: torch.Tensor, y: torch.Tensor, pred: torch.Tensor, num_imag
     return images
 
 
-def mask_image(x, y_mask, pred_mask, i):
+def mask_image(
+    x: NDArray[np.generic],
+    y_mask: NDArray[np.floating],
+    pred_mask: NDArray[np.floating],
+    i: int,
+) -> NDArray[np.generic]:
+    """Overlay the ground-truth and predicted masks on a single input image.
+
+    Parameters
+    ----------
+    x : NDArray[np.generic]
+        The input image stack.
+    y_mask : NDArray[np.generic]
+        The ground-truth mask stack.
+    pred_mask : NDArray[np.generic]
+        The predicted mask stack.
+    i : int
+        The image index within the stacks.
+
+    Returns
+    -------
+    NDArray[np.generic]
+        The RGB-overlaid image (output of ``skimage.color.label2rgb``).
+    """
     img = x[i, :, :, :].squeeze()
     img = gray2rgb(img)
     y_mask = y_mask[i, :, :, :].squeeze()
@@ -159,89 +257,263 @@ def mask_image(x, y_mask, pred_mask, i):
     pred_mask = (pred_mask - diff_mask) * 2
 
     labels = np.max([y_mask, diff_mask, pred_mask], axis=0)
-    img = label2rgb(labels, image=img, colors=[[0, 0, 1], [0, 1, 0], [1, 0, 0]], alpha=0.3, bg_label=0,
-                    bg_color=None)
-    return img
+    return label2rgb(
+        labels,
+        image=img,
+        colors=[[0, 0, 1], [0, 1, 0], [1, 0, 0]],
+        alpha=0.3,
+        bg_label=0,
+        bg_color=None,
+    )
 
 
-def train_model(dataset_file: str, node_name: str, dev: device = torch.device("cuda"), output_train: str = "training",
-                learning_rate: float = 0.003673, batch_size: int = 35, epochs: int = 62,
-                wandb_mode: str = "offline", filter_empty_patches: bool = True, wandb_project: str = "vseg",
-                pin_memory: bool = True) -> None:
+def train_model(
+    dataset_file: str,
+    node_name: str,
+    dev: device | None = None,
+    output_train: str = "training",
+    learning_rate: float = 0.003673,
+    batch_size: int = 35,
+    epochs: int = 62,
+    wandb_mode: str = "offline",
+    filter_empty_patches: bool = True,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+    pretrained_artifact: str | None = None,
+    pin_memory: bool = True,
+    resume: bool = False,
+) -> None:
+    """Train the vessel segmentation model.
+
+    Parameters
+    ----------
+    dataset_file : str
+        The file to the dataset (zarr).
+    node_name : str
+        The name of the node in the zarr file.
+    dev : torch.device | None
+        The device to use for training. ``None`` resolves to ``torch.device("cuda")``
+        inside the function body (avoids a def-time ``torch.device`` call).
+    output_train : str
+        The output directory for the training.
+    learning_rate : float
+        The learning rate for the optimizer.
+    batch_size : int
+        The batch size for training.
+    epochs : int
+        The number of epochs to train.
+    wandb_mode : str
+        The mode for wandb.
+    wandb_project : str | None
+        The wandb project name. ``None`` lets wandb use its own default
+        (the toolkit is lab-config-free on import).
+    wandb_entity : str | None
+        The wandb entity (team/user) name. ``None`` lets wandb use the
+        user's default entity (no hardcoded lab entity).
+    pretrained_artifact : str | None
+        The wandb artifact path (``"entity/project/name:version"``) of a
+        pretrained model to initialise from. ``None`` trains from scratch.
+        When non-None, threads through to ``VsegModel(pretrained=True,
+        pretrained_artifact=...)``.
+    filter_empty_patches : bool
+        Whether to filter empty patches.
+    pin_memory : bool
+        Whether to pin memory in the data loader. Speeds up for CUDA.
+    resume : bool
+        If True, resume from a previous checkpoint. The manifest's
+        ``last_completed_epoch`` is read and the model loads
+        ``checkpoint.{last_completed_epoch}.pth`` (the existing per-epoch
+        weights artifact); the epoch loop continues from
+        ``last_completed_epoch + 1``. A params-hash mismatch (code/param
+        change between runs) invalidates the checkpoint and re-runs from
+        epoch 0.
+
+        .. note::
+            1.0.0 limitation: full-state ``.pth`` augmentation
+            (optimizer / scheduler / RNG / dataloader-epoch state) is
+            deferred to 1.1. Resume continues from epoch ``N+1`` with a
+            re-initialized optimizer state — this is a known, documented
+            limitation, not a silent wrong-data fallback. The manifest
+            records the epoch index (complementary to the per-epoch
+            ``checkpoint.*.pth`` weights artifact); the ``.pth`` is the
+            weights, the manifest is the bookkeeper.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch (or wandb) is not installed (re-raised with an actionable message).
     """
-    Train the vessel segmentation model
+    try:
+        import torch
+        from torch.utils.data import DataLoader, Subset, random_split
 
-    :param dataset_file: The file to the dataset (zarr)
-    :type dataset_file: str
-    :param node_name: The name of the node in the zarr file
-    :type node_name: str
-    :param dev: The device to use for training
-    :type dev: str
-    :param output_train: The output directory for the training
-    :type output_train: str
-    :param learning_rate: The learning rate for the optimizer
-    :type learning_rate: float
-    :param batch_size: The batch size for training
-    :type batch_size: int
-    :param epochs: The number of epochs to train
-    :type epochs: int
-    :param wandb_mode: The mode for wandb
-    :type wandb_mode: str
-    :param wandb_project: The project for wandb. See wandb of LIOM for more details.
-    :type wandb_project: str
-    :param filter_empty_patches: Whether to filter empty patches
-    :type filter_empty_patches: bool
-    :param pin_memory: Whether to pin memory in the data loader. Speeds up for CUDA.
-    :type pin_memory: bool
-    :return: None
-    """
+        from .dataset import OmeZarrLabelDataSet
+        from .loss import DiceBCELoss
+        from .model import VsegModel
+    except ImportError as e:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        ) from e
+    try:
+        import wandb
+    except ImportError as e:
+        raise ImportError(
+            "Please install wandb (ai extra) to use the vessel segmentation "
+            "training of the LIOM toolkit."
+        ) from e
+    if dev is None:
+        dev = torch.device("cuda")
     # Setup training parameters and wandb run
-    hyperparameter_defaults = dict(
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        epochs=epochs)
+    hyperparameter_defaults = {
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "epochs": epochs,
+    }
 
-    # Init wandb
+    # Init wandb. entity=wandb_entity (None -> wandb uses the user's default
+    # entity; project=wandb_project (None -> wandb default project). No
+    # hardcoded lab config.
     run = wandb.init(
-        project=wandb_project,
-        entity="liom-lab",
-        mode=wandb_mode,
-        config=hyperparameter_defaults)
+        project=wandb_project, entity=wandb_entity, mode=wandb_mode, config=hyperparameter_defaults
+    )
 
     config = wandb.config
 
     # Load the dataset
-    full_dataset = OmeZarrLabelDataSet(dataset_file, node_name, device=dev, pre_process=False,
-                                       patch_size=(1, 256, 256), filter_empty=filter_empty_patches,
-                                       normalise_label=False)
+    full_dataset = OmeZarrLabelDataSet(
+        dataset_file,
+        node_name,
+        device=dev,
+        pre_process=False,
+        patch_size=(1, 256, 256),
+        filter_empty=filter_empty_patches,
+        normalise_label=False,
+    )
     train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
     if filter_empty_patches:
-        # Filter indices on valid patches
-        train_valid_indices = [idx for idx in train_dataset.indices if idx in full_dataset.valid_indices]
-        test_valid_indices = [idx for idx in test_dataset.indices if idx in full_dataset.valid_indices]
+        # Map the split indices through valid_indices to get the actual
+        # dataset indices. random_split returns Subset objects whose
+        # .indices are integers in 0..len(valid_indices)-1 (i.e. indices
+        # INTO the filtered dataset, since full_dataset.__len__ returns
+        # len(valid_indices) when filter_empty is set). The previous code
+        # checked whether a filtered-dataset index was a VALUE in
+        # valid_indices (which contains original dataset indices) -- a
+        # namespace mismatch that succeeded only by numerical coincidence
+        # and produced a tiny, non-random training subset. Map each split
+        # index through valid_indices to recover the true dataset index.
+        train_valid_indices = [
+            int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices
+        ]
+        test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
 
-        # Crate new subsets for dataloaders
+        # Create new subsets for dataloaders
         train_dataset = Subset(full_dataset, train_valid_indices)
         test_dataset = Subset(full_dataset, test_valid_indices)
 
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
-    validation_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory
+    )
+    validation_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory
+    )
 
     # Setup check point dir
     best_epoch = -1
     create_dir(f"{output_train}")
     create_dir(f"{output_train}/files")
     checkpoint_path = f"{output_train}/files/checkpoint"
-    create_dir(f'{output_train}/patch_seg')
+    create_dir(f"{output_train}/patch_seg")
 
-    model = VsegModel()
+    # Resume bookkeeping: the manifest records last_completed_epoch
+    # (complementary to the per-epoch checkpoint.*.pth weights artifact).
+    # The manifest is the bookkeeper; the .pth is the weights.
+    #
+    # NOTE: steps_total=epochs is passed for manifest completeness, but
+    # train_model does NOT call start_step/finish_step per epoch — it uses
+    # set_last_completed_epoch + the complete sentinel instead. The
+    # completed_steps set in the manifest is therefore always empty for
+    # this pipeline; last_completed_epoch is the authoritative epoch index.
+    # Future maintainers should not expect completed_steps to track epoch
+    # completion here.
+    from liom_toolkit.utils.checkpoint import ResumeManager
+
+    resume_mgr = ResumeManager(
+        output_dir=Path(output_train),
+        pipeline="train_model",
+        params={
+            "dataset_file": dataset_file,
+            "node_name": node_name,
+            "epochs": epochs,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            # Include training-affecting parameters so a config change
+            # between runs invalidates the checkpoint (params-hash
+            # mismatch). pretrained_artifact determines the initial
+            # weights (from-scratch vs. fine-tuning); filter_empty_patches
+            # changes which patches are used; dev (CPU vs. GPU) affects
+            # floating-point reproducibility; pin_memory changes data
+            # loading behavior. Without these, resume with a different
+            # training config would silently continue from a checkpoint
+            # that was initialized differently — a stale-checkpoint bug.
+            "pretrained_artifact": pretrained_artifact,
+            "filter_empty_patches": filter_empty_patches,
+            "dev": str(dev) if dev is not None else None,
+            "pin_memory": pin_memory,
+        },
+        steps_total=epochs,
+    )
+    if resume and resume_mgr.is_complete():
+        logger.info("train_model: checkpoint complete, nothing to do.")
+        run.finish()
+        return
+
+    # Initialise the model. pretrained_artifact threads through to VsegModel;
+    # None trains from scratch (no silent fallback to a hardcoded lab artifact).
+    model = VsegModel(
+        pretrained=pretrained_artifact is not None,
+        pretrained_artifact=pretrained_artifact,
+    )
+
+    # Resume: load the per-epoch checkpoint.{last_completed_epoch}.pth weights
+    # and continue from epoch N+1. 1.0.0 limitation: the optimizer / scheduler
+    # / RNG state is re-initialized (full-state .pth augmentation is deferred
+    # to 1.1 — resume is not bit-deterministic across optimizer/RNG state
+    # until 1.1). This is a known, documented limitation, not a silent
+    # wrong-data fallback.
+    start_epoch = 0
+    if resume:
+        last_epoch = resume_mgr.get_last_completed_epoch()
+        if last_epoch is not None:
+            ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
+            if Path(ckpt_file).exists():
+                # weights_only=True restricts deserialization to tensor
+                # storage (no arbitrary pickle code execution). PyTorch 2.6+
+                # defaults to this, but the ai extra does not pin a torch
+                # version, so a user on torch < 2.6 would otherwise load with
+                # weights_only=False (pickle.load under the hood) — a
+                # malicious or swapped .pth would execute arbitrary code.
+                # Match the model.py load path (weights_only=True).
+                model.load_state_dict(torch.load(ckpt_file, weights_only=True))
+                start_epoch = last_epoch + 1
+                logger.info(
+                    "train_model: resuming from epoch %d (loaded %s).",
+                    start_epoch,
+                    ckpt_file,
+                )
+            else:
+                logger.warning(
+                    "train_model: manifest says last_completed_epoch=%d but "
+                    "%s is missing — starting from epoch 0.",
+                    last_epoch,
+                    ckpt_file,
+                )
 
     model = model.to(dev)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5)
     loss_fn = DiceBCELoss()
 
     # Track model with Wandb
@@ -251,19 +523,17 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
     train_losses = []
     val_losses = []
 
-    best_valid_loss = float('inf')
+    best_valid_loss = float("inf")
 
-    for epoch in (pbar := tqdm(range(config.epochs), desc="Epochs", leave=False, position=0)):
-        train_loss, train_y, train_y_pred, x_train = train(model,
-                                                           train_loader,
-                                                           optimizer,
-                                                           loss_fn,
-                                                           dev)
+    epoch_range = range(start_epoch, config.epochs)
+    for epoch in (pbar := tqdm(epoch_range, desc="Epochs", leave=False, position=0)):
+        train_loss, train_y, train_y_pred, x_train = train(
+            model, train_loader, optimizer, loss_fn, dev
+        )
 
-        val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(model,
-                                                                                           validation_loader,
-                                                                                           loss_fn,
-                                                                                           dev)
+        val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(
+            model, validation_loader, loss_fn, dev
+        )
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -278,46 +548,42 @@ def train_model(dataset_file: str, node_name: str, dev: device = torch.device("c
         if epoch % 10 == 0:
             torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
 
-        pbar.set_postfix(
-            loss=f'Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+        # Record the epoch as complete (complementary to the per-epoch .pth).
+        # A crash after epoch N leaves last_completed_epoch=N; resume
+        # continues from N+1.
+        resume_mgr.set_last_completed_epoch(epoch)
+
+        pbar.set_postfix(loss=f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         train_images = create_images(x_train, train_y, train_y_pred)
         val_images = create_images(x_val, val_y, val_y_pred)
-        wandb.log({
-            'Training Loss': train_loss,
-            'Validation Loss': val_loss,
-            'Accuracy': accuracy,
-            'Jaccard': jaccard,
-            'F1 score': f1_score,
-            'Recall': recall,
-            "Images": {"Training": [wandb.Image(x, mode="RGB") for x in train_images],
-                       "Validation": [wandb.Image(x, mode="RGB") for x in val_images],
-                       }
-        })
+        wandb.log(
+            {
+                "Training Loss": train_loss,
+                "Validation Loss": val_loss,
+                "Accuracy": accuracy,
+                "Jaccard": jaccard,
+                "F1 score": f1_score,
+                "Recall": recall,
+                "Images": {
+                    "Training": [wandb.Image(x, mode="RGB") for x in train_images],
+                    "Validation": [wandb.Image(x, mode="RGB") for x in val_images],
+                },
+            }
+        )
 
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
+    # Atomic complete sentinel — written LAST, after all epochs done. A crash
+    # on the final epoch does NOT leave complete=True (write_manifest is
+    # atomic: temp + Path.replace).
+    resume_mgr.mark_complete()
 
-    print(f'Finished Training: Best Epoch = {best_epoch}')
-    artifact = wandb.Artifact('model', type='model')
+    logger.info("Finished Training: Best Epoch = %s", best_epoch)
+    artifact = wandb.Artifact("model", type="model")
     artifact.add_file(f"{checkpoint_path}.latest.pth")
     run.log_artifact(artifact)
 
     # For sweeps
-    torch.save(model.state_dict(), os.path.join(wandb.run.dir, "model.pt"))
+    torch.save(model.state_dict(), str(Path(wandb.run.dir) / "model.pt"))
     run.finish()
 
     final_loss = pd.DataFrame(data=[train_losses, val_losses]).T
-    final_loss.to_csv('final_metrics.csv', encoding='utf-8', index=False)
-
-
-if __name__ == "__main__":
-    # Hardcoded for wandb sweeps
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataset_dir = ""
-    output = ""
-    node_name = ""
-
-    train_model(dataset_file=dataset_dir,
-                dev=device,
-                output_train=output,
-                node_name=node_name)
+    final_loss.to_csv("final_metrics.csv", encoding="utf-8", index=False)

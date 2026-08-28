@@ -34,12 +34,22 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# setuptools-scm-generated version file (written to the source tree at build
+# time by [tool.setuptools_scm].write_to_source = true; not committed).
+liom_toolkit/_version.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+
+# allensdk transient cache manifest (regenerate.py writes this alongside the
+# committed fixture; it is not needed by the regression test).
+tests/test_utils/fixtures/allen_itksnap_25um/manifest.json
+
+# Stray metric-output CSV from local CLI runs (not a committed artifact).
+/final_metrics.csv
 
 # Installer logs
 pip-log.txt
@@ -79,6 +89,10 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/build/
+# autoapi-generated API reference stubs (autoapi_keep_files=True is for
+# incremental-build speed, not for committing — regenerated every build).
+docs/source/reference/autoapi/
 
 # PyBuilder
 .pybuilder/
@@ -145,3 +159,28 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# === OpenGSD (gsd-core) — keep ALL GSD-produced files out of git ===
+.cursor/
+.windsurf/
+.windsurf/gsd-local-patches/
+.windsurf/gsd-pristine/
+.devin/
+.planning/
+.planning/tmp/
+/CLAUDE.md
+/GEMINI.md
+graphify-out/
+handoffs/
+memories/
+context/
+specs/
+.gsd/
+.gsd-id
+.gsd-worktrees/
+.gsd-profile
+.agents/
+.bg-shell/
+skills-lock.json
+.gsd-graph/
+.mcp.json

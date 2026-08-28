@@ -1,316 +1,738 @@
-import os
-import tempfile
-from tempfile import mktemp
+"""Template creation and pre-registration for ANTs-based groupwise registration."""
 
-import ants
-import ants.utils as utils
+from __future__ import annotations
+
+import logging
+import shutil
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
-from ants import resample_image_to_target, registration, apply_transforms
-from ants.core import ants_image_io as iio
-from ants.core.ants_image import ANTsImage
+from ome_zarr.reader import Node
 from tqdm.auto import tqdm
 
-from liom_toolkit.utils import load_zarr, load_node_by_name, load_ants_image_from_node, download_allen_template
-from ..segmentation import segment_3d_brain
+from liom_toolkit.utils import download_allen_template, load_node_by_name, load_zarr
+from liom_toolkit.utils.ants import load_ants_image_from_node
+
+if TYPE_CHECKING:
+    from ants.core.ants_image import ANTsImage
+
+logger = logging.getLogger(__name__)
 
 
-def create_template(images: list, masks: list, brain_names: list, template_volume: ANTsImage,
-                    template_resolution: int | float = 10, iterations: int = 3, init_with_template=True,
-                    save_pre_reg: bool = False, remove_temp_output: bool = False,
-                    save_templating_progress: bool = False, pre_registration_type: str = "Rigid",
-                    templating_registration_type: str = "SyN") -> ANTsImage:
+def create_template(
+    images: list[ANTsImage],
+    masks: list[ANTsImage],
+    brain_names: list[str],
+    template_volume: ANTsImage,
+    template_resolution: int | float = 10,
+    iterations: int = 3,
+    init_with_template: bool = True,
+    save_pre_reg: bool = False,
+    remove_temp_output: bool = False,
+    save_templating_progress: bool = False,
+    pre_registration_type: str = "Rigid",
+    templating_registration_type: str = "SyN",
+    resume_mgr: Any = None,
+    output_dir: str | None = None,
+) -> ANTsImage:
+    """Create a template from a folder of images.
+
+    Parameters
+    ----------
+    images : list[ANTsImage]
+        List of images to use to create the template.
+    masks : list[ANTsImage]
+        List of masks to use to create the template.
+    brain_names : list[str]
+        List of brain names to use for saving the pre-registered images.
+    template_volume : ANTsImage
+        Default template to pre-register the brains to and possibly the
+        initial volume for registration.
+    template_resolution : int or float
+        The resolution of the template.
+    iterations : int
+        The number of iterations to use to create the template.
+    init_with_template : bool
+        Whether to initialize the template with the atlas volume or the
+        first image.
+    save_pre_reg : bool
+        Whether to save the pre-registered images.
+    remove_temp_output : bool
+        Whether to remove the temporary output.
+    save_templating_progress : bool
+        Whether to save the template at each iteration.
+    pre_registration_type : str
+        The type of pre-registration to use.
+    templating_registration_type : str
+        The type of registration to use to create the template.
+
+    Returns
+    -------
+    ANTsImage
+        The newly created template.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
-    Create a template from a folder of images.
-
-    :param images: List of images to use to create the template.
-    :type images: list
-    :param masks: List of masks to use to create the template.
-    :type masks: list
-    :param brain_names: List of brain names to use for saving the pre-registered images.
-    :type brain_names: list
-    :param template_volume: Default template to pre-register the brains to and possible the initial volume for registration.
-    :type template_volume: ANTsImage
-    :param template_resolution: The resolution of the template.
-    :type template_resolution: int
-    :param iterations: The number of iterations to use to create the template.
-    :type iterations: int
-    :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
-    :type init_with_template: bool
-    :param save_pre_reg: Whether to save the pre-registered images.
-    :type save_pre_reg: bool
-    :param remove_temp_output: Whether to remove the temporary output.
-    :type remove_temp_output: bool
-    :param save_templating_progress: Whether to save the template at each iteration.
-    :type save_templating_progress: bool
-    :param pre_registration_type: The type of pre-registration to use.
-    :type pre_registration_type: str
-    :param templating_registration_type: The type of registration to use to create the template.
-    :type templating_registration_type: str
-    :return: The newly created template.
-    :rtype: ANTsImage
-    """
+    try:
+        import ants
+    except ImportError as e:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        ) from e
     template_images = []
     template_masks = []
-    for i, image in tqdm(enumerate(images), desc="Pre-registering images", leave=False, total=len(images), unit="image",
-                         position=1):
-        image_resampled = ants.resample_image(image, (template_resolution, template_resolution, template_resolution),
-                                              use_voxels=False, interp_type=1)
-        mask_resampled = ants.resample_image(masks[i], (template_resolution, template_resolution, template_resolution),
-                                             use_voxels=False, interp_type=1)
+    for i, image in tqdm(
+        enumerate(images),
+        desc="Pre-registering images",
+        leave=False,
+        total=len(images),
+        unit="image",
+        position=1,
+    ):
+        image_resampled = ants.resample_image(
+            image,
+            (template_resolution, template_resolution, template_resolution),
+            use_voxels=False,
+            interp_type=1,
+        )
+        mask_resampled = ants.resample_image(
+            masks[i],
+            (template_resolution, template_resolution, template_resolution),
+            use_voxels=False,
+            interp_type=1,
+        )
 
-        image_reg, mask_reg = pre_register_brain(image_resampled, mask_resampled, template_volume, brain_names[i],
-                                                 save_pre_reg=save_pre_reg, registration_type=pre_registration_type)
+        image_reg, mask_reg = pre_register_brain(
+            image_resampled,
+            mask_resampled,
+            template_volume,
+            brain_names[i],
+            save_pre_reg=save_pre_reg,
+            registration_type=pre_registration_type,
+        )
         template_images.append(image_reg)
         template_masks.append(mask_reg)
 
-    print("Creating template...")
+    logger.info("Creating template...")
     if init_with_template:
-        template = build_template(template_volume, template_images, masks=template_masks, iterations=iterations,
-                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output,
-                                  type_of_transform=templating_registration_type)
+        template = build_template(
+            template_volume,
+            template_images,
+            masks=template_masks,
+            iterations=iterations,
+            save_progress=save_templating_progress,
+            remove_temp_output=remove_temp_output,
+            type_of_transform=templating_registration_type,
+            resume_mgr=resume_mgr,
+            output_dir=output_dir,
+        )
     else:
-        template = build_template(template_images[0], template_images, masks=template_masks, iterations=iterations,
-                                  save_progress=save_templating_progress, remove_temp_output=remove_temp_output,
-                                  type_of_transform=templating_registration_type)
+        template = build_template(
+            template_images[0],
+            template_images,
+            masks=template_masks,
+            iterations=iterations,
+            save_progress=save_templating_progress,
+            remove_temp_output=remove_temp_output,
+            type_of_transform=templating_registration_type,
+            resume_mgr=resume_mgr,
+            output_dir=output_dir,
+        )
     return template
 
 
-def pre_register_brain(volume: ANTsImage, mask: ANTsImage | None, template: ANTsImage, brain: str,
-                       save_pre_reg: bool = False, registration_type: str = "Rigid") -> (
-        ANTsImage, ANTsImage):
-    """
-    Register an image to a template and return the registered image and mask.
+def pre_register_brain(
+    volume: ANTsImage,
+    mask: ANTsImage | None,
+    template: ANTsImage,
+    brain: str,
+    save_pre_reg: bool = False,
+    registration_type: str = "Rigid",
+    output_dir: str | None = None,
+) -> tuple[ANTsImage, ANTsImage]:
+    """Register an image to a template and return the registered image and mask.
 
-    :param volume: The volume to register
-    :type volume: ANTsImage
-    :param mask: The mask to use in registration
-    :type mask: ANTsImage
-    :param template: The template to register to
-    :type template: ANTsImage
-    :param brain: The name of the brain
-    :type brain: str
-    :param save_pre_reg: Whether to save the pre-registered image and mask
-    :type save_pre_reg: bool
-    :param registration_type: The type of registration to use
-    :type registration_type: str
-    :return: The registered image and registered mask
-    :rtype: tuple[ANTsImage, ANTsImage]
+    Parameters
+    ----------
+    volume : ANTsImage
+        The volume to register.
+    mask : ANTsImage or None
+        The mask to use in registration.
+    template : ANTsImage
+        The template to register to.
+    brain : str
+        The name of the brain.
+    save_pre_reg : bool
+        Whether to save the pre-registered image and mask.
+    registration_type : str
+        The type of registration to use.
+    output_dir : str or None
+        Optional directory to write pre-registered images to. When None
+        (default) the files are written to a ``pre_registered/`` directory
+        under the current working directory (legacy behavior); when set,
+        they are written under ``{output_dir}/pre_registered/``.
+
+    Returns
+    -------
+    tuple[ANTsImage, ANTsImage]
+        The registered image and registered mask.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
-    image_reg_transform = ants.registration(fixed=template, moving=volume, moving_mask=mask,
-                                            type_of_transform=registration_type)
-    image_reg = apply_transforms(fixed=template, moving=volume, transformlist=image_reg_transform['fwdtransforms'])
-    mask_reg = apply_transforms(fixed=template, moving=mask, transformlist=image_reg_transform['fwdtransforms'])
+    try:
+        import ants
+        from ants import apply_transforms
+    except ImportError as e:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        ) from e
+    image_reg_transform = ants.registration(
+        fixed=template, moving=volume, moving_mask=mask, type_of_transform=registration_type
+    )
+    image_reg = apply_transforms(
+        fixed=template, moving=volume, transformlist=image_reg_transform["fwdtransforms"]
+    )
+    mask_reg = apply_transforms(
+        fixed=template, moving=mask, transformlist=image_reg_transform["fwdtransforms"]
+    )
     if save_pre_reg:
-        if not os.path.exists("pre_registered"):
-            os.makedirs("pre_registered")
-        ants.image_write(image_reg, f"pre_registered/{brain}_pre_reg.nii.gz")
-        ants.image_write(mask_reg, f"pre_registered/{brain}_pre_reg_mask.nii.gz")
+        pre_reg_dir = str(Path(output_dir) / "pre_registered") if output_dir else "pre_registered"
+        if not Path(pre_reg_dir).exists():
+            Path(pre_reg_dir).mkdir(parents=True)
+        ants.image_write(image_reg, str(Path(pre_reg_dir) / f"{brain}_pre_reg.nii.gz"))
+        ants.image_write(mask_reg, str(Path(pre_reg_dir) / f"{brain}_pre_reg_mask.nii.gz"))
     return image_reg, mask_reg
 
 
 def build_template(
-        initial_template: ANTsImage = None,
-        image_list: list[ANTsImage] = None,
-        iterations: int = 3,
-        gradient_step: float = 0.2,
-        blending_weight: float = 0.75,
-        weights: bool = None,
-        masks: list | None = None,
-        remove_temp_output: bool = False,
-        save_progress: bool = False,
-        type_of_transform: str = "SyN",
-        **kwargs
+    initial_template: ANTsImage | None = None,
+    image_list: list[ANTsImage] | None = None,
+    iterations: int = 3,
+    gradient_step: float = 0.2,
+    blending_weight: float = 0.75,
+    weights: list[float] | None = None,
+    masks: list[ANTsImage] | None = None,
+    remove_temp_output: bool = False,
+    save_progress: bool = False,
+    useNoRigid: bool = True,
+    output_dir: str | None = None,
+    type_of_transform: str = "SyN",
+    resume_mgr: Any = None,
+    **kwargs: ANTsImage,
 ) -> ANTsImage:
-    """
-    Estimate an optimal template from an input image_list
+    """Estimate an optimal template from an input image_list.
+
     A modification of the ANTsPy function build_template to use masks.
-    Source here: https://antspyx.readthedocs.io/en/latest/_modules/ants/registration/build_template.html#build_template
+    Source here: https://antspyx.readthedocs.io/en/v0.6.3/_modules/ants/registration/build_template.html#build_template
 
-    :param initial_template: The initial template to use
-    :type initial_template: ANTsImage
-    :param image_list: The list of images to use to create the template
-    :type image_list: list[ANTsImage]
-    :param iterations: The number of iterations to use to create the template
-    :type iterations: int
-    :param gradient_step: For shape update gradient
-    :type gradient_step: float
-    :param blending_weight: Weight for image blending
-    :type blending_weight: float
-    :param weights: Weight for each input image
-    :type weights: List[float]
-    :param masks: List of masks corresponding to the images in image_list
-    :type masks: List[ANTsImage]
-    :param remove_temp_output: Whether to remove the temporary output files
-    :type remove_temp_output: bool
-    :param save_progress: Whether to save the progress of the template building
-    :type save_progress: bool
-    :param type_of_transform: The type of transform to use for registration
-    :type type_of_transform: str
-    :param kwargs: Extra arguments passed to ants registration
-    :return: The newly created template
-    :rtype: ANTsImage
+    Parameters
+    ----------
+    initial_template : ANTsImage or None
+        The initial template to use.
+    image_list : list[ANTsImage] or None
+        The list of images to use to create the template.
+    iterations : int
+        The number of iterations to use to create the template.
+    gradient_step : float
+        For shape update gradient.
+    blending_weight : float
+        Weight for image blending.
+    weights : list[float] or None
+        Weight for each input image.
+    masks : list[ANTsImage] or None
+        List of masks corresponding to the images in image_list.
+    remove_temp_output : bool
+        Whether to remove the temporary output files.
+    save_progress : bool
+        Whether to save the progress of the template building.
+    useNoRigid : bool
+        Whether to exclude the rigid component when averaging the per-image
+        affine transforms (uses ants.average_affine_transform_no_rigid when
+        True, ants.average_affine_transform when False).
+    output_dir : str or None
+        Optional directory to retain all intermediate transforms in. When
+        None (default) a secure temporary directory is used and removed at
+        the end; when set, the directory is kept.
+    type_of_transform : str
+        The type of transform to use for registration.
+    resume_mgr : ResumeManager or None
+        Optional resume bookkeeper. When provided, each iteration is wrapped
+        with ``resume_mgr.start_step`` / ``resume_mgr.finish_step`` so
+        completed iterations (whose rolling-latest template NIfTI artifact
+        validates) are skipped on resume. The resumable artifact is the
+        rolling-latest ``template_{i}.nii.gz`` (no intermediate duplication —
+        the per-iteration ``remove_temp_output`` cleanup stays).
+    **kwargs : ANTsImage
+        Extra arguments passed to ants registration (forwarded as-is).
 
-    Example
-    ^^^^^^^
+    Returns
+    -------
+    ANTsImage
+        The newly created template.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
+    ValueError
+        If ``image_list`` is None or empty.
+
+    Examples
+    --------
     >>> import ants
     >>> image = ants.image_read( ants.get_ants_data('r16') )
     >>> image2 = ants.image_read( ants.get_ants_data('r27') )
     >>> image3 = ants.image_read( ants.get_ants_data('r85') )
-    >>> timage = ants.build_template( image_list = ( image, image2, image3 ) ).resample_image( (45,45))
-    >>> timagew = ants.build_template( image_list = ( image, image2, image3 ), weights = (5,1,1) )
+    >>> timage = ants.build_template(
+    ...     image_list = ( image, image2, image3 )
+    ... ).resample_image( (45,45))
+    >>> timagew = ants.build_template(
+    ...     image_list = ( image, image2, image3 ), weights = (5,1,1)
+    ... )
     """
+    try:
+        import ants
+        from ants.core import ants_image_io as iio
+    except ImportError as e:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        ) from e
+
+    # Validate image_list early so a caller using the default (None) gets an
+    # explicit, named error instead of an opaque TypeError from len(None) /
+    # None[0] deeper in the function.
+    if image_list is None or len(image_list) == 0:
+        raise ValueError("build_template requires a non-empty image_list.")
 
     if weights is None:
-        weights = np.repeat(1.0 / len(image_list), len(image_list))
+        weights = list(np.repeat(1.0 / len(image_list), len(image_list)))
     weights = [x / sum(weights) for x in weights]
     if initial_template is None:
         initial_template = image_list[0] * 0
         for i in range(len(image_list)):
             temp = image_list[i] * weights[i]
-            temp = resample_image_to_target(temp, initial_template)
+            temp = ants.resample_image_to_target(temp, initial_template)
             initial_template = initial_template + temp
 
-    if not os.path.exists("template_progress") and save_progress:
-        os.makedirs("template_progress")
+    # Deliberate fork divergence from upstream antspyx 0.6.3, which still
+    # uses the TOCTOU-vulnerable tempfile.mktemp for work_dir. mkdtemp
+    # atomically creates a unique directory (no race window); work_dir is
+    # used as a directory by make_outprefix's os.makedirs, so a
+    # file-creating helper (NamedTemporaryFile/mkstemp) would break that.
+    work_dir = tempfile.mkdtemp() if output_dir is None else output_dir
 
-    xavg = initial_template.clone()
-    for i in tqdm(range(iterations), desc="Running template iterations", leave=False, total=iterations,
-                  unit="iteration", position=1):
-        for k in range(len(image_list)):
-            if masks is None:
-                w1 = registration(
-                    xavg, image_list[k], type_of_transform=type_of_transform, **kwargs
+    # Write progress files under work_dir rather than a CWD-relative
+    # template_progress/ directory, which would litter the caller's working
+    # directory (commonly the repo root in notebooks).
+    progress_dir = str(Path(work_dir) / "template_progress")
+    if save_progress and not Path(progress_dir).exists():
+        Path(progress_dir).mkdir(parents=True)
+
+    def make_outprefix(k: int) -> str:
+        (Path(work_dir) / f"img{k:04d}").mkdir(exist_ok=True, parents=True)
+        return str(Path(work_dir) / f"img{k:04d}" / "out")
+
+    # Wrap the body in try/finally so the mkdtemp work_dir is removed on
+    # every exit path, not just the success path. Without this, any
+    # ants.registration / apply_transforms / write_transform / image_write
+    # failure mid-iteration would leak the work_dir (and all per-image
+    # transform subdirectories) on disk. Only the auto-created temp dir is
+    # cleaned up; an explicit output_dir is retained by the caller.
+    try:
+        xavg = initial_template.clone()
+        wavg: Any = None
+        xavgNew: Any = None
+        L: int = 0
+        for i in tqdm(
+            range(iterations),
+            desc="Running template iterations",
+            leave=False,
+            total=iterations,
+            unit="iteration",
+            position=1,
+        ):
+            # Resume gating: skip completed iterations whose rolling-latest
+            # template NIfTI artifact validates. The resumable artifact is
+            # template_{i}.nii.gz (no intermediate duplication — the per-
+            # iteration remove_temp_output cleanup stays).
+            template_artifact = Path(progress_dir) / f"template_{i}.nii.gz"
+            if resume_mgr is not None and not resume_mgr.start_step(
+                i, artifact_path=template_artifact
+            ):
+                # Skipped: load the rolling-latest template as the init for
+                # the next iteration.
+                if template_artifact.exists():
+                    xavg = iio.image_read(str(template_artifact))
+                continue
+            affinelist = []
+            for k in range(len(image_list)):
+                if masks is None:
+                    w1 = ants.registration(
+                        xavg,
+                        image_list[k],
+                        type_of_transform=type_of_transform,
+                        outprefix=make_outprefix(k),
+                        **kwargs,
+                    )
+                else:
+                    w1 = ants.registration(
+                        xavg,
+                        image_list[k],
+                        type_of_transform=type_of_transform,
+                        outprefix=make_outprefix(k),
+                        moving_mask=masks[k],
+                        **kwargs,
+                    )
+                L = len(w1["fwdtransforms"])
+                affinelist.append(w1["fwdtransforms"][L - 1])
+                if k == 0:
+                    if L == 2:
+                        wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                    xavgNew = w1["warpedmovout"] * weights[k]
+                else:
+                    if L == 2:
+                        wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
+                    xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
+                    # Fork divergence from upstream 0.6.3: per-iteration cleanup
+                    # of per-image transform files. Upstream only does an
+                    # end-of-function shutil.rmtree(work_dir), but mid-run temp
+                    # data grows too large on the lab system and causes the
+                    # algorithm to fail, so the per-image cleanup is required.
+                    # Skip the last iteration so the final transforms remain
+                    # available to the affine-averaging block below.
+                    if i < iterations - 1 and remove_temp_output:
+                        for fwd_transform in w1["fwdtransforms"]:
+                            Path(fwd_transform).unlink()
+                        for inv_transform in w1["invtransforms"]:
+                            Path(inv_transform).unlink()
+
+            if useNoRigid:
+                avgaffine = ants.average_affine_transform_no_rigid(affinelist)
+            else:
+                avgaffine = ants.average_affine_transform(affinelist)
+            afffn = str(Path(work_dir) / "avgAffine.mat")
+            ants.write_transform(avgaffine, afffn)
+
+            if L == 2:
+                logger.debug("wavg.abs().mean() = %s", wavg.abs().mean())
+                wscl = (-1.0) * gradient_step
+                wavg = wavg * wscl
+                wavgA = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=wavg,
+                    imagetype=1,
+                    transformlist=afffn,
+                    whichtoinvert=[1],
+                )
+                wavgfn = str(Path(work_dir) / "avgWarp.nii.gz")
+                iio.image_write(wavgA, wavgfn)
+                xavg = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=xavgNew,
+                    transformlist=[wavgfn, afffn],
+                    whichtoinvert=[0, 1],
                 )
             else:
-                w1 = registration(
-                    xavg, image_list[k], type_of_transform=type_of_transform, moving_mask=masks[k], **kwargs
+                xavg = ants.apply_transforms(
+                    fixed=xavgNew,
+                    moving=xavgNew,
+                    transformlist=[afffn],
+                    whichtoinvert=[1],
                 )
-            if k == 0:
-                wavg = iio.image_read(w1["fwdtransforms"][0]) * weights[k]
-                xavgNew = w1["warpedmovout"] * weights[k]
-            else:
-                # Remove the transform and warping when not needed, when not last i
-                wavg = wavg + iio.image_read(w1["fwdtransforms"][0]) * weights[k]
-                xavgNew = xavgNew + w1["warpedmovout"] * weights[k]
-                if i < iterations - 1 and remove_temp_output:
-                    for fwd_transform in w1["fwdtransforms"]:
-                        os.remove(fwd_transform)
-                    for inv_transform in w1["invtransforms"]:
-                        os.remove(inv_transform)
-        print(wavg.abs().mean())
-        wscl = (-1.0) * gradient_step
-        wavg = wavg * wscl
-        wavgfn = mktemp(suffix=".nii.gz")
-        iio.image_write(wavg, wavgfn)
-        # Keep for debugging/visualization
-        xavg = apply_transforms(xavgNew, xavgNew, wavgfn)
-        if blending_weight is not None:
-            xavg = xavg * blending_weight + utils.iMath(xavg, "Sharpen") * (
+            if blending_weight is not None:
+                xavg = xavg * blending_weight + ants.iMath(xavg, "Sharpen") * (
                     1.0 - blending_weight
-            )
-        if save_progress:
-            ants.image_write(xavg, f"template_progress/template_{i}.nii.gz")
-    return xavg
+                )
+            if save_progress:
+                iio.image_write(xavg, str(Path(progress_dir) / f"template_{i}.nii.gz"))
+            # Record the iteration as complete (rolling-latest template NIfTI
+            # is the resumable artifact). finish_step writes the .done marker
+            # ONLY after the artifact validates.
+            if resume_mgr is not None:
+                resume_mgr.finish_step(i, artifact_path=template_artifact)
+
+        # NOTE: the pipeline-level complete sentinel is NOT set here.
+        # build_template is an inner step of build_template_for_resolution,
+        # which still has post-template work to do (register_to_template,
+        # segment_3d, ants.image_write). Marking the pipeline complete here
+        # would let a crash in any of those post-template steps leave a
+        # "complete" manifest with no output file written — a silent
+        # missing-output bug. The caller (build_template_for_resolution)
+        # sets the complete sentinel only after the output file is written.
+        return xavg
+    finally:
+        if output_dir is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def build_template_for_resolution(output_file: str, zarr_files: list, brain_names: list,
-                                  resolution_level: int = 3, template_resolution: int = 50,
-                                  iterations: int = 15, init_with_template: bool = False,
-                                  register_to_template: bool = False, flipped_brains: bool = False) -> None:
+def build_template_for_resolution(
+    output_file: str,
+    zarr_files: list[str],
+    brain_names: list[str],
+    resolution_level: int = 3,
+    template_resolution: int = 50,
+    atlas_resolution: int | None = None,
+    iterations: int = 15,
+    init_with_template: bool = False,
+    register_to_template: bool = False,
+    flipped_brains: bool = False,
+    resume: bool = False,
+) -> None:
+    """Create a template for a given resolution level and save it to disk.
+
+    Parameters
+    ----------
+    output_file : str
+        The location where to save the template.
+    zarr_files : list[str]
+        The list of zarr files to use to create the template.
+    brain_names : list[str]
+        The list of brain names to use for saving the pre-registered images.
+    resolution_level : int
+        The resolution level to load the images at.
+    template_resolution : int
+        The resolution of the template (in micron).
+    atlas_resolution : int | None
+        The resolution of the Allen atlas/reference volume to download
+        (in micron). ``None`` (default) falls back to ``template_resolution``
+        for backward compatibility — existing callers passing only
+        ``template_resolution`` are unaffected.
+    iterations : int
+        The number of iterations to use to create the template.
+    init_with_template : bool
+        Whether to initialize the template with the atlas volume or the
+        first image.
+    register_to_template : bool
+        Whether to register the template to the atlas volume.
+    flipped_brains : bool
+        Whether to include flipped brains in the template.
+    resume : bool
+        If True, resume from a previous checkpoint. Completed iterations
+        (whose rolling-latest template NIfTI artifact validates) are skipped
+        and the template build continues from the first incomplete
+        iteration. A params-hash mismatch (code/param change between runs)
+        invalidates the checkpoint and re-runs from scratch. The resumable
+        artifact is the rolling-latest ``template_{i}.nii.gz`` only (no
+        intermediate duplication — the per-iteration remove_temp_output
+        cleanup stays).
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
+    ValueError
+        If the mask node is not found in a zarr file.
     """
-    Create a template for a given resolution level and save it to disk.
+    try:
+        import ants
+        from ants import apply_transforms
+    except ImportError as e:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        ) from e
+    # atlas_resolution defaults to template_resolution for backward compat
+    # (existing callers passing only template_resolution are unaffected).
+    if atlas_resolution is None:
+        atlas_resolution = template_resolution
+    # Resume bookkeeping: the manifest + .done markers live under
+    # {output_file.parent}/_liom_checkpoints/build_template.json. The
+    # resumable artifact is the rolling-latest template NIfTI.
+    resume_mgr: Any = None
+    if resume:
+        from liom_toolkit.utils.checkpoint import ResumeManager
 
-    :param output_file: The location where to save the template.
-    :type output_file: str
-    :param zarr_files: The list of zarr files to use to create the template.
-    :type zarr_files: list
-    :param brain_names: The list of brain names to use for saving the pre-registered images.
-    :type brain_names: list
-    :param resolution_level: The resolution level to load the images at.
-    :type resolution_level: int
-    :param template_resolution: The resolution of the template.
-    :type template_resolution: int
-    :param iterations: The number of iterations to use to create the template.
-    :type iterations: int
-    :param init_with_template: Whether to initialize the template with the atlas volume or the first image.
-    :type init_with_template: bool
-    :param register_to_template: Whether to register the template to the atlas volume.
-    :type register_to_template: bool
-    :param flipped_brains: Whether to include flipped brains in the template.
-    :type flipped_brains: bool
-    :return: None
-    """
-    temp_folder = tempfile.TemporaryDirectory()
-    resolution_mm = template_resolution / 1000
+        resume_mgr = ResumeManager(
+            output_dir=Path(output_file).parent,
+            pipeline="build_template",
+            params={
+                "output_file": output_file,
+                "zarr_files": zarr_files,
+                "brain_names": brain_names,
+                "resolution_level": resolution_level,
+                "template_resolution": template_resolution,
+                "atlas_resolution": atlas_resolution,
+                "iterations": iterations,
+                "init_with_template": init_with_template,
+                "register_to_template": register_to_template,
+                "flipped_brains": flipped_brains,
+            },
+            steps_total=iterations,
+        )
+        if resume_mgr.is_complete():
+            logger.info("build_template_for_resolution: checkpoint complete, nothing to do.")
+            return
+    # Use a context manager so the temp dir is cleaned up on every exit
+    # path, not just the success path. Without this, a download,
+    # create_template, segment_3d, or image_write failure would leak the
+    # temp dir on disk.
+    with tempfile.TemporaryDirectory() as temp_folder:
+        resolution_mm = template_resolution / 1000
 
-    # Update brain names if flipped brains
-    if flipped_brains:
-        brain_names = update_brain_name_list(brain_names)
-
-    # Load allen template
-    template_volume = download_allen_template(temp_folder.name, resolution=template_resolution, keep_nrrd=True)
-    template_volume = ants.reorient_image2(template_volume, "RAS")
-
-    brain_volumes = []
-    masks = []
-    for file in tqdm(zarr_files, desc="Loading brains", leave=False, total=len(zarr_files), unit="brain", position=1):
-        zarr_file = file
-        nodes = load_zarr(zarr_file)
-        image_node = nodes[0]
-        mask_node = load_node_by_name(nodes, "mask")
-
-        brain_volume, mask = load_volume_for_registration(image_node, mask_node, resolution_level, flipped=False)
-        brain_volumes.append(brain_volume)
-        masks.append(mask)
-
-        # Added flipped brains
+        # Update brain names if flipped brains
         if flipped_brains:
-            brain_volume, mask = load_volume_for_registration(image_node, mask_node, resolution_level, flipped=True)
+            brain_names = update_brain_name_list(brain_names)
+
+        # Load allen atlas/reference at atlas_resolution (defaults to
+        # template_resolution for backward compat).
+        template_volume = download_allen_template(
+            temp_folder, resolution=atlas_resolution, keep_nrrd=True
+        )
+        template_volume = ants.reorient_image2(template_volume, "RAS")
+
+        brain_volumes = []
+        masks = []
+        for file in tqdm(
+            zarr_files,
+            desc="Loading brains",
+            leave=False,
+            total=len(zarr_files),
+            unit="brain",
+            position=1,
+        ):
+            zarr_file = file
+            nodes = load_zarr(zarr_file)
+            image_node = nodes[0]
+            mask_node = load_node_by_name(nodes, "mask")
+            if mask_node is None:
+                raise ValueError(f"Mask node not found in {zarr_file}")
+
+            brain_volume, mask = load_volume_for_registration(
+                image_node, mask_node, resolution_level, flipped=False
+            )
             brain_volumes.append(brain_volume)
             masks.append(mask)
 
-    if init_with_template:
-        template = create_template(brain_volumes, masks, brain_names, template_volume,
-                                   template_resolution=resolution_mm, iterations=iterations,
-                                   pre_registration_type="Rigid")
-    else:
-        template = create_template(brain_volumes, masks, brain_names, template_volume,
-                                   template_resolution=resolution_mm, iterations=iterations,
-                                   init_with_template=init_with_template, pre_registration_type="Rigid")
-    if register_to_template:
-        template_transform = ants.registration(fixed=template_volume, moving=template, type_of_transform="SyN")
-        template = apply_transforms(fixed=template_volume, moving=template,
-                                    transformlist=template_transform["fwdtransforms"])
-    # Mask template to remove noise
-    template_mask = segment_3d_brain(template)
-    new_template = template * template_mask
+            # Added flipped brains
+            if flipped_brains:
+                brain_volume, mask = load_volume_for_registration(
+                    image_node, mask_node, resolution_level, flipped=True
+                )
+                brain_volumes.append(brain_volume)
+                masks.append(mask)
 
-    # Apply properties after multiplication
-    new_template.set_direction(template.direction)
-    new_template.set_spacing(template.spacing)
-    new_template.set_origin(template.origin)
+        # When resume is enabled, pass a persistent output_dir + save_progress
+        # so the rolling-latest template NIfTI persists across runs (the
+        # resumable artifact). The work dir is under the output file's parent
+        # so it survives between runs.
+        template_work_dir = None
+        save_templating_progress = False
+        if resume_mgr is not None:
+            template_work_dir = str(Path(output_file).parent / "template_build_work")
+            Path(template_work_dir).mkdir(parents=True, exist_ok=True)
+            save_templating_progress = True
 
-    ants.image_write(new_template, output_file)
+        if init_with_template:
+            template = create_template(
+                brain_volumes,
+                masks,
+                brain_names,
+                template_volume,
+                template_resolution=resolution_mm,
+                iterations=iterations,
+                pre_registration_type="Rigid",
+                save_templating_progress=save_templating_progress,
+                resume_mgr=resume_mgr,
+                output_dir=template_work_dir,
+            )
+        else:
+            template = create_template(
+                brain_volumes,
+                masks,
+                brain_names,
+                template_volume,
+                template_resolution=resolution_mm,
+                iterations=iterations,
+                init_with_template=init_with_template,
+                pre_registration_type="Rigid",
+                save_templating_progress=save_templating_progress,
+                resume_mgr=resume_mgr,
+                output_dir=template_work_dir,
+            )
+        if register_to_template:
+            template_transform = ants.registration(
+                fixed=template_volume,
+                moving=template,
+                type_of_transform="SyN",
+                use_legacy_histogram_matching=False,
+            )
+            template = apply_transforms(
+                fixed=template_volume,
+                moving=template,
+                transformlist=template_transform["fwdtransforms"],
+            )
+        # Mask template to remove noise. segment_3d operates on numpy arrays
+        # (it indexes with boolean masks); convert the ANTsImage to numpy first.
+        from ..segmentation import segment_3d
+
+        template_mask = segment_3d(template.numpy())
+        new_template = template * template_mask
+
+        # Apply properties after multiplication
+        new_template.set_direction(template.direction)
+        new_template.set_spacing(template.spacing)
+        new_template.set_origin(template.origin)
+
+        ants.image_write(new_template, output_file)
+
+        # Mark the pipeline complete ONLY after the output file is written.
+        # Setting it earlier (e.g. inside build_template before the
+        # post-template register_to_template / segment_3d / image_write
+        # steps) would let a crash in those steps leave a "complete" manifest
+        # with no output file — on the next --resume run is_complete() would
+        # return True and the function would exit without writing the output.
+        if resume_mgr is not None:
+            resume_mgr.mark_complete()
 
 
-def load_volume_for_registration(image_node, mask_node, resolution_level, flipped=False) -> (
-        ANTsImage, ANTsImage):
+def load_volume_for_registration(
+    image_node: Node,
+    mask_node: Node,
+    resolution_level: int,
+    flipped: bool = False,
+) -> tuple[ANTsImage, ANTsImage]:
+    """Load a volume from a zarr file to use in registration.
+
+    Will apply the mask to the volume and load it in RAS+ orientation. Can
+    also flip the volume.
+
+    Parameters
+    ----------
+    image_node : Node
+        The image node to load the image from (ome_zarr.reader.Node).
+    mask_node : Node
+        The mask node to load the mask from (ome_zarr.reader.Node).
+    resolution_level : int
+        The resolution level to load the volume at.
+    flipped : bool
+        Whether to flip the volume or not.
+
+    Returns
+    -------
+    tuple[ANTsImage, ANTsImage]
+        The loaded volume and mask.
+
+    Raises
+    ------
+    ImportError
+        If ANTsPy is not installed.
     """
-    Load a volume from a zarr file to use in registration. Will apply the mask to the volume and load it in
-    RAS+ orientation. Can also flip the volume.
-
-    :param image_node: The image node to load the image from.
-    :type image_node: zarr.core.Node
-    :param mask_node: The mask node to load the mask from.
-    :type mask_node: zarr.core.Node
-    :param resolution_level: The resolution level to load the volume at.
-    :type resolution_level: int
-    :param flipped: Whether to flip the volume or not.
-    :type flipped: bool
-    :return: The loaded volume and mask.
-    :rtype: tuple[ANTsImage, ANTsImage]
-    """
-    brain_volume = load_ants_image_from_node(image_node, resolution_level=resolution_level, channel=0)
+    try:
+        import ants
+    except ImportError as e:
+        raise ImportError(
+            "Please install ANTsPy to use the registration module of the LIOM toolkit."
+        ) from e
+    brain_volume = load_ants_image_from_node(
+        image_node, resolution_level=resolution_level, channel=0
+    )
     mask = load_ants_image_from_node(mask_node, resolution_level=resolution_level)
     brain_volume = brain_volume * mask
     if flipped:
@@ -320,22 +742,28 @@ def load_volume_for_registration(image_node, mask_node, resolution_level, flippe
         mask.set_direction(direction)
     brain_volume = ants.reorient_image2(brain_volume, "RAS")
     mask = ants.reorient_image2(mask, "RAS")
-    # Fix for physical shape being reset after multiplication
-    brain_volume.physical_shape = mask.physical_shape
+    # Fix for physical shape being reset after multiplication. physical_shape
+    # is a read-only property in ANTsPy >= 0.5 (computed as spacing * shape);
+    # the shape is unchanged by the mask multiply, so restoring the mask's
+    # spacing restores the physical shape.
+    brain_volume.set_spacing(mask.spacing)
     return brain_volume, mask
 
 
-def update_brain_name_list(names: list) -> list:
-    """
-    Update the brain name list to include the flipped brains.
+def update_brain_name_list(names: list[str]) -> list[str]:
+    """Update the brain name list to include the flipped brains.
 
-    :param names: The list of brain names.
-    :type names: list
-    :return: The updated list of brain names.
-    :rtype: list
+    Parameters
+    ----------
+    names : list[str]
+        The list of brain names.
+
+    Returns
+    -------
+    list[str]
+        The updated list of brain names.
     """
     new_names = []
     for name in names:
-        new_names.append(name)
-        new_names.append(name + "_mirrored")
+        new_names.extend((name, name + "_mirrored"))
     return new_names
