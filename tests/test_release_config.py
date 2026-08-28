@@ -455,7 +455,7 @@ class TestDocsChangelog:
     """REL-01 RTD wiring invariants for docs/source/changelog.md + index.rst.
 
     The root CHANGELOG.md is pulled into the RTD toctree via a 3-line myst
-    stub that ``{include}``s ``../CHANGELOG.md``. The ``:orphan: true``
+    stub that ``{include}``s ``../../CHANGELOG.md``. The ``:orphan: true``
     frontmatter removes the stub from the sidebar toctree (avoiding a
     duplicate "Changelog" entry) while the include still renders the content
     inline. ``index.rst`` must list ``changelog`` in its hidden toctree so
@@ -469,14 +469,20 @@ class TestDocsChangelog:
 
     def test_docs_changelog_stub_includes_root(self) -> None:
         """The stub must use the myst ``{include}`` directive to pull in
-        ``../CHANGELOG.md`` (the root source of truth).
+        ``../../CHANGELOG.md`` (the root source of truth).
+
+        The include path resolves relative to the stub's directory
+        (``docs/source/``), so ``../../CHANGELOG.md`` is required to reach
+        the repo-root CHANGELOG.md. ``../CHANGELOG.md`` would resolve to
+        ``docs/CHANGELOG.md``, which does not exist.
         """
         text = DOCS_CHANGELOG.read_text(encoding="utf-8")
         assert "{include}" in text, (
             "docs/source/changelog.md must use the myst {include} directive"
         )
-        assert "../CHANGELOG.md" in text, (
-            "docs/source/changelog.md must {include} ../CHANGELOG.md"
+        assert "../../CHANGELOG.md" in text, (
+            "docs/source/changelog.md must {include} ../../CHANGELOG.md "
+            "(resolves to the repo-root CHANGELOG.md from docs/source/)"
         )
 
     def test_docs_changelog_stub_is_orphan(self) -> None:

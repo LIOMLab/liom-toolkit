@@ -4,5 +4,5 @@ orphan: true
 
 # Changelog
 
-```{include} ../CHANGELOG.md
+```{include} ../../CHANGELOG.md
 ```
