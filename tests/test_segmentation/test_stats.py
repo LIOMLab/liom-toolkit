@@ -93,16 +93,23 @@ def test_calculate_density_known_answer():
 # ---------------------------------------------------------------------------
 
 
-def test_compute_average_diameter_empty_set_raises():
-    """An empty vessel skeleton raises ``ValueError`` -- the mean diameter
-    of an empty set is undefined. Returning 0.0 would imply zero-width
-    vessels exist (a plausible-shaped-but-wrong value); returning ``NaN``
-    would let a silent NaN escape into the published pandas DataFrame. The
-    current unfixed code returns ``NaN`` + ``RuntimeWarning``; the fix
-    raises ``ValueError`` BEFORE ``np.mean`` is evaluated on the empty
-    array."""
-    mask = np.zeros((21, 21), dtype=np.uint8)
-    skeleton = np.zeros((21, 21), dtype=bool)
+def test_compute_average_diameter_empty_skeleton_raises():
+    """A non-empty tissue mask with an empty (all-False) skeleton raises
+    ``ValueError`` -- the mean diameter of an empty vessel set is
+    undefined. Returning 0.0 would imply zero-width vessels exist (a
+    plausible-shaped-but-wrong value); returning ``NaN`` would let a
+    silent NaN escape into the published pandas DataFrame. The fix raises
+    ``ValueError`` BEFORE ``np.mean`` is evaluated on the empty array
+    (the ``positive_radii.size == 0`` path).
+
+    This is distinct from ``test_compute_average_diameter_empty_tissue_raises``,
+    which exercises the ``mask.sum() == 0`` guard (an empty tissue mask is
+    a bad region mask, not an empty vessel set). With an empty mask the
+    empty-skeleton path is unreachable because the mask check fires first,
+    so this test uses a NON-empty mask (``np.ones``) with an empty skeleton
+    to actually reach the ``positive_radii.size == 0`` branch."""
+    mask = np.ones((21, 21), dtype=np.uint8)  # non-empty tissue mask
+    skeleton = np.zeros((21, 21), dtype=bool)  # empty skeleton -> no positive radii
 
     with pytest.raises(ValueError):
         compute_average_diameter(mask, skeleton, 0.65)
@@ -110,7 +117,8 @@ def test_compute_average_diameter_empty_set_raises():
 
 def test_compute_average_diameter_empty_tissue_raises():
     """An all-zero tissue mask raises ``ValueError`` -- mean diameter is
-    undefined when there is no tissue."""
+    undefined when there is no tissue (the ``mask.sum() == 0`` guard, the
+    first check in ``compute_average_diameter``)."""
     mask = np.zeros((21, 21), dtype=np.uint8)
     skeleton = np.zeros((21, 21), dtype=bool)
 
