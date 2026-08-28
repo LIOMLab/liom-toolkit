@@ -9,11 +9,8 @@ Covers:
 - FOUND-06 (py.typed marker ships in the installed package)
 """
 
-import sys
 from importlib.metadata import distribution, metadata
 from importlib.resources import files
-
-import pytest
 
 
 def _req_name(req: str) -> str:
@@ -145,10 +142,6 @@ class TestPyTypedMarker:
             "py.typed marker is missing from the installed liom_toolkit package"
         )
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 14),
-        reason="sanity check that the marker is readable only on the dev Python",
-    )
     def test_pytyped_marker_is_readable(self):
         """The py.typed marker must be a readable resource (not just present)."""
         pkg_files = files("liom_toolkit")
