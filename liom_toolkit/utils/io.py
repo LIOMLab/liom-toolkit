@@ -590,6 +590,18 @@ def extract_zarr_to_image(
         per-slice PNGs via ``imageio`` (escape hatch for PNG consumers).
         Any other value raises ``ValueError``.
 
+        .. note::
+            The ``"tiff"`` path materializes the entire volume into RAM
+            (every Z slice is normalized to uint8, then ``np.stack`` copies
+            them into one contiguous array before the single
+            ``tifffile.imwrite`` call). For a real LSFM volume (e.g.
+            2000×2000×2000 uint16 ≈ 16 GB) this will OOM. The ``"png"``
+            path parallelizes per-slice and avoids the full
+            materialization — prefer ``format="png"`` for large volumes,
+            or write the multi-page TIFF incrementally via
+            ``tifffile.TiffWriter`` (one page per slice) if a single-file
+            output is required.
+
     Raises
     ------
     ValueError
@@ -614,6 +626,12 @@ def extract_zarr_to_image(
         # Normalize each slice to uint8 (the TIFF pages hold displayable
         # images, matching the per-slice PNG normalization), then write a
         # single multi-page TIFF (one page per Z slice).
+        #
+        # NOTE: this materializes the entire volume into RAM (np.stack
+        # copies every normalized slice into one contiguous array). For
+        # large LSFM volumes this will OOM — see the format docstring
+        # above. Prefer format="png" for large volumes, or refactor to
+        # tifffile.TiffWriter for incremental page writes.
         pages = np.stack(
             [convert_to_png_for_saving(volume[z, :, :]) for z in range(volume.shape[0])]
         )
