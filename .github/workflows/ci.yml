@@ -10,15 +10,25 @@ concurrency:
   group: ci-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read   # least-privilege default; no ci.yml job needs write access
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0   # setuptools-scm needs full history + tags for dynamic-version metadata extraction during uv sync
-      - uses: astral-sh/setup-uv@v8.3.2
-      - run: uv python install 3.14   # lint on the highest supported version
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: "lint-3.14"
+          cache-python: true
+          python-version: "3.14"   # lint on the highest supported version
       - run: uv sync                   # installs dev group (ruff, ty) + core deps
       - run: uv run ruff check
       - run: uv run ruff format --check
@@ -47,12 +57,19 @@ jobs:
             continue-on-error: true   # antspyx source build on 3.14 (no wheel) — non-gating
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.continue-on-error || false }}
+    timeout-minutes: 30   # antspyx source build can be slow on a cache miss
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0   # setuptools-scm needs full history + tags for dynamic-version metadata extraction during uv sync
-      - uses: astral-sh/setup-uv@v8.3.2
-      - run: uv python install ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: "${{ matrix.python-version }}-${{ matrix.install-scope }}"
+          cache-python: true
+          python-version: "${{ matrix.python-version }}"
       - name: Install dependencies (core)
         if: matrix.install-scope == 'core'
         run: uv sync --no-all-extras
