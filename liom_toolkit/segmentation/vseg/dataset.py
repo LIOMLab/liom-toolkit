@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import pathlib
 from collections.abc import Iterator
 from multiprocessing import cpu_count
@@ -603,6 +604,19 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         # exists, so __len__ falls through to super().__len__()).
         dataset_length = len(self) // 4 if self.rotate_patches else len(self)
 
+        # Use spawn (not fork) for the process pool. This module imports
+        # torch at the top level, and torch starts internal threads at import
+        # time. On Linux the default start method is fork; forking a
+        # multithreaded process deadlocks (the child inherits the threads in
+        # a broken state). Spawn creates a fresh interpreter with no
+        # inherited state, avoiding the deadlock. macOS defaults to spawn
+        # already, so this is a no-op there.
+        #
+        # The _lock kwarg is also created from the spawn context. tqdm's
+        # ensure_lock would otherwise create a lock from the default (fork)
+        # context, and passing a fork-context SemLock to a spawn-context
+        # ProcessPoolExecutor raises RuntimeError.
+        spawn_ctx = multiprocessing.get_context("spawn")
         results = process_map(
             self._process_patch,
             range(dataset_length),
@@ -612,6 +626,8 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             leave=True,
             max_workers=max(1, cpu_count() - 2),
             chunksize=100,
+            mp_context=spawn_ctx,
+            _lock=spawn_ctx.Lock(),
         )
 
         # ``results`` is one validity bit per GRID patch (length

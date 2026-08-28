@@ -26,8 +26,6 @@ imports only core deps (numpy, scipy, skimage, pandas, imageio), so no
 ``pytest.importorskip`` gating is needed.
 """
 
-import os
-
 import numpy as np
 import pytest
 from skimage.morphology import skeletonize
@@ -703,15 +701,7 @@ def test_compute_mask_area_returns_scalar():
     A real Dask distributed client is injected into the singleton manager (no
     mock of the gather/submit/compute path) so the full materialization chain
     is exercised end-to-end.
-
-    Skipped under pytest-xdist: spawning a real ``LocalCluster`` inside an
-    xdist worker process deadlocks on Linux CI (the distributed scheduler's
-    nanny process handshake hangs when both xdist and distributed compete for
-    process resources). The test runs in the single-process path (``-p no:xdist``
-    or no ``-n`` flag) where the LocalCluster spawn is safe.
     """
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        pytest.skip("real LocalCluster deadlocks inside xdist workers on Linux CI")
     pytest.importorskip("dask.distributed")
     import dask.array as da
     from dask.distributed import Client, LocalCluster
