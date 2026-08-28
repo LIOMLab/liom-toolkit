@@ -89,11 +89,17 @@ class TestPytestConfig:
         filters = ini.get("filterwarnings", [])
         class_only = []
         for f in filters:
-            # Split into the 5 colon-separated fields. action:message:category
-            parts = f.split(":")
-            # A class-only ignore has form `action::Category` — i.e. exactly
-            # 3 parts with an empty message (parts[1] == "").
-            if len(parts) == 3 and parts[0] == "ignore" and parts[1] == "":
+            # pytest filter spec format is
+            # `action:message:category:module:lineno` — at most 5
+            # colon-separated fields. Split with a maxsplit of 4 so a
+            # message pattern containing colons (e.g.
+            # `ignore:foo: bar:DeprecationWarning`) does not inflate the
+            # part count and cause a class-only filter to be missed.
+            parts = f.split(":", 4)
+            # A class-only ignore has form `action::Category` — i.e. an
+            # empty message (parts[1] == "") regardless of how many
+            # trailing fields are present.
+            if parts[0] == "ignore" and parts[1] == "":
                 class_only.append(f)
         assert not class_only, (
             "filterwarnings contains class-only (unscoped) ignore filters "
