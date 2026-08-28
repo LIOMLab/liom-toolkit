@@ -440,6 +440,19 @@ def train_model(
             "epochs": epochs,
             "learning_rate": learning_rate,
             "batch_size": batch_size,
+            # Include training-affecting parameters so a config change
+            # between runs invalidates the checkpoint (params-hash
+            # mismatch). pretrained_artifact determines the initial
+            # weights (from-scratch vs. fine-tuning); filter_empty_patches
+            # changes which patches are used; dev (CPU vs. GPU) affects
+            # floating-point reproducibility; pin_memory changes data
+            # loading behavior. Without these, resume with a different
+            # training config would silently continue from a checkpoint
+            # that was initialized differently — a stale-checkpoint bug.
+            "pretrained_artifact": pretrained_artifact,
+            "filter_empty_patches": filter_empty_patches,
+            "dev": str(dev) if dev is not None else None,
+            "pin_memory": pin_memory,
         },
         steps_total=epochs,
     )

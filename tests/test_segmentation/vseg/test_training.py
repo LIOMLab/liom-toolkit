@@ -144,6 +144,15 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
                 "epochs": epochs,
                 "learning_rate": 0.001,
                 "batch_size": 1,
+                # Match the expanded params-hash in train_model so the
+                # resume test's pre-existing manifest is not invalidated
+                # by a params-hash mismatch. train_model resolves dev=None
+                # to torch.device("cuda") before hashing, so the hash
+                # records "cuda".
+                "pretrained_artifact": None,
+                "filter_empty_patches": True,
+                "dev": "cuda",
+                "pin_memory": True,
             },
             steps_total=epochs,
         )
