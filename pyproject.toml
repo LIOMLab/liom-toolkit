@@ -148,7 +148,7 @@ addopts = [
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
-    "antspy: requires the antspy extra (antspyx) - 3.12-only, skip with -m 'not antspy'",
+    "antspy: requires the antspy extra (antspyx) - skip with -m 'not antspy'",
     "slow: slow test, auto-deselected from fast iteration by convention",
     "real_process_map: opt out of the fast serial process_map fixture (test_dataset.py) — the test must exercise the real forked-worker path",
 ]
@@ -162,7 +162,7 @@ source = ["liom_toolkit"]
 
 [tool.coverage.report]
 show_missing = true
-# CI overrides to 0 on 3.14 legs via --cov-fail-under=0.
+# Both CI legs (3.12+all, 3.14+all) enforce this 60% floor.
 fail_under = 60
 
 [tool.ruff]
