@@ -8,11 +8,13 @@ public API through its ``__init__.py`` (barrel imports), so external code
 imports from the subpackage, not the module: ``from liom_toolkit.utils import
 load_zarr`` rather than ``from liom_toolkit.utils.io import load_zarr``.
 
-The top-level ``liom_toolkit/__init__.py`` is intentionally empty — importing
-the package root pulls nothing heavy. Heavy/optional dependencies
-(``ants``, ``torch``) are extras, lazy-imported at module top
-or inside the function that needs them (see :doc:`contributing`). The Allen
-atlas is downloaded directly — no extra is required for it.
+The top-level ``liom_toolkit/__init__.py`` is intentionally minimal — it
+installs a ``NullHandler`` on the ``liom_toolkit`` logger and re-exports
+``configure_logging`` and ``__version__``, but imports nothing heavy.
+Heavy/optional dependencies (``ants``, ``torch``) are extras, lazy-imported
+at module top or inside the function that needs them
+(see :doc:`contributing`). The Allen atlas is downloaded directly — no extra
+is required for it.
 
 conversion/
 ===========
@@ -31,9 +33,11 @@ registration/
 ANTs-based image registration to templates and the Allen Atlas, plus
 template generation. ``register.py`` implements rigid and SyN registration
 and atlas alignment; ``templating.py`` implements template creation,
-pre-registration, and ``build_template``. Importing this subpackage eagerly
-requires the ``antspy`` extra (the import guard re-raises with a user-facing
-install message if ``ants`` is missing).
+pre-registration, and ``build_template``. The subpackage can be imported on
+core-only installs (``ants`` is lazy-imported inside each function), but
+calling any registration function requires the ``antspy`` extra — the
+import guard re-raises with a user-facing install message if ``ants`` is
+missing.
 
 segmentation/
 =============

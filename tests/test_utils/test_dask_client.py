@@ -143,6 +143,30 @@ def test_close_without_create():
     assert mgr.cluster is None
 
 
+def test_close_client_raises_still_closes_cluster(monkeypatch):
+    """If ``client.close()`` raises, ``cluster.close()`` is still called and
+    both fields are cleared. Without the try/finally, a client.close() error
+    would leak the cluster and leave the manager in a dirty state.
+
+    The RuntimeError from ``client.close()`` propagates to the caller (the
+    try/finally ensures cluster cleanup runs, not that the error is swallowed).
+    """
+    fake_cluster_cls, fake_client_cls = _install_dask_mocks(monkeypatch)
+    mgr = DaskClientManager()
+    mgr.__create_local_cluster__()
+    client_mock = mgr.client
+    cluster_mock = mgr.cluster
+    client_mock.close.side_effect = RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        mgr.close()
+
+    client_mock.close.assert_called_once()
+    cluster_mock.close.assert_called_once()
+    assert mgr.client is None
+    assert mgr.cluster is None
+
+
 def test_context_manager(monkeypatch):
     """``with DaskClientManager() as mgr`` yields the manager and calls ``close()`` on exit."""
     _install_dask_mocks(monkeypatch)

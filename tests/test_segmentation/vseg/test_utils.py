@@ -1,12 +1,13 @@
 """Known-answer tests for ``liom_toolkit/segmentation/vseg/utils.py``.
 
-Both tests target functions whose module (``vseg/utils.py``) has module-top
-imports of ``torch`` and ``sklearn.metrics``. Per D-02 we do NOT stub those
-deps; instead each test calls ``pytest.importorskip`` BEFORE importing from
-``vseg.utils`` so the tests run for real on the 3.12-full CI leg (where the
-``ai`` extra is installed) and cleanly skip on the 3.14-core leg (where it is
-not). The importorskip must precede the ``from liom_toolkit...`` statement —
-importing the module before the skips would crash on missing torch.
+Both tests target functions whose module (``vseg/utils.py``) keeps
+``torch`` under ``TYPE_CHECKING`` and lazy-imports ``sklearn.metrics``
+inside ``calculate_metrics()``. We do NOT stub those deps; instead each
+test calls ``pytest.importorskip`` BEFORE importing from ``vseg.utils``
+so the tests run for real on CI legs where the ``ai`` extra is installed
+and cleanly skip where it is not. The importorskip must precede the
+``from liom_toolkit...`` statement — importing the module before the
+skips would crash on missing torch.
 
 Coverage:
 

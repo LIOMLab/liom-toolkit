@@ -113,11 +113,11 @@ reference — auto-generated from each script's argparse definition — lives in
 
 .. code-block:: bash
 
-   # Convert an HDF5 volume to OME-Zarr
-   liom-convert-hdf5-to-zarr --input volume.h5 --output volume.ome.zarr
+   # Convert an HDF5 volume to OME-Zarr (positional args)
+   liom-convert-hdf5-to-zarr volume.h5 volume.ome.zarr
 
-   # Build a 3D brain mask from an OME-Zarr volume
-   liom-create-mask --input volume.ome.zarr --output mask.ome.zarr
+   # Build a 3D brain mask from an OME-Zarr volume (mask path is derived)
+   liom-create-mask volume.ome.zarr
 
 For worked examples covering the full conversion → registration →
 segmentation → stats pipeline, see the :doc:`notebooks/index`. For a prose

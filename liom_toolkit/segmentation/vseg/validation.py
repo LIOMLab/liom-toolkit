@@ -147,7 +147,8 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
     jaccard_list = ["jaccard", *jaccard, jaccard_mean]
     cldice_list = ["clDice", *cldice, cldice_mean]
 
-    with Path(f"{save_path}/validationmetrics.csv").open(encoding="utf-8", mode="w") as f:
+    csv_path = Path(f"{save_path}/validationmetrics.csv")
+    with csv_path.open(encoding="utf-8", mode="w", newline="") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(headings)
         csvwriter.writerow(accuracy_list)

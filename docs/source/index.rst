@@ -51,7 +51,7 @@ edits or hardcoded lab config.
       :link-type: doc
 
       Worked examples: conversion, segmentation, templating, and stats —
-      rendered with stored outputs.
+      code-only (run locally with all extras for outputs).
 
    .. grid-item-card:: Usage
       :link: usage

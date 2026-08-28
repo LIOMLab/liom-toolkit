@@ -127,13 +127,20 @@ class DaskClientManager:
 
         Idempotent: safe to call when no client/cluster was ever created, and
         safe to call more than once. The client is closed before the cluster
-        so in-flight tasks are drained before the scheduler shuts down.
+        so in-flight tasks are drained before the scheduler shuts down. If
+        ``client.close()`` raises, the cluster is still closed (via finally)
+        and both fields are cleared, so the manager is left in a clean state
+        regardless of teardown errors.
         """
-        if self.client is not None:
-            self.client.close()
+        if self.client is None and self.cluster is None:
+            return
+        try:
+            if self.client is not None:
+                self.client.close()
+        finally:
+            if self.cluster is not None:
+                self.cluster.close()
             self.client = None
-        if self.cluster is not None:
-            self.cluster.close()
             self.cluster = None
 
     def __enter__(self) -> DaskClientManager:

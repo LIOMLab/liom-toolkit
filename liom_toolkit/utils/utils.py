@@ -34,8 +34,9 @@ def clean_dir(directory: str) -> None:
     directory : str
         The directory to clean.
     """
-    if pathlib.Path(directory + ".DS_Store").exists():
-        pathlib.Path(directory + ".DS_Store").unlink()
+    ds_store = pathlib.Path(directory) / ".DS_Store"
+    if ds_store.exists():
+        ds_store.unlink()
 
 
 def convert_to_png_for_saving(img: ArrayLike) -> NDArray[np.uint8]:
