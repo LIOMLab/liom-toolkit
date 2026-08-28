@@ -467,7 +467,16 @@ def train_model(
         if last_epoch is not None:
             ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
             if Path(ckpt_file).exists():
-                model.load_state_dict(torch.load(ckpt_file))
+                # weights_only=True restricts deserialization to tensor
+                # storage (no arbitrary pickle code execution). PyTorch 2.6+
+                # defaults to this, but the ai extra does not pin a torch
+                # version, so a user on torch < 2.6 would otherwise load with
+                # weights_only=False (pickle.load under the hood) — a
+                # malicious or swapped .pth would execute arbitrary code.
+                # Match the model.py load path (weights_only=True).
+                model.load_state_dict(
+                    torch.load(ckpt_file, weights_only=True)
+                )
                 start_epoch = last_epoch + 1
                 logger.info(
                     "train_model: resuming from epoch %d (loaded %s).",
