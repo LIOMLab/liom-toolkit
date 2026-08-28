@@ -19,6 +19,7 @@ The tiny zarr fixture is written via ``liom_toolkit.conversion.conversion.save_z
 each test process is independent — no shared file, no runtime coupling.
 """
 
+import contextlib
 from itertools import starmap
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def _fast_process_map(request, monkeypatch):
     import liom_toolkit.segmentation.vseg.dataset as dataset_mod
 
     def fast_pm(fn, *iterables, **kwargs):
-        return list(starmap(fn, zip(*iterables)))
+        return list(starmap(fn, zip(*iterables, strict=False)))
 
     monkeypatch.setattr(dataset_mod, "process_map", fast_pm)
     yield
@@ -474,7 +475,7 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
         scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16),
     )
 
-    ds1 = OmeZarrLabelDataSet(
+    _ds1 = OmeZarrLabelDataSet(
         zarr_path,
         label_node_name="training",
         patch_size=(8, 8, 8),
@@ -509,7 +510,7 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
 
     monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
 
-    ds2 = OmeZarrLabelDataSet(
+    _ds2 = OmeZarrLabelDataSet(
         zarr_path,
         label_node_name="training",
         patch_size=(8, 8, 8),
@@ -570,7 +571,8 @@ def test_valid_indices_cache_atomic_write(tmp_path, monkeypatch):
     monkeypatch.setattr(_Path, "replace", crashing_replace)
 
     # Force a cache miss by changing patch_size so the write path runs.
-    try:
+    # expected: the simulated crash propagates
+    with contextlib.suppress(OSError):
         OmeZarrLabelDataSet(
             zarr_path,
             label_node_name="training",
@@ -582,8 +584,6 @@ def test_valid_indices_cache_atomic_write(tmp_path, monkeypatch):
             filter_empty=True,
             empty_percentage=0.0,
         )
-    except OSError:
-        pass  # expected: the simulated crash propagates
     # The .partial temp file must be cleaned up.
     assert not _Path(f"{sidecar}.partial").exists(), (
         "temp .partial file was not cleaned up after a failed atomic write"

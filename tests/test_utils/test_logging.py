@@ -131,7 +131,9 @@ def test_configure_logging_exported() -> None:
 # optional deps and verified by the T20 gate + grep audit.
 
 
-def test_volume_segmentation_logs_stage(caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray) -> None:
+def test_volume_segmentation_logs_stage(
+    caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray
+) -> None:
     """segment_3d emits 'Segmenting 3D volume...' at INFO on its module logger."""
     from liom_toolkit.segmentation.volume_segmentation import segment_3d
 
@@ -144,7 +146,9 @@ def test_volume_segmentation_logs_stage(caplog: pytest.LogCaptureFixture, synthe
     assert all(r.name == "liom_toolkit.segmentation.volume_segmentation" for r in stage_records)
 
 
-def test_volume_segmentation_logs_threshold_stage(caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray) -> None:
+def test_volume_segmentation_logs_threshold_stage(
+    caplog: pytest.LogCaptureFixture, synthetic_volume: np.ndarray
+) -> None:
     """segment_3d emits the 'Thresholding image...' stage announcement at INFO."""
     from liom_toolkit.segmentation.volume_segmentation import segment_3d
 

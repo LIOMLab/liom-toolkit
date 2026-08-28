@@ -59,7 +59,7 @@ def test_importerror_surfacing_train_model(monkeypatch) -> None:
 
     from liom_toolkit.scripts.liom_train_model import main
 
-    with pytest.raises(ImportError, match="PyTorch|wandb"):
+    with pytest.raises(ImportError, match=r"PyTorch|wandb"):
         main()
 
 

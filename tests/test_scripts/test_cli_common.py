@@ -21,7 +21,12 @@ def test_build_common_parser_has_flags() -> None:
     """build_common_parser() returns a parser with the 4 cross-cutting flags."""
     parser = build_common_parser()
     args = parser.parse_args(
-        ["--dask_scheduler", "127.0.0.1:8786", "--n_workers", "4", "--log-level", "DEBUG", "--resume"]
+        [
+            "--dask_scheduler", "127.0.0.1:8786",
+            "--n_workers", "4",
+            "--log-level", "DEBUG",
+            "--resume",
+        ]
     )
     assert args.dask_scheduler == "127.0.0.1:8786"
     assert args.n_workers == 4

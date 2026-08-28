@@ -285,7 +285,11 @@ class TestReleaseWorkflow:
         publish = parsed.get("jobs", {}).get("publish", {})
         steps = publish.get("steps", [])
         checkout = next(
-            (s for s in steps if isinstance(s, dict) and "actions/checkout" in str(s.get("uses", ""))),
+            (
+                s
+                for s in steps
+                if isinstance(s, dict) and "actions/checkout" in str(s.get("uses", ""))
+            ),
             None,
         )
         assert checkout is not None, "release.yml publish job has no actions/checkout step"

@@ -41,7 +41,7 @@ def _load(dotted: str):
     return importlib.import_module(dotted)
 
 
-@pytest.mark.parametrize("dotted,name", SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
+@pytest.mark.parametrize(("dotted", "name"), SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
 def test_all_defined_in_every_init(dotted: str, name: str) -> None:
     """Every subpackage ``__init__.py`` defines ``__all__`` as a list of strings."""
     mod = _load(dotted)
@@ -55,7 +55,7 @@ def test_all_defined_in_every_init(dotted: str, name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("dotted,name", SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
+@pytest.mark.parametrize(("dotted", "name"), SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
 def test_all_names_resolve(dotted: str, name: str) -> None:
     """Every name in ``__all__`` is an importable attribute on the subpackage."""
     mod = _load(dotted)
@@ -66,7 +66,7 @@ def test_all_names_resolve(dotted: str, name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("dotted,name", SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
+@pytest.mark.parametrize(("dotted", "name"), SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
 def test_no_underscore_in_all(dotted: str, name: str) -> None:
     """No underscore-prefixed name appears in any ``__all__``.
 
@@ -81,7 +81,7 @@ def test_no_underscore_in_all(dotted: str, name: str) -> None:
     )
 
 
-@pytest.mark.parametrize("dotted,name", SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
+@pytest.mark.parametrize(("dotted", "name"), SUBPACKAGES, ids=[n for _, n in SUBPACKAGES])
 def test_star_import_matches_all(dotted: str, name: str) -> None:
     """``from <subpackage> import *`` exports exactly the names in ``__all__``.
 
