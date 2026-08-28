@@ -101,7 +101,7 @@ def main() -> None:
         f"(library regression snapshot)"
     )
     print(f"  annotation_{resolution}.nrrd: cached for the regression test")
-    print(f"  structure_tree.json: cached for the regression test")
+    print("  structure_tree.json: cached for the regression test")
 
 
 if __name__ == "__main__":

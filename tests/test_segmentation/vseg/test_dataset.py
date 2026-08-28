@@ -19,6 +19,7 @@ The tiny zarr fixture is written via ``liom_toolkit.conversion.conversion.save_z
 each test process is independent — no shared file, no runtime coupling.
 """
 
+from itertools import starmap
 from pathlib import Path
 
 import numpy as np
@@ -48,7 +49,7 @@ def _fast_process_map(request, monkeypatch):
     import liom_toolkit.segmentation.vseg.dataset as dataset_mod
 
     def fast_pm(fn, *iterables, **kwargs):
-        return [fn(*args) for args in zip(*iterables)]
+        return list(starmap(fn, zip(*iterables)))
 
     monkeypatch.setattr(dataset_mod, "process_map", fast_pm)
     yield
@@ -531,7 +532,6 @@ def test_valid_indices_cache_atomic_write(tmp_path, monkeypatch):
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
     from pathlib import Path as _Path
 
-    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
 
     zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")

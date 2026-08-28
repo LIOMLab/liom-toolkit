@@ -14,8 +14,6 @@ uses at runtime.
 
 from __future__ import annotations
 
-import sys
-
 from liom_toolkit.scripts._common import build_common_parser
 
 

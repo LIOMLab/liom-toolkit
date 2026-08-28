@@ -73,6 +73,8 @@ def configure_logging(level: int | str = logging.INFO, stream: TextIO | None = N
             logger.removeHandler(h)
     handler = logging.StreamHandler(stream or sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    handler._liom_toolkit_handler = True
+    # Sentinel stamped via __dict__ to mark our handler for idempotent
+    # teardown (read back via getattr at the loop above).
+    handler.__dict__["_liom_toolkit_handler"] = True
     logger.addHandler(handler)
     logger.setLevel(level)

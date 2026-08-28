@@ -128,21 +128,16 @@ def read_manifest(manifest_path: pathlib.Path) -> dict[str, Any] | None:
         The manifest dict, or ``None`` if the file does not exist (friendly
         for the resume flow — a missing manifest means a fresh run).
 
-    Raises
-    ------
-    json.JSONDecodeError
-        If the manifest file exists but contains corrupt JSON. This is an
-        explicit failure, not a silent fallback to a fresh run: per the
-        project's "no silent wrong-data" rule, a corrupt manifest raises
-        rather than being silently treated as missing (which could mask a
-        disk error or a hand-edit that lost in-progress checkpoint state).
-        The asymmetry between "missing file → None" and "corrupt file →
-        raise" is intentional. ``write_manifest`` uses an atomic
-        temp-file + ``Path.replace`` write, so corruption during writes is
-        prevented; external corruption (disk error, manual edit) surfaces
-        as a raised ``JSONDecodeError`` for the user to diagnose. Callers
-        who want a graceful fallback can catch ``json.JSONDecodeError`` and
-        treat it as a fresh run, but the default behavior is to fail loud.
+        Note: a manifest file that exists but contains corrupt JSON raises
+        ``json.JSONDecodeError`` (transitively from ``json.load``) rather
+        than being silently treated as missing — this is an explicit
+        failure, not a silent fallback, per the project's "no silent
+        wrong-data" rule. ``write_manifest`` uses an atomic temp-file +
+        ``Path.replace`` write, so corruption during writes is prevented;
+        external corruption (disk error, manual edit) surfaces for the
+        user to diagnose. Callers who want a graceful fallback can catch
+        ``json.JSONDecodeError`` and treat it as a fresh run, but the
+        default behavior is to fail loud.
     """
     manifest_path = pathlib.Path(manifest_path)
     if not manifest_path.exists():

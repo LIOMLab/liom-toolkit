@@ -90,7 +90,7 @@ def test_star_import_matches_all(dotted: str, name: str) -> None:
     """
     mod = _load(dotted)
     namespace: dict[str, object] = {}
-    exec(f"from {dotted} import *", namespace)  # noqa: S102 -- star-import is the behavior under test
+    exec(f"from {dotted} import *", namespace)  # ruff: ignore[exec-builtin] -- star-import is the behavior under test
     # exec injects __builtins__; everything else must come from __all__.
     exported = {k for k in namespace if k != "__builtins__"}
     expected = set(mod.__all__)

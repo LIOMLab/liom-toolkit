@@ -595,7 +595,7 @@ def extract_zarr_to_image(
             (every Z slice is normalized to uint8, then ``np.stack`` copies
             them into one contiguous array before the single
             ``tifffile.imwrite`` call). For a real LSFM volume (e.g.
-            2000×2000×2000 uint16 ≈ 16 GB) this will OOM. The ``"png"``
+            2000x2000x2000 uint16 ≈ 16 GB) this will OOM. The ``"png"``
             path parallelizes per-slice and avoids the full
             materialization — prefer ``format="png"`` for large volumes,
             or write the multi-page TIFF incrementally via
