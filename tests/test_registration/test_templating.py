@@ -369,9 +369,7 @@ def test_build_template_for_resolution_has_atlas_resolution_param() -> None:
         "build_template_for_resolution must accept atlas_resolution"
     )
     param = sig.parameters["atlas_resolution"]
-    assert param.default is None, (
-        f"atlas_resolution must default to None, got {param.default!r}"
-    )
+    assert param.default is None, f"atlas_resolution must default to None, got {param.default!r}"
 
 
 def test_build_template_atlas_resolution_none_uses_template_resolution(
@@ -542,9 +540,7 @@ def test_build_template_for_resolution_has_resume_param() -> None:
     from liom_toolkit.registration.templating import build_template_for_resolution
 
     sig = inspect.signature(build_template_for_resolution)
-    assert "resume" in sig.parameters, (
-        "build_template_for_resolution must accept a resume param"
-    )
+    assert "resume" in sig.parameters, "build_template_for_resolution must accept a resume param"
     param = sig.parameters["resume"]
     assert param.default is False, f"resume must default to False, got {param.default!r}"
 

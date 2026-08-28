@@ -51,7 +51,7 @@ def test_compute_params_hash_format():
     """The hash is ``sha256:<64 hex chars>``."""
     h = compute_params_hash({"a": 1})
     assert h.startswith("sha256:")
-    body = h[len("sha256:"):]
+    body = h[len("sha256:") :]
     assert len(body) == 64
     # hex chars only
     int(body, 16)

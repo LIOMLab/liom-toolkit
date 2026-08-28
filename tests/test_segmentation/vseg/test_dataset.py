@@ -471,8 +471,12 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
     label = np.zeros((16, 16, 16), dtype=np.uint8)
     label[4:12, 4:12, 4:12] = 1
     save_label_to_zarr(
-        label, zarr_path, generate_label_color_dict_mask(), "training",
-        scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16),
+        label,
+        zarr_path,
+        generate_label_color_dict_mask(),
+        "training",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(16, 16, 16),
     )
 
     _ds1 = OmeZarrLabelDataSet(
@@ -497,8 +501,12 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
     label2 = np.zeros((24, 16, 16), dtype=np.uint8)
     label2[4:12, 4:12, 4:12] = 1
     save_label_to_zarr(
-        label2, zarr_path, generate_label_color_dict_mask(), "training",
-        scales=(6.5, 6.5, 6.5), chunks=(24, 16, 16),
+        label2,
+        zarr_path,
+        generate_label_color_dict_mask(),
+        "training",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(24, 16, 16),
     )
 
     call_count = {"n": 0}

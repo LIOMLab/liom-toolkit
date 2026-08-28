@@ -102,9 +102,7 @@ def write_manifest(manifest_path: pathlib.Path, data: dict[str, Any]) -> None:
     """
     manifest_path = pathlib.Path(manifest_path)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        dir=str(manifest_path.parent), suffix=".tmp", prefix=".manifest_"
-    )
+    fd, tmp = tempfile.mkstemp(dir=str(manifest_path.parent), suffix=".tmp", prefix=".manifest_")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, sort_keys=True)
@@ -146,9 +144,7 @@ def read_manifest(manifest_path: pathlib.Path) -> dict[str, Any] | None:
         return json.load(f)
 
 
-def write_done_marker(
-    output_dir: pathlib.Path, pipeline: str, step_index: int
-) -> None:
+def write_done_marker(output_dir: pathlib.Path, pipeline: str, step_index: int) -> None:
     """Write the ``.done`` marker for ``step_index`` of ``pipeline``.
 
     The marker is a zero-byte file at
@@ -227,9 +223,7 @@ def is_step_done(
     marker = output_dir / "_liom_checkpoints" / f"{pipeline}.step_{step_index}.done"
     if not marker.exists():
         return False
-    return not (
-        artifact_path is not None and not pathlib.Path(artifact_path).exists()
-    )
+    return not (artifact_path is not None and not pathlib.Path(artifact_path).exists())
 
 
 class ResumeManager:
@@ -293,9 +287,7 @@ class ResumeManager:
         self.pipeline = pipeline
         self.params_hash = compute_params_hash(params)
         self.steps_total = steps_total
-        self.manifest_path = (
-            self.output_dir / "_liom_checkpoints" / f"{pipeline}.json"
-        )
+        self.manifest_path = self.output_dir / "_liom_checkpoints" / f"{pipeline}.json"
         self._artifacts: dict[str, str] = {}
         existing = read_manifest(self.manifest_path)
         if existing is None or existing.get("params_hash") != self.params_hash:

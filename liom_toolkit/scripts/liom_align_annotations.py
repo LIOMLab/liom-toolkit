@@ -81,8 +81,7 @@ def main() -> None:
         import ants
     except ImportError as e:
         raise ImportError(
-            "Please install ANTsPy (antspy extra) to use the registration CLI "
-            "of the LIOM toolkit."
+            "Please install ANTsPy (antspy extra) to use the registration CLI of the LIOM toolkit."
         ) from e
 
     if args.dask_scheduler:

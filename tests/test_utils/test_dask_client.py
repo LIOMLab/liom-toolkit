@@ -28,9 +28,7 @@ def _install_dask_mocks(monkeypatch):
     """
     fake_cluster_cls = MagicMock(name="LocalCluster")
     fake_client_cls = MagicMock(name="Client")
-    monkeypatch.setattr(
-        "liom_toolkit.utils.dask_client.LocalCluster", fake_cluster_cls
-    )
+    monkeypatch.setattr("liom_toolkit.utils.dask_client.LocalCluster", fake_cluster_cls)
     monkeypatch.setattr("liom_toolkit.utils.dask_client.Client", fake_client_cls)
     return fake_cluster_cls, fake_client_cls
 
@@ -99,9 +97,7 @@ def test_n_workers_zero_raises(monkeypatch):
 def test_n_workers_cpu_count_one_raises(monkeypatch):
     """``cpu_count()=1`` → computed ``n_workers=0`` → ``ValueError`` (never silently 0 workers)."""
     _install_dask_mocks(monkeypatch)
-    monkeypatch.setattr(
-        "liom_toolkit.utils.dask_client.multiprocessing.cpu_count", lambda: 1
-    )
+    monkeypatch.setattr("liom_toolkit.utils.dask_client.multiprocessing.cpu_count", lambda: 1)
     mgr = DaskClientManager()
 
     with pytest.raises(ValueError, match="n_workers must be >= 1"):

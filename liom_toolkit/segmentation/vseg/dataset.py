@@ -143,9 +143,7 @@ def _valid_indices_cache_path(zarr_path: str) -> str:
     return f"{zarr_path}.valid_indices_cache.json"
 
 
-def _load_valid_indices_cache(
-    zarr_path: str, expected_hash: str
-) -> NDArray[np.int_] | None:
+def _load_valid_indices_cache(zarr_path: str, expected_hash: str) -> NDArray[np.int_] | None:
     """Load valid_indices from the cache sidecar if the hash matches.
 
     Returns ``None`` on a cache miss (no sidecar, unreadable sidecar, or hash

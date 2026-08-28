@@ -47,9 +47,7 @@ def test_train_model_has_wandb_project_param_none_default() -> None:
 def test_train_model_has_pretrained_artifact_param_none_default() -> None:
     """train_model signature has ``pretrained_artifact: str | None = None``."""
     sig = inspect.signature(train_model)
-    assert "pretrained_artifact" in sig.parameters, (
-        "train_model must accept pretrained_artifact"
-    )
+    assert "pretrained_artifact" in sig.parameters, "train_model must accept pretrained_artifact"
     param = sig.parameters["pretrained_artifact"]
     assert param.default is None, f"pretrained_artifact must default to None, got {param.default!r}"
 
@@ -205,7 +203,14 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
 
             train_mock.return_value = (0.5, MagicMock(), MagicMock(), MagicMock())
             eval_mock.return_value = (
-                0.5, MagicMock(), MagicMock(), MagicMock(), 0.9, 0.9, 0.9, 0.9,
+                0.5,
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                0.9,
+                0.9,
+                0.9,
+                0.9,
             )
 
             if crash_on_epoch is not None:
@@ -306,9 +311,7 @@ def test_resume_train_model_complementary_pth(tmp_path):
 
     mocks = _run_train_model_resume(tmp_path, last_completed_epoch=3, epochs=4)
     manifest_data = json.loads(mocks["manifest_path"].read_text())
-    assert "last_completed_epoch" in manifest_data, (
-        "manifest must record last_completed_epoch"
-    )
+    assert "last_completed_epoch" in manifest_data, "manifest must record last_completed_epoch"
     # The manifest does NOT duplicate the weights bytes.
     assert "weights" not in manifest_data, (
         "manifest must NOT store weights bytes (complementary to .pth)"

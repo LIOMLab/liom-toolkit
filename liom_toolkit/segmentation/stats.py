@@ -40,9 +40,7 @@ PIL.Image.MAX_IMAGE_PIXELS = 2_000_000_000  # finite DoS-guard limit (not None â
 # kernel produces the per-pixel neighbor signature; a foreground pixel whose
 # signature is in the valid set is a branching point. The result is array_equal
 # to the old 20-convolution result (numerical-equivalence regression test).
-_BRANCHING_KERNEL = np.array(
-    [[1, 2, 4], [8, 0, 16], [32, 64, 128]], dtype=np.int32
-)
+_BRANCHING_KERNEL = np.array([[1, 2, 4], [8, 0, 16], [32, 64, 128]], dtype=np.int32)
 
 
 def _build_branching_signatures() -> np.ndarray:
@@ -433,9 +431,7 @@ def get_branching_points(skeleton: NDArray[np.bool_]) -> NDArray[np.bool_]:
     NDArray[np.bool_]
         The branching points in the skeleton.
     """
-    conv = ndi.convolve(
-        skeleton.astype(np.int32), _BRANCHING_KERNEL, mode="constant", cval=0
-    )
+    conv = ndi.convolve(skeleton.astype(np.int32), _BRANCHING_KERNEL, mode="constant", cval=0)
     return np.isin(conv, _BRANCHING_SIGNATURES) & skeleton.astype(bool)
 
 

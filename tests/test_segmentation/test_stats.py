@@ -625,8 +625,7 @@ def test_branching_points_equivalence():
         new_result = get_branching_points(sk)
         old_result = _old_get_branching_points(sk)
         assert np.array_equal(new_result, old_result), (
-            "get_branching_points kernel reduction diverged from the old "
-            "20-convolution result"
+            "get_branching_points kernel reduction diverged from the old 20-convolution result"
         )
 
 

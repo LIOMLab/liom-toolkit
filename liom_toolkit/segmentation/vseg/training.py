@@ -495,9 +495,7 @@ def train_model(
                 # weights_only=False (pickle.load under the hood) — a
                 # malicious or swapped .pth would execute arbitrary code.
                 # Match the model.py load path (weights_only=True).
-                model.load_state_dict(
-                    torch.load(ckpt_file, weights_only=True)
-                )
+                model.load_state_dict(torch.load(ckpt_file, weights_only=True))
                 start_epoch = last_epoch + 1
                 logger.info(
                     "train_model: resuming from epoch %d (loaded %s).",

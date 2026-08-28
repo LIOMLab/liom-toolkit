@@ -75,9 +75,7 @@ def main() -> None:
     # so construct_reference_space finds the cached files under the names it
     # expects (allen_atlas_{res}.nrrd + structure_tree.json).
     with tempfile.TemporaryDirectory() as data_dir:
-        shutil.copy(
-            nrrd_path, os.path.join(data_dir, f"allen_atlas_{resolution}.nrrd")
-        )
+        shutil.copy(nrrd_path, os.path.join(data_dir, f"allen_atlas_{resolution}.nrrd"))
         shutil.copy(
             os.path.join(FIXTURE_DIR, "structure_tree.json"),
             os.path.join(data_dir, "structure_tree.json"),
@@ -90,9 +88,7 @@ def main() -> None:
     pd.testing.assert_frame_equal(df, expected_df)
 
     # Save the volume oracle (compressed).
-    np.savez_compressed(
-        os.path.join(FIXTURE_DIR, f"annotation_{resolution}um.npz"), arr=vol
-    )
+    np.savez_compressed(os.path.join(FIXTURE_DIR, f"annotation_{resolution}um.npz"), arr=vol)
 
     print(f"Fixture generated in {FIXTURE_DIR}:")
     print(f"  labels.parquet: {len(df)} rows, {df.shape[1]} columns (allensdk oracle)")

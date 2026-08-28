@@ -59,9 +59,7 @@ class TestReleaseConfig:
         assert isinstance(dynamic, list), (
             f"[project].dynamic must be a list, got {type(dynamic).__name__}"
         )
-        assert "version" in dynamic, (
-            f"[project].dynamic must include 'version'; got {dynamic!r}"
-        )
+        assert "version" in dynamic, f"[project].dynamic must include 'version'; got {dynamic!r}"
         assert "version" not in project, (
             "[project] must NOT declare a static 'version' literal — the "
             "version is dynamic via setuptools-scm. Found static "
@@ -79,8 +77,7 @@ class TestReleaseConfig:
             f"[build-system].requires must be a list, got {type(requires).__name__}"
         )
         assert any("setuptools-scm" in req for req in requires), (
-            "[build-system].requires must include setuptools-scm; got "
-            f"{requires!r}"
+            f"[build-system].requires must include setuptools-scm; got {requires!r}"
         )
 
     def test_setuptools_scm_config_section_exists(self) -> None:
@@ -103,8 +100,7 @@ class TestReleaseConfig:
             f"{type(version_file).__name__}"
         )
         assert version_file.endswith("_version.py"), (
-            f"[tool.setuptools_scm].version_file must end in '_version.py'; "
-            f"got {version_file!r}"
+            f"[tool.setuptools_scm].version_file must end in '_version.py'; got {version_file!r}"
         )
 
     def test_classifier_is_production_stable(self) -> None:
@@ -146,8 +142,7 @@ class TestReleaseConfig:
         )
         changelog_url = urls["Changelog"]
         assert isinstance(changelog_url, str) and "CHANGELOG.md" in changelog_url, (
-            f"[project.urls].Changelog must point at a CHANGELOG.md URL; got "
-            f"{changelog_url!r}"
+            f"[project.urls].Changelog must point at a CHANGELOG.md URL; got {changelog_url!r}"
         )
 
     def test_gitignore_version_file(self) -> None:
@@ -269,8 +264,7 @@ class TestReleaseWorkflow:
         steps = publish.get("steps", [])
         uses = [str(s.get("uses", "")) for s in steps if isinstance(s, dict)]
         assert any("pypa/gh-action-pypi-publish" in u for u in uses), (
-            f"release.yml publish job must use pypa/gh-action-pypi-publish; "
-            f"got uses={uses!r}"
+            f"release.yml publish job must use pypa/gh-action-pypi-publish; got uses={uses!r}"
         )
 
     def test_release_workflow_publish_has_fetch_depth_zero(self) -> None:
@@ -393,9 +387,7 @@ class TestChangelog:
         for breaking changes; discovered on the GitHub repo view, the PyPI
         Changelog project-URL, and via ``git grep`` by downstream consumers).
         """
-        assert CHANGELOG.is_file(), (
-            f"CHANGELOG.md missing at repo root ({CHANGELOG})"
-        )
+        assert CHANGELOG.is_file(), f"CHANGELOG.md missing at repo root ({CHANGELOG})"
 
     def test_changelog_has_keep_a_changelog_header(self) -> None:
         """The preamble must reference both Keep a Changelog and Semantic
@@ -403,12 +395,10 @@ class TestChangelog:
         """
         text = CHANGELOG.read_text(encoding="utf-8")
         assert "Keep a Changelog" in text, (
-            "CHANGELOG.md preamble must reference 'Keep a Changelog' "
-            "(convention attribution)"
+            "CHANGELOG.md preamble must reference 'Keep a Changelog' (convention attribution)"
         )
         assert "Semantic Versioning" in text, (
-            "CHANGELOG.md preamble must reference 'Semantic Versioning' "
-            "(convention attribution)"
+            "CHANGELOG.md preamble must reference 'Semantic Versioning' (convention attribution)"
         )
 
     def test_changelog_has_1_0_0_section(self) -> None:
@@ -416,33 +406,23 @@ class TestChangelog:
         (the release this plan ships).
         """
         text = CHANGELOG.read_text(encoding="utf-8")
-        assert "## [1.0.0]" in text, (
-            "CHANGELOG.md must contain a '## [1.0.0]' release header"
-        )
+        assert "## [1.0.0]" in text, "CHANGELOG.md must contain a '## [1.0.0]' release header"
 
     def test_changelog_has_added_section(self) -> None:
         text = CHANGELOG.read_text(encoding="utf-8")
-        assert "### Added" in text, (
-            "CHANGELOG.md must contain an '### Added' subsection"
-        )
+        assert "### Added" in text, "CHANGELOG.md must contain an '### Added' subsection"
 
     def test_changelog_has_changed_section(self) -> None:
         text = CHANGELOG.read_text(encoding="utf-8")
-        assert "### Changed" in text, (
-            "CHANGELOG.md must contain an '### Changed' subsection"
-        )
+        assert "### Changed" in text, "CHANGELOG.md must contain an '### Changed' subsection"
 
     def test_changelog_has_removed_section(self) -> None:
         text = CHANGELOG.read_text(encoding="utf-8")
-        assert "### Removed" in text, (
-            "CHANGELOG.md must contain an '### Removed' subsection"
-        )
+        assert "### Removed" in text, "CHANGELOG.md must contain an '### Removed' subsection"
 
     def test_changelog_has_fixed_section(self) -> None:
         text = CHANGELOG.read_text(encoding="utf-8")
-        assert "### Fixed" in text, (
-            "CHANGELOG.md must contain an '### Fixed' subsection"
-        )
+        assert "### Fixed" in text, "CHANGELOG.md must contain an '### Fixed' subsection"
 
     def test_changelog_has_unreleased_section(self) -> None:
         """Keep a Changelog 1.1.0 recommends an ``[Unreleased]`` section at
@@ -467,9 +447,7 @@ class TestDocsChangelog:
     """
 
     def test_docs_changelog_stub_exists(self) -> None:
-        assert DOCS_CHANGELOG.is_file(), (
-            f"docs/source/changelog.md stub missing ({DOCS_CHANGELOG})"
-        )
+        assert DOCS_CHANGELOG.is_file(), f"docs/source/changelog.md stub missing ({DOCS_CHANGELOG})"
 
     def test_docs_changelog_stub_includes_root(self) -> None:
         """The stub must use the myst ``{include}`` directive to pull in
@@ -481,9 +459,7 @@ class TestDocsChangelog:
         ``docs/CHANGELOG.md``, which does not exist.
         """
         text = DOCS_CHANGELOG.read_text(encoding="utf-8")
-        assert "{include}" in text, (
-            "docs/source/changelog.md must use the myst {include} directive"
-        )
+        assert "{include}" in text, "docs/source/changelog.md must use the myst {include} directive"
         assert "../../CHANGELOG.md" in text, (
             "docs/source/changelog.md must {include} ../../CHANGELOG.md "
             "(resolves to the repo-root CHANGELOG.md from docs/source/)"
@@ -504,6 +480,4 @@ class TestDocsChangelog:
         block so the changelog page is reachable from the docs root.
         """
         text = INDEX_RST.read_text(encoding="utf-8")
-        assert "changelog" in text, (
-            "docs/source/index.rst toctree must include a 'changelog' entry"
-        )
+        assert "changelog" in text, "docs/source/index.rst toctree must include a 'changelog' entry"

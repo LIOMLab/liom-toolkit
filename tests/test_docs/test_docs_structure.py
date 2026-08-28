@@ -102,9 +102,7 @@ class TestConfPy:
         }
         exts = _conf_value("extensions")
         assert exts is not None, "extensions list not found in conf.py"
-        assert set(exts) == expected, (
-            f"extensions mismatch; got {set(exts)!r}"
-        )
+        assert set(exts) == expected, f"extensions mismatch; got {set(exts)!r}"
 
     def test_autosummary_not_in_extensions(self):
         exts = _conf_value("extensions") or []
@@ -131,9 +129,7 @@ class TestConfPy:
         assert mapping is not None, "intersphinx_mapping not found"
         assert isinstance(mapping, dict)
         assert "ome-zarr" in mapping, "ome-zarr intersphinx target missing"
-        assert len(mapping) == 11, (
-            f"expected 11 intersphinx targets, got {len(mapping)}"
-        )
+        assert len(mapping) == 11, f"expected 11 intersphinx targets, got {len(mapping)}"
 
     def test_no_sphinxcontrib_apidoc(self):
         assert "sphinxcontrib.apidoc" not in _conf_text()
@@ -273,9 +269,7 @@ class TestNarrativePagesAndCli:
         for mod_name in CLI_SCRIPT_MODULES:
             mod = importlib.import_module(f"liom_toolkit.scripts.{mod_name}")
             fn = getattr(mod, "_build_argument_parser", None)
-            assert callable(fn), (
-                f"{mod_name}._build_argument_parser is not callable"
-            )
+            assert callable(fn), f"{mod_name}._build_argument_parser is not callable"
 
     def test_index_rst_uses_grid_cards(self):
         text = (DOCS_SOURCE / "index.rst").read_text(encoding="utf-8")
@@ -321,18 +315,14 @@ class TestNotebooks:
         toctree_start = text.index(".. toctree::")
         toctree_block = text[toctree_start:]
         for nb in NOTEBOOKS:
-            assert nb in toctree_block, (
-                f"{nb} missing from notebooks/index.rst toctree"
-            )
+            assert nb in toctree_block, f"{nb} missing from notebooks/index.rst toctree"
         # toctree entries must NOT carry .ipynb extensions (nbsphinx resolves
         # the bare stem to the .ipynb file).
         assert ".ipynb" not in toctree_block
 
     def test_all_6_notebook_files_exist(self):
         for nb in NOTEBOOKS:
-            assert (DOCS_SOURCE / "notebooks" / f"{nb}.ipynb").is_file(), (
-                f"{nb}.ipynb missing"
-            )
+            assert (DOCS_SOURCE / "notebooks" / f"{nb}.ipynb").is_file(), f"{nb}.ipynb missing"
 
     def test_each_notebook_has_nbsphinx_execute_never(self):
         for nb in NOTEBOOKS:

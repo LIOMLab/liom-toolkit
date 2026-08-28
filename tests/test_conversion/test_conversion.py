@@ -592,9 +592,7 @@ def test_resume_create_full_zarr_stale_params(tmp_path):
         "chunks": (16, 16, 16),
     }
     # Write manifest with the stale params, then run with different params.
-    _write_partial_manifest(
-        tmp_path, "create_full_zarr_volume", stale_params, completed_steps=[0]
-    )
+    _write_partial_manifest(tmp_path, "create_full_zarr_volume", stale_params, completed_steps=[0])
     current_params = dict(stale_params)
     current_params["auto_fluo_file"] = "auto.h5"  # different -> stale
     mocks = _run_create_full_zarr_volume_resume(tmp_path, resume=True, params=current_params)

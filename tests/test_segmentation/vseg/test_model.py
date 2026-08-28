@@ -64,9 +64,7 @@ def test_vseg_model_has_pretrained_artifact_param_none_default() -> None:
         "VsegModel.__init__ must accept pretrained_artifact"
     )
     param = sig.parameters["pretrained_artifact"]
-    assert param.default is None, (
-        f"pretrained_artifact must default to None, got {param.default!r}"
-    )
+    assert param.default is None, f"pretrained_artifact must default to None, got {param.default!r}"
     # The old hardcoded-lab-default param name must be gone.
     assert "pre_trained_project" not in sig.parameters, (
         "VsegModel.__init__ must NOT keep the old pre_trained_project param "

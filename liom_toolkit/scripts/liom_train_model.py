@@ -107,15 +107,13 @@ def main() -> None:
         import torch  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before train_model
     except ImportError as e:
         raise ImportError(
-            "Please install PyTorch (ai extra) to use the training CLI "
-            "of the LIOM toolkit."
+            "Please install PyTorch (ai extra) to use the training CLI of the LIOM toolkit."
         ) from e
     try:
         import wandb  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before train_model
     except ImportError as e:
         raise ImportError(
-            "Please install wandb (ai extra) to use the training CLI "
-            "of the LIOM toolkit."
+            "Please install wandb (ai extra) to use the training CLI of the LIOM toolkit."
         ) from e
 
     if args.dask_scheduler:

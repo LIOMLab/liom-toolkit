@@ -353,7 +353,5 @@ def test_extract_zarr_to_image_png_no_clobber(tmp_path):
     target_dir = Path(target)
     png_files = list(target_dir.glob("*.png"))
     names = {p.name for p in png_files}
-    assert len(names) == 5, (
-        f"expected 5 unique PNG filenames, got {len(names)} (slice clobber)"
-    )
+    assert len(names) == 5, f"expected 5 unique PNG filenames, got {len(names)} (slice clobber)"
     assert names == {f"{z}.png" for z in range(5)}

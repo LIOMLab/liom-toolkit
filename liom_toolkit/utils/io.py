@@ -659,6 +659,4 @@ def extract_zarr_to_image(
                 )
             )
     else:
-        raise ValueError(
-            f"Unsupported format: {format!r}. Use 'tiff' or 'png'."
-        )
+        raise ValueError(f"Unsupported format: {format!r}. Use 'tiff' or 'png'.")
