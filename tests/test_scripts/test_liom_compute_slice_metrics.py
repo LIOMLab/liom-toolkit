@@ -1,12 +1,29 @@
-"""Smoke test for the ``liom-compute-slice-metrics`` CLI.
+"""Smoke + in-process ``main()`` test for the ``liom-compute-slice-metrics`` CLI.
 
-Exercises ``--help`` exits 0 and contains the 4 shared flags + the curated
-stats flags (output_dir, image, --voxel_size).
+Exercises:
+* ``--help`` exits 0 and contains the 4 shared flags + the curated stats flags
+  (output_dir, image, --voxel_size).
+* ``main()`` reaches the real ``compute_slice_metrics`` domain callee and
+  writes ``regions.xlsx`` (and ``regions.png``) via the real openpyxl path
+  (D-03 coordination -- this smoke also exercises the real ``df.to_excel``
+  call, no monkeypatch). A kwarg-name typo in ``main()``'s call to
+  ``compute_slice_metrics`` raises ``TypeError`` against the real signature.
+
+Per D-01: no ``pytest.importorskip``; no ``sys.modules`` heavy-dep mock
+(core-deps-only CLI). Per AGENTS section 5, ``imageio``/``numpy``/``pandas``/
+``openpyxl`` are NOT mocked -- the smoke writes real TIFFs and reads the real
+xlsx output.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+from pathlib import Path
+
+import imageio.v3 as iio
+import numpy as np
 
 
 def test_liom_compute_slice_metrics_help_exits_0() -> None:
@@ -25,3 +42,60 @@ def test_liom_compute_slice_metrics_help_exits_0() -> None:
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
     for flag in ("output_dir", "image", "--voxel_size"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
+
+
+def test_liom_compute_slice_metrics_main_smoke(tmp_path: Path, monkeypatch) -> None:
+    """``main()`` reaches the real ``compute_slice_metrics`` and writes regions.xlsx.
+
+    Builds 4 tiny real TIFFs (mask, vessel_mask, region_map, vessel_exclude)
+    using the synthetic arrays from ``test_stats.py`` (mask=ones, vessel_mask
+    with a bright block, region_map=ones, vessel_exclude=ones), invokes
+    ``main()`` in-process, and asserts ``regions.xlsx`` exists in the output
+    directory. The real ``df.to_excel`` -> openpyxl path runs (no monkeypatch),
+    coordinating with D-03. A kwarg-name typo in ``main()``'s call to
+    ``compute_slice_metrics`` raises ``TypeError`` against the real signature.
+    """
+    mask = np.ones((30, 30), dtype=np.uint8)
+    vessel_mask = np.zeros((30, 30), dtype=np.uint8)
+    vessel_mask[10:20, 10:20] = 1
+    region_map = np.ones((30, 30), dtype=np.uint8)
+    vessel_exclude = np.ones((30, 30), dtype=np.uint8)
+
+    mask_path = tmp_path / "mask.tif"
+    vessel_path = tmp_path / "vessel.tif"
+    region_path = tmp_path / "region.tif"
+    exclude_path = tmp_path / "exclude.tif"
+    iio.imwrite(str(mask_path), mask)
+    iio.imwrite(str(vessel_path), vessel_mask)
+    iio.imwrite(str(region_path), region_map)
+    iio.imwrite(str(exclude_path), vessel_exclude)
+
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-compute-slice-metrics",
+            str(out_dir),
+            "label",
+            str(mask_path),
+            str(vessel_path),
+            str(region_path),
+            str(exclude_path),
+            "--voxel_size",
+            "0.65",
+        ],
+    )
+
+    from liom_toolkit.scripts.liom_compute_slice_metrics import main
+
+    main()
+
+    assert os.path.isfile(str(out_dir / "regions.xlsx")), (
+        "main() did not write regions.xlsx -- the real compute_slice_metrics "
+        "domain callee (and its df.to_excel -> openpyxl path) was not reached"
+    )
+    assert os.path.isfile(str(out_dir / "regions.png")), (
+        "main() did not write regions.png -- the real compute_slice_metrics "
+        "domain callee was not reached"
+    )
