@@ -1,0 +1,221 @@
+"""Behavioral tests for committed config-as-data: pytest config and CI workflow.
+
+These tests parse committed config files (pyproject.toml via tomllib,
+.github/workflows/ci.yml via PyYAML) as STRUCTURED DATA and assert on the
+parsed structure. This is config-as-data validation, NOT static-source
+regex testing (AGENTS.md §5 forbids reading .py files as text and asserting
+on string content; it does not forbid parsing committed config files as
+structured data).
+
+A regression in any of the asserted properties (re-adding a blanket
+deprecation filter, dropping a stub from the dev group, removing 3.12 from
+the CI matrix, deleting the workflow file) makes the corresponding test
+fail.
+
+Covers:
+- FOUND-02 (no blanket `ignore::DeprecationWarning` filter in pytest config)
+- FOUND-05 / TYPE-01 (dev group declares the 4 type-stub packages)
+- FOUND-08 (CI workflow file parses as valid YAML with the required jobs and
+  Python matrix)
+"""
+
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def _load_pyproject() -> dict:
+    """Parse pyproject.toml as structured TOML data."""
+    with PYPROJECT.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+class TestPytestConfig:
+    """FOUND-02: the blanket deprecation-warning filter is gone.
+
+    The requirement truth is that real third-party deprecation warnings are
+    no longer swallowed by a blanket filter. Only explicit, scoped filters
+    (matched by exact message/module) are permitted — never a bare
+    `ignore::DeprecationWarning` that suppresses the entire class.
+    """
+
+    def test_no_blanket_ignore_deprecation_warning_filter(self) -> None:
+        """`[tool.pytest.ini_options].filterwarnings` must NOT contain any
+        entry that blanket-ignores all DeprecationWarning instances.
+
+        A blanket filter is one whose action is `ignore` and whose target is
+        the bare class `DeprecationWarning` with no message/module scope —
+        i.e. the string `ignore::DeprecationWarning` (the form pytest
+        documents for class-only filters). Scoped filters like
+        `ignore:<message>:DeprecationWarning` are permitted and not flagged
+        here.
+        """
+        cfg = _load_pyproject()
+        ini = cfg.get("tool", {}).get("pytest", {}).get("ini_options", {})
+        filters = ini.get("filterwarnings", [])
+        assert isinstance(filters, list), (
+            f"filterwarnings must be a list, got {type(filters).__name__}"
+        )
+        blanket = [f for f in filters if f == "ignore::DeprecationWarning"]
+        assert not blanket, (
+            "Blanket `ignore::DeprecationWarning` filter is present in "
+            f"pyproject.toml [tool.pytest.ini_options].filterwarnings: "
+            f"{blanket!r}. This swallows ALL third-party deprecation "
+            "warnings and violates FOUND-02. Use scoped filters "
+            "(ignore:<message>:DeprecationWarning) only."
+        )
+
+    def test_filterwarnings_are_scoped_not_class_only(self) -> None:
+        """Every filterwarnings entry must be scoped (carry a message
+        pattern), not a bare class-only suppression.
+
+        pytest filter spec format is `action:message:category:module:lineno`.
+        A class-only filter like `ignore::DeprecationWarning` has an empty
+        message field and suppresses the whole class — that is the blanket
+        form FOUND-02 forbids. Permitted filters have a non-empty message
+        pattern (e.g. `ignore:datetime\\.datetime\\.utcnow...:DeprecationWarning`).
+        """
+        cfg = _load_pyproject()
+        ini = cfg.get("tool", {}).get("pytest", {}).get("ini_options", {})
+        filters = ini.get("filterwarnings", [])
+        class_only = []
+        for f in filters:
+            # Split into the 5 colon-separated fields. action:message:category
+            parts = f.split(":")
+            # A class-only ignore has form `action::Category` — i.e. exactly
+            # 3 parts with an empty message (parts[1] == "").
+            if len(parts) == 3 and parts[0] == "ignore" and parts[1] == "":
+                class_only.append(f)
+        assert not class_only, (
+            "filterwarnings contains class-only (unscoped) ignore filters "
+            f"that suppress an entire warning class: {class_only!r}. "
+            "FOUND-02 requires every filter to be scoped by message."
+        )
+
+
+class TestDevStubs:
+    """FOUND-05 / TYPE-01: the dev dependency group declares the 4 type-stub
+    packages.
+
+    Stubs are dev-only and not shipped to users, so we validate the DECLARED
+    dev group in pyproject.toml (the deliverable) rather than probing
+    importlib.metadata (which is environment-dependent: a core-only CI
+    matrix install has no stubs). The committed pyproject.toml dev group is
+    the source of truth — `uv sync` resolves it.
+    """
+
+    REQUIRED_STUBS = ("types-tqdm", "types-opencv-python", "scipy-stubs", "pandas-stubs")
+
+    def test_dev_group_declares_all_required_stubs(self) -> None:
+        """`[dependency-groups].dev` must declare all 4 required stubs.
+
+        Parses pyproject.toml as TOML and normalizes each dev entry to its
+        canonical lowercase distribution name (dropping version specifiers,
+        extras, markers) before checking membership. A regression (dropping
+        any stub from the dev group) fails this test.
+        """
+        cfg = _load_pyproject()
+        dev = cfg.get("dependency-groups", {}).get("dev", [])
+        assert isinstance(dev, list), (
+            f"[dependency-groups].dev must be a list, got {type(dev).__name__}"
+        )
+
+        def canonical(req: str) -> str:
+            base = req.split(";", 1)[0].split("[", 1)[0].strip()
+            for i, ch in enumerate(base):
+                if ch in "=<>!~":
+                    base = base[:i].strip()
+                    break
+            return base.lower().replace("_", "-")
+
+        declared = {canonical(r) for r in dev}
+        missing = [s for s in self.REQUIRED_STUBS if s not in declared]
+        assert not missing, (
+            f"[dependency-groups].dev is missing required type stubs: "
+            f"{missing!r}. Declared dev entries: {sorted(declared)!r}"
+        )
+
+
+class TestCIWorkflow:
+    """FOUND-08: the CI workflow file exists, parses as valid YAML, and
+    declares the required jobs with a Python 3.12 + 3.14 matrix.
+
+    This validates the committed workflow CONFIG as data. It does NOT verify
+    that an external CI run actually executed — that stays manual-only
+    (genuinely external). A regression (deleting the file, dropping 3.12
+    from the matrix, removing the lint or test job) fails this test.
+    """
+
+    def test_ci_workflow_file_exists(self) -> None:
+        """The workflow file must exist at .github/workflows/ci.yml."""
+        assert CI_WORKFLOW.is_file(), (
+            f"CI workflow file missing: {CI_WORKFLOW} (FOUND-08 requires "
+            ".github/workflows/ci.yml to exist)"
+        )
+
+    def test_ci_workflow_parses_as_valid_yaml(self) -> None:
+        """The workflow file must parse as valid YAML (a malformed workflow
+        is a CI regression that GitHub would reject).
+        """
+        yaml = pytest.importorskip("yaml", reason="PyYAML required to parse CI YAML")
+        text = CI_WORKFLOW.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(text)
+        assert isinstance(parsed, dict), (
+            f"CI workflow did not parse to a mapping; got {type(parsed).__name__}"
+        )
+
+    def test_ci_workflow_has_lint_and_test_jobs(self) -> None:
+        """The workflow must define `lint` and `test` jobs (the publish job
+        is gated on them).
+        """
+        yaml = pytest.importorskip("yaml")
+        parsed = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        jobs = parsed.get("jobs", {})
+        assert isinstance(jobs, dict), f"jobs must be a mapping, got {type(jobs).__name__}"
+        for required in ("lint", "test"):
+            assert required in jobs, (
+                f"CI workflow is missing required job '{required}'. "
+                f"Present jobs: {sorted(jobs)!r}"
+            )
+
+    def test_ci_test_matrix_includes_python_312_and_314(self) -> None:
+        """The test job's strategy matrix must include python-version entries
+        for both '3.12' and '3.14'.
+        """
+        yaml = pytest.importorskip("yaml")
+        parsed = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        test_job = parsed.get("jobs", {}).get("test", {})
+        strategy = test_job.get("strategy", {})
+        matrix = strategy.get("matrix", {})
+        py_versions = matrix.get("python-version", [])
+        # Normalize to strings for comparison (YAML may parse "3.12" as str).
+        versions = [str(v) for v in py_versions]
+        assert "3.12" in versions, (
+            f"CI test matrix python-version must include '3.12'; got {versions!r}"
+        )
+        assert "3.14" in versions, (
+            f"CI test matrix python-version must include '3.14'; got {versions!r}"
+        )
+
+    def test_ci_publish_gated_on_lint_and_test(self) -> None:
+        """The publish job must be gated on both lint and test jobs
+        (`needs: [lint, test]`), so a failing lint or test blocks release.
+        """
+        yaml = pytest.importorskip("yaml")
+        parsed = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        publish_job = parsed.get("jobs", {}).get("publish", {})
+        assert publish_job, "CI workflow is missing the 'publish' job"
+        needs = publish_job.get("needs", [])
+        if isinstance(needs, str):
+            needs = [needs]
+        needs_set = set(needs)
+        assert {"lint", "test"}.issubset(needs_set), (
+            f"CI publish job must depend on both 'lint' and 'test'; got {needs!r}"
+        )
