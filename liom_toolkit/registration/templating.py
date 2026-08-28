@@ -459,8 +459,14 @@ def build_template(
             if resume_mgr is not None:
                 resume_mgr.finish_step(i, artifact_path=template_artifact)
 
-        if resume_mgr is not None:
-            resume_mgr.mark_complete()
+        # NOTE: the pipeline-level complete sentinel is NOT set here.
+        # build_template is an inner step of build_template_for_resolution,
+        # which still has post-template work to do (register_to_template,
+        # segment_3d, ants.image_write). Marking the pipeline complete here
+        # would let a crash in any of those post-template steps leave a
+        # "complete" manifest with no output file written — a silent
+        # missing-output bug. The caller (build_template_for_resolution)
+        # sets the complete sentinel only after the output file is written.
         return xavg
     finally:
         if output_dir is None:
@@ -674,6 +680,15 @@ def build_template_for_resolution(
         new_template.set_origin(template.origin)
 
         ants.image_write(new_template, output_file)
+
+        # Mark the pipeline complete ONLY after the output file is written.
+        # Setting it earlier (e.g. inside build_template before the
+        # post-template register_to_template / segment_3d / image_write
+        # steps) would let a crash in those steps leave a "complete" manifest
+        # with no output file — on the next --resume run is_complete() would
+        # return True and the function would exit without writing the output.
+        if resume_mgr is not None:
+            resume_mgr.mark_complete()
 
 
 def load_volume_for_registration(
