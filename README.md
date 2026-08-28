@@ -3,7 +3,7 @@
 This package supports the research being done by the Laboratoire d’Imagerie Optique et Moléculaire at
 Polytechnique Montréal. It hosts a collection of scripts used to process and analyze data collected by the lab.
 
-[![Build and Publish Toolkit](https://github.com/LIOMLab/liom-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/LIOMLab/liom-toolkit/actions/workflows/ci.yml) [![Documentation Status](https://readthedocs.org/projects/liom-toolkit/badge/?version=latest)](https://liom-toolkit.readthedocs.io/en/latest/?badge=latest)
+[![PyPI version](https://badge.fury.io/py/liom-toolkit.svg)](https://badge.fury.io/py/liom-toolkit) [![Build Status](https://github.com/LIOMLab/liom-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/LIOMLab/liom-toolkit/actions/workflows/ci.yml) [![Release](https://github.com/LIOMLab/liom-toolkit/actions/workflows/release.yml/badge.svg)](https://github.com/LIOMLab/liom-toolkit/actions/workflows/release.yml) [![Documentation Status](https://readthedocs.org/projects/liom-toolkit/badge/?version=latest)](https://liom-toolkit.readthedocs.io/en/latest/?badge=latest)
 
 ## Installation
 
@@ -42,6 +42,37 @@ On Python 3.14:
 Demonstrations of some of the functionalities of the package can be found in the notebooks in the LIOM Notebooks
 repository.
 The repository can be found here: [LIOM Notebooks](https://github.com/LIOMLab/liom-notebooks)
+
+## Command-line tools
+
+LIOM Toolkit ships **7 `liom-*` console scripts** (registered in
+`pyproject.toml` under `[project.scripts]` and documented in the
+[CLI Reference](https://liom-toolkit.readthedocs.io/en/latest/cli.html)):
+
+| CLI | Purpose |
+|-----|---------|
+| `liom-convert-hdf5-to-zarr` | Convert HDF5 volumes to OME-Zarr |
+| `liom-create-mask` | Generate a brain mask from an OME-Zarr volume |
+| `liom-segment-2d` | 2D Frangi + threshold vessel segmentation |
+| `liom-align-annotations` | Register a volume to the Allen Atlas annotations |
+| `liom-build-template` | Build a registration template from a set of volumes |
+| `liom-compute-slice-metrics` | Per-region vessel morphometrics + Excel export |
+| `liom-train-model` | Train the U-Net vessel-segmentation model |
+
+The new CLIs share a parent parser with `--log-level`, `--resume`,
+`--n_workers`, and `--dask_scheduler` flags. Run any CLI with `--help` for
+the full argument list, e.g. `uv run liom-build-template --help`.
+
+## Changelog
+
+**1.0.0 is a clean break from the pre-1.0 date-based (calver) versions**
+(`2025.*`). There are no deprecation shims — renames and removals are
+one-way. If you are upgrading from a `0.x` / `2025.*` build, read
+[`CHANGELOG.md`](./CHANGELOG.md) for the full breaking-change narrative and
+migration notes (CustomScaler deletion, `allensdk` removal, the four hard
+renames, `__all__` curation, the `calculate_density` /
+`compute_average_diameter` semantic split, the TIFF-default
+`extract_zarr_to_image` rename, and the wandb lab-config parameterization).
 
 ## Requirements
 

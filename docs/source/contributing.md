@@ -129,6 +129,39 @@ integrated into a sibling project capped at 3.12). `from __future__ import
 annotations` is acceptable for 3.12 compatibility where deferred annotation
 evaluation is needed; on 3.14 it is a no-op.
 
+## Versioning
+
+Starting at 1.0.0 the package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The pre-1.0 releases used date-based calver (`2025.06.12`); 1.0.0 is a clean
+break with no deprecation shims (see [`CHANGELOG.md`](https://github.com/LIOMLab/liom-toolkit/blob/main/CHANGELOG.md)).
+
+| Bump | When | Backward-compatible? |
+|------|------|----------------------|
+| **1.0.x** (patch) | bugfixes, doc updates, dependency upper-bound widening | yes |
+| **1.1** (minor) | new backward-compatible features, new optional extras | yes |
+| **2.0** (major) | breaking API changes, removed public names, dropped Python versions | no |
+
+**Releases are cut via git tags.** The version is derived from git tags at
+build time by [`setuptools-scm`](https://setuptools-scm.readthedocs.io/)
+(`dynamic = ["version"]` + `[tool.setuptools_scm]` in `pyproject.toml`).
+To cut a release:
+
+```bash
+git tag v1.0.1
+git push --tags
+```
+
+The `v*` tag push triggers the `release.yml` GitHub Actions workflow, which
+builds the wheel/sdist, uploads to PyPI, and creates a GitHub Release with
+notes extracted from the `## [<version>]` section of `CHANGELOG.md`. There
+is no manual `pyproject.toml` version edit per release — the tag is the
+single source of truth.
+
+This gives the downstream `~/code/lightsheet` consumer a predictable
+pinning strategy: `liom-toolkit>=1.0,<2` for stable-within-major,
+`liom-toolkit~=1.0` for patch-only, or pin an exact tag for full
+reproducibility.
+
 ## Optional dependencies
 
 Heavy/optional deps (`ants`, `torch`, `wandb`) are extras — not
