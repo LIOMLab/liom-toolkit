@@ -1,3 +1,577 @@
 [build-system]
-requires = ["setuptools>=67.0.0", "wheel", "setuptools_scm"]
+requires = ["setuptools >= 77.0.3", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "liom-toolkit"
+readme = "README.md"
+dynamic = ["version"]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [
+    { name = "Frederic Lesage", email = "frederic.lesage@polymtl.ca" },
+    { name = "Frans Irgolitsch", email = "frans.irgolitsch@polymtl.ca" }
+]
+description = "LIOM Toolkit is a Python package for processing and analyzing microscopy data, providing tools for image segmentation, registration, and analysis."
+keywords = ["bioinformatics", "neuroinformatics", "lightsheet", "microscopy", "liom", "segmentation", "registration", "image processing",
+    "deep learning"]
+
+dependencies = [
+    "tqdm>=4.70.0",
+    'scikit-image>=0.26',
+    # scipy.ndimage is used directly in stats.py & plane_segmentation.py.
+    # On 3.12, antspyx 0.6.3 (PyPI) caps scipy<1.16, so the lock pins 1.15.x
+    # there (has cp312 wheels). On 3.14, antspyx 0.6.4 (from this repo's
+    # antspyx-cp314 wheel release) removed the cap, so we require scipy>=1.16.1
+    # — the first release with cp314 macOS arm64 wheels.
+    'scipy>=1.11.4; python_version < "3.14"',
+    'scipy>=1.16.1; python_version >= "3.14"',
+    'imageio>=2.30',
+    'ome-zarr>=0.18.0',
+    "nibabel>=5.4.2",
+    'zarr>=3.0',
+    "h5py>=3.16.0",
+    "pynrrd>=1.1.3",
+    "pandas>=3.0.5",
+    "requests>=2.34.2",
+    "pywavelets>=1.9.0",
+    "simpleitk>=2.5.6",
+    "dask>=2026.8.0",
+    "bokeh>=3.1.0", # Bokeh is used for the dask dashboard
+    "distributed>=2026.8.0",
+    "opencv-python>=5.0.0.93",
+    "natsort>=8.4.0",
+    "openpyxl>=3.1",
+    "tifffile>=2024.0",
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.optional-dependencies]
+ai = [
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+    "timm>=1.0.29",
+    "einops>=0.8.2",
+    "wandb>=0.29.0",
+    "scikit-learn>=1.9.0",
+]
+antspy = [
+    # antspyx 0.6.4 (built from ANTsX/ANTsPy main) removed the scipy<1.16 cap
+    # that was in 0.6.3. On 3.12 it installs from PyPI (0.6.3 has cp312 wheels);
+    # on 3.14 it installs from this repo's antspyx-cp314 GitHub Release via the
+    # uv flat index in [tool.uv.sources] (upstream has no cp314 wheels on PyPI).
+    'antspyx>=0.6.3',
+]
+
+all = [
+    "liom_toolkit[ai]",
+    "liom_toolkit[antspy]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "hypothesis>=6.165.10",
+    "ruff>=0.16.5",
+    "ty==0.0.75",
+    "types-tqdm>=4.70.0.20260827",
+    "types-opencv-python>=1.0.11",
+    "scipy-stubs>=1.18.1.0",
+    "pandas-stubs>=3.0.5.260730",
+    "pyarrow>=25.0.1",
+    "types-openpyxl>=3.1.5.20260827",
+    "pyyaml>=6.0",
+]
+# Docs-build-only tooling (PEP 735 dependency group). Not a user-facing
+# extra — `pip install liom-toolkit[docs]` is intentionally not offered.
+# RTD installs this group via `.readthedocs.yaml` (`groups: [docs]`).
+docs = [
+    "sphinx>=9.1,<10",
+    "pydata-sphinx-theme>=0.17,<1",
+    "sphinx-autoapi>=3.8,<4",
+    "sphinx-argparse>=0.5,<1",
+    "sphinx-design>=0.7,<1",
+    "sphinx-copybutton>=0.5,<1",
+    "myst-parser>=5.0,<6",
+    "nbsphinx>=0.9,<1",
+    "ipykernel>=7.3.0,<8",
+    "ipywidgets>=8.0,<9",
+    "nbconvert>=7.17.1,<8",
+]
+
+[project.scripts]
+liom-convert-hdf5-to-zarr = "liom_toolkit.scripts.liom_convert_hdf5_to_zarr:main"
+liom-create-mask = "liom_toolkit.scripts.liom_create_mask:main"
+liom-segment-2d = "liom_toolkit.scripts.liom_segment_2d:main"
+liom-align-annotations = "liom_toolkit.scripts.liom_align_annotations:main"
+liom-build-template = "liom_toolkit.scripts.liom_build_template:main"
+liom-compute-slice-metrics = "liom_toolkit.scripts.liom_compute_slice_metrics:main"
+liom-train-model = "liom_toolkit.scripts.liom_train_model:main"
+
+[project.urls]
+Homepage = "https://github.com/LIOMLab/liom-toolkit"
+Documentation = "https://liom-toolkit.readthedocs.io/"
+Repository = "https://github.com/LIOMLab/liom-toolkit"
+Changelog = "https://github.com/LIOMLab/liom-toolkit/blob/main/CHANGELOG.md"
+
+# Dynamic version derived from git tags via setuptools-scm. The version is
+# written to liom_toolkit/_version.py at build time (gitignored — generated,
+# not committed) and imported by liom_toolkit/__init__.py as __version__.
+# `write_to_source = true` is the explicit opt-in that keeps the source-tree
+# write behaviour (avoids the upcoming default flip DeprecationWarning).
+[tool.setuptools_scm]
+version_file = "liom_toolkit/_version.py"
+write_to_source = true
+
+# The repo also carries a non-version tag (antspyx-cp314, used by the
+# build-antspyx-cp314-wheels workflow to attach wheel release assets).
+# Without filtering, git describe picks it up as the nearest tag and
+# setuptools-scm raises ValueError because it has no dotted version.
+# tag.strict makes git describe only consider tags with at least one dot
+# (e.g. v1.0, 0.8.0), excluding antspyx-cp314.
+[tool.setuptools_scm.tag]
+strict = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "-n", "auto",
+    "--maxprocesses=6",
+    "--dist=load",
+    "--max-worker-restart=0",
+    "--cov",
+]
+markers = [
+    "ai: requires the ai extra (torch) - skip with -m 'not ai'",
+    "antspy: requires the antspy extra (antspyx) - skip with -m 'not antspy'",
+    "slow: slow test, auto-deselected from fast iteration by convention",
+    "real_process_map: opt out of the fast serial process_map fixture (test_dataset.py) — the test must exercise the real forked-worker path",
+]
+filterwarnings = [
+    # pynrrd 1.1.3 calls datetime.utcnow() (deprecated in 3.12+); unfixable upstream.
+    "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["liom_toolkit"]
+
+[tool.coverage.report]
+show_missing = true
+# Both CI legs (3.12+all, 3.14+all) enforce this 60% floor.
+fail_under = 60
+
+[tool.ruff]
+target-version = "py312"   # NOT py314 — load-bearing for 3.12 forward-ref support (from __future__ import annotations stays)
+line-length = 100
+# Sphinx conf.py manipulates sys.path before imports (E402) and uses its own
+# formatting conventions; it is build tooling, not package code, so exclude it
+# from ruff lint/format. CI runs `ruff check` / `ruff format --check` on `.`.
+extend-exclude = ["docs"]
+
+# Phase-7 ratchet: the auto-fixable Phase-1 subset is now expanded with the
+# docstring/annotation rule families (D, DOC, ANN). The remaining expansive
+# rule sets (S, N, A, ARG, PL, PTH, PERF, LOG, G, PGH, BLE, etc.) land in the
+# final ratchet after the per-module docstring/annotation waves are done.
+# CI runs `ruff check` + `ruff format --check` read-only.
+[tool.ruff.lint]
+# Full expansive rule set per the Phase-7 final ratchet. The Phase-1
+# auto-fixable subset (E, F, W, I, UP, B, SIM, C4, RUF) plus the docstring /
+# annotation families (D, DOC, ANN) landed in the early waves; the remaining
+# rule sets (security, naming, structural, refactor, etc.) land here as the
+# final ratchet. T20 stays in `ignore` (D-05 — Phase 8 LOG-01 owns the
+# print→logging sweep). DOC requires `preview = true` (set below).
+# UP037 (useless future import) does NOT fire under target-version = "py312",
+# so `from __future__ import annotations` is preserved (load-bearing on 3.12).
+select = [
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting)
+    "UP",     # pyupgrade (modernize syntax)
+    "B",      # flake8-bugbear (common bugs)
+    "SIM",    # flake8-simplify
+    "C4",     # flake8-comprehensions
+    "RUF",    # Ruff-specific rules
+    "D",      # pydocstyle (numpy convention)
+    "DOC",    # pydoclint (preview — signature↔docstring consistency)
+    "ANN",    # flake8-annotations (enforce type annotations)
+    "S",      # flake8-bandit (security)
+    "N",      # pep8-naming (tuned for scientific code — see per-file-ignores)
+    "A",      # flake8-builtins
+    "ARG",    # flake8-unused-arguments
+    "PL",     # Pylint (PLC, PLE, PLR, PLW)
+    "PTH",    # flake8-use-pathlib
+    "PERF",   # Perflint
+    "LOG",    # flake8-logging
+    "G",      # flake8-logging-format
+    "PGH",    # pygrep-hooks
+    "BLE",    # flake8-blind-except
+    "DTZ",    # flake8-datetimez
+    "YTT",    # flake8-2020
+    "EM",     # flake8-errmsg
+    "EXE",    # flake8-executable
+    "FA",     # flake8-future-annotations
+    "ICN",    # flake8-import-conventions
+    "INP",    # flake8-no-pep420
+    "SLF",    # flake8-self
+    "TD",     # flake8-todos
+    "FIX",    # flake8-fixme
+    "ERA",    # eradicate (commented-out code)
+    "TRY",    # tryceratops
+    "RET",    # flake8-return
+    "FBT",    # flake8-boolean-trap
+    "RSE",    # flake8-raise
+    "SLOT",   # flake8-slots
+    "PD",     # pandas-vet
+    "C90",    # mccabe (complexity)
+    "TC",     # flake8-type-checking
+    "TID",    # flake8-tidy-imports
+    "PIE",    # flake8-pie
+    "FLY",    # flynt (f-string conversion)
+    "FURB",   # refurb
+    "NPY",    # NumPy-specific (deprecated aliases)
+    "Q",      # flake8-quotes (enforce double quotes)
+    "PT",     # flake8-pytest-style
+]
+# Enable preview rules project-wide so DOC (pydoclint) is active. Non-DOC
+# preview rules that fire are triaged below in `ignore` with justifications.
+preview = true
+# Formatter-conflicting rules MUST be ignored when using `ruff format`.
+# Ratchet: the remaining ignores suppress non-auto-fixable violations.
+# E501/B008/E721 ratchet debts were cleared in the prior wave (manual line
+# breaks, deferred device default-arg, isinstance type comparison) and are
+# no longer listed. T20 (print) was dropped after the LOG-01 print→logging
+# sweep; the print-free invariant is now enforced by the T20 hard-gate.
+ignore = [
+    "COM812",  # formatter conflict — permanent
+    "ISC001",  # formatter conflict — permanent
+    # --- MiP-3 scientific-convention ignores (per 07-RESEARCH.md Pitfall 1) ---
+    # N813: CamelCase-imported-as-lowercase. `import SimpleITK as sitk` and
+    # similar CamelCase aliases are universal in the SimpleITK/scikit-image
+    # ecosystem; renaming would diverge from every downstream consumer.
+    "N813",
+    # ANN401: dynamically-typed-Any. `Any` is legitimately unavoidable in a
+    # few torch/override signatures and for ANTsImage under
+    # replace-imports-with-any (ty maps ants.** to Any at runtime; the
+    # static type is ANTsImage under TYPE_CHECKING, but a handful of helper
+    # signatures accept Any to stay faithful to the runtime contract).
+    "ANN401",
+    # PLR2004: magic-value-comparison. Scientific code compares against
+    # domain constants inline (e.g. `if resolution in [10, 25, 50, 100]`,
+    # voxel-size literals, channel counts). Extracting every literal to a
+    # named constant would harm legibility for one-off domain values.
+    "PLR2004",
+    # --- style-preference rule families (not correctness; suppress to keep
+    # the gate meaningful rather than noisy) ---
+    # TRY003/EM101/EM102: raise-vanilla-args / raw-string-in-exception /
+    # f-string-in-exception. These enforce assigning the message to a
+    # variable before raising. The project raises with inline string
+    # literals throughout (idiomatic and readable); the style is not a
+    # correctness or security concern.
+    "TRY003",
+    "EM101",
+    "EM102",
+    # FBT001/FBT002/FBT003: boolean-trap. Scientific Python and the existing
+    # public API use boolean positional arguments extensively (e.g.
+    # `fill_holes=True`, `pretrained=False`). Migrating to keyword-only
+    # would be a breaking API change deferred to Phase 8 API-01.
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    # PLC0415: import-outside-top-level. Lazy imports of heavy optional deps
+    # (ants, torch) inside function bodies are intentional per AGENTS §3
+    # (modules must import cleanly without extras). Function-scope imports
+    # also break circular-import cycles (e.g. io.py <-> zarr_writer.py).
+    "PLC0415",
+    # TC001/TC002/TC003: typing-only imports. Moving imports under
+    # TYPE_CHECKING is a non-trivial refactor with pydantic/eager-resolution
+    # risks (AGENTS global rules: pydantic v2 resolves eagerly). Out of
+    # scope for a lint ratchet; the runtime cost of top-level imports is
+    # negligible compared to the heavy-dep lazy-import strategy.
+    "TC001",
+    "TC002",
+    "TC003",
+    # PLR0913/PLR0917: too-many-arguments / too-many-positional-arguments.
+    # Orchestration and pipeline functions thread many parameters by design
+    # (conversion, registration, training entry points).
+    "PLR0913",
+    "PLR0917",
+    # PLR0914/PLR0915/PLR0912/PLR1702/C901: complexity rules (too-many-locals,
+    # too-many-statements, too-many-branches, too-many-nested-blocks,
+    # complex-structure). Long pipeline functions are accepted per the
+    # project conventions; refactoring them is Phase 8 PERF-01 scope.
+    "PLR0914",
+    "PLR0915",
+    "PLR0912",
+    "PLR1702",
+    "C901",
+    # PLR6301: no-self-use. False positives on methods that don't use self
+    # but are part of a class API (e.g. nn.Module forward helpers).
+    "PLR6301",
+    # PLR6104: non-augmented-assignment. Style preference (`x = x + 1` vs
+    # `x += 1`); not a correctness concern.
+    "PLR6104",
+    # PLW2901: redefined-loop-name. Intentional in several pipeline loops
+    # that progressively refine a variable.
+    "PLW2901",
+    # PLW3201: bad-dunder-method-name. False positives on legitimate
+    # double-underscore-prefixed private methods (see dask_client.py).
+    "PLW3201",
+    # PLC1901: compare-to-empty-string. Style preference (`x == ""` vs
+    # `not x`); both are correct.
+    "PLC1901",
+    # PLR6201: literal-membership. Style preference (`x in [a, b]` vs
+    # `x in {a, b}`); for 2-3 element lists the set-literal micro-optimization
+    # is not worth the legibility cost.
+    "PLR6201",
+    # N806/N803/N812: scientific naming. Uppercase/single-letter variable
+    # names (H, W, N, C) and CamelCase aliases are mathematical convention
+    # in the U-Net forward pass and tensor operations.
+    "N806",
+    "N803",
+    "N812",
+    # TID252: relative-imports. The project uses relative imports within
+    # the package by convention (idiomatic for a library).
+    "TID252",
+    # ERA001: commented-out-code. A couple of legacy commented-out blocks
+    # are kept as historical context (see loss.py, io.py); removing them is
+    # a deliberate cleanup, not a lint-driven deletion.
+    "ERA001",
+    # S403: suspicious-pickle-import. `import pickle` in vseg/model.py is
+    # used only to catch `pickle.UnpicklingError` from torch.load (safe —
+    # not pickling untrusted data). Suppressed globally; the other S rules
+    # remain active.
+    "S403",
+    # RUF201: rule-codes-in-selectors. Prefers rule names over codes in
+    # select/ignore (e.g. "missing-trailing-comma" over "COM812"). Rule codes
+    # are more compact and the conventional form in ruff configs; the names
+    # are verbose and less recognizable. Style preference only.
+    "RUF201",
+    # ARG001/ARG002/ARG003: unused-function-argument / unused-method-argument /
+    # unused-class-argument. The library keeps several parameters for
+    # backward-signature compatibility (e.g. ``rsc`` on download_allen_template,
+    # ``reference_space_key`` on construct_reference_space, ``tolerance`` on
+    # make_structure_mask) — removing them would break downstream callers.
+    # Abstract-method implementations and protocol-shaped helpers also
+    # legitimately leave args unused.
+    "ARG001",
+    "ARG002",
+    "ARG003",
+    # PLW0717: too-many-statements-in-try-clause. The atomic-download pattern
+    # in _download_nrrd / _download_structure_tree naturally groups the
+    # stream + write + rename in one try clause (6 statements) so the
+    # except can clean up the .partial temp file. Splitting would scatter
+    # the cleanup logic.
+    "PLW0717",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI scripts legitimately import the internal shared parent-parser helper
+# `_common` from the sibling `liom_toolkit.scripts` package — the underscore
+# prefix marks it as package-internal (not part of the public CLI surface),
+# but sibling CLI modules are the intended consumers.
+"liom_toolkit/scripts/liom_*.py" = [
+    "PLC2701",  # importing the internal `_common` helper is the sanctioned sibling-import pattern
+]
+# Test files: relaxed rules — annotations, docstrings, unused-args, naming,
+# complexity, private-member-access, and commented-out code are not required
+# in tests (per .planning/research/ARCHITECTURE.md per-file-ignores table).
+# S101 (assert) is the idiomatic pytest assertion primitive.
+# PT011 (pytest-raises-too-broad) and PT018 (composite-assertion) are
+# acceptable in tests where the exact match is not the test's focus.
+"tests/**" = [
+    "S101",   # assert is the idiomatic pytest assertion primitive
+    "ANN",    # type annotations not required on test functions
+    "D",      # docstrings not required on test functions
+    "DOC",    # pydoclint consistency not enforced on test docstrings
+    "ARG001", # unused function arguments (fixtures, dummies) are common
+    "ARG002", # unused method arguments (e.g. setUp/tearDown) are common
+    "ARG005", # unused lambda arguments are common in test stubs
+    "PLR0915",# long test functions are acceptable
+    "PLR0912",# many branches in test cases are acceptable
+    "PLR0914",# many locals in test cases are acceptable
+    "PLR1702",# nested blocks in test cases are acceptable
+    "PLR6301",# no-self-use on test class methods is a false positive
+    "C901",   # complexity not enforced on tests
+    "SLF001", # private-member-access is common in white-box tests
+    "ERA001", # commented-out code in tests is acceptable
+    "TC001",  # typing-only imports not required in tests
+    "TC002",  # typing-only third-party imports not required in tests
+    "TC003",  # typing-only stdlib imports not required in tests
+    "PLC0415",# function-scope imports are common in tests (importorskip)
+    "PLC2701",# importing private names is common in white-box tests
+    "PLC1901",# compare-to-empty-string style not enforced on tests
+    "PLR6201",# literal-membership style not enforced on tests
+    "PLW2901",# redefined loop names are common in test loops
+    "PLW1514",# unspecified-encoding acceptable in test file IO
+    "FBT001", # boolean positional args common in test helpers
+    "FBT002", # boolean default positional args common in test helpers
+    "FBT003", # boolean positional value in call common in tests
+    "EM101",  # raw-string-in-exception style not enforced on tests
+    "EM102",  # f-string-in-exception style not enforced on tests
+    "TRY003", # raise-vanilla-args style not enforced on tests
+    "PTH",    # os.path usage in tests is acceptable
+    "S108",   # hardcoded temp file paths in tests are acceptable
+    "S403",   # pickle import in tests is acceptable
+    "S301",   # pickle use in tests is acceptable
+    "N806",   # uppercase variable names common in test math
+    "N803",   # uppercase argument names common in test math
+    "RUF069", # float-equality comparison common in numeric tests
+    "RUF059", # unused unpacked variable common in test fixtures
+    "RUF002", # ambiguous unicode in docstrings acceptable in tests
+    "RUF003", # ambiguous unicode in comments acceptable in tests
+    "RUF001", # ambiguous unicode in strings acceptable in tests
+    "E402",   # module-import-not-at-top acceptable in tests (importorskip)
+    "INP001", # implicit namespace package acceptable for test conftest
+    "PT011",  # pytest-raises-too-broad acceptable in tests
+    "PT018",  # pytest-composite-assertion acceptable in tests
+    "NPY002", # numpy legacy random acceptable in test fixtures
+    "FIX",    # FIXME/TODO/XXX tags acceptable in tests
+    "TD",     # TODO tags acceptable in tests
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+# defaults — line-length 100 inherited from [tool.ruff]
+
+[tool.ty.rules]
+# Expansive strictness — based on ty's "even stricter" recommended config.
+# Not all rules are errors: false-positive-prone rules are warnings so real
+# bugs surface without failing CI on third-party stub imprecision.
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+unsound-assignment = "error"
+unsound-yield = "error"
+blanket-ignore-comment = "error"
+unsupported-dynamic-base = "warn"
+# Known false-positive-prone rules — enable as warnings:
+division-by-zero = "warn"
+possibly-missing-attribute = "warn"
+possibly-missing-import = "warn"
+# numpy ArrayLike union noise: numpy.typing.ArrayLike is a broad union
+# (Buffer | _SupportsArray | _NestedSequence | ...). Accessing .shape,
+# .astype, .sum, or subscripting on an ArrayLike-typed value fires
+# unresolved-attribute / not-subscriptable / unsupported-operator because
+# not all union members define those. These are false positives for code
+# that receives ArrayLike inputs and operates on them as arrays. Downgrade
+# to warnings so real attribute/subscript bugs on non-array types still
+# surface without failing CI on the ArrayLike union noise.
+unresolved-attribute = "warn"
+not-subscriptable = "warn"
+unsupported-operator = "warn"
+# dask/numpy/ome_zarr stub friction: dask.array.Array doesn't satisfy
+# numpy's ArrayLike protocol (missing __buffer__, __array__ protocol
+# members) even though it's practically array-like. Passing a dask Array
+# to a function expecting ArrayLike fires invalid-argument-type; returning
+# a dask Array from a function typed -> da.Array fires unsound-return-
+# statement (client.persist returns Unknown). These are third-party stub
+# imprecision, not real bugs. Downgrade to warnings.
+invalid-argument-type = "warn"
+unsound-return-statement = "warn"
+invalid-return-type = "warn"
+invalid-assignment = "warn"
+no-matching-overload = "warn"
+# missing-argument, unknown-argument, not-iterable, unsound-assignment,
+# unresolved-import, missing-override-decorator: these remain at ty's
+# default severity (error) — they catch real bugs. The vseg/** and tests/**
+# overrides below relax the noisiest ones.
+
+[tool.ty.environment]
+python-version = "3.12"   # match ruff target-version (>=3.12 floor)
+
+# Optional deps that ship no inline types and no stubs are installed in the
+# base environment. replace-imports-with-any makes the entire surface `Any`
+# AND unconditionally suppresses import diagnostics — strictly better than
+# per-file import-error overrides for untyped C++-binding libs (downstream
+# attribute accesses no longer need inline `# ty: ignore` proliferation).
+#   - ants.**: antspyx native C++ bindings, no py.typed (antspy extra)
+#   - patchify.**: no inline types, no stubs (removed from core deps; forward-looking)
+#   - torch.**: PyTorch ships py.typed but is an optional extra (ai group);
+#     not installed in the base env, so ty can't resolve it. Replacing with
+#     Any avoids cascading unresolved-attribute errors in vseg/**.
+#   - wandb.**: optional extra (ai group), no stubs in base env.
+#   - sklearn.**: scikit-learn is an optional extra (ai group); not installed
+#     in the base env.
+#   - matplotlib.**: used only in vseg/validation.py for diff image saving;
+#     not a declared dependency (visualization is optional).
+#   - allensdk.**: deprecated, not installable on Python 3.12+; only
+#     referenced in the test fixture regenerate.py (one-off oracle script).
+[tool.ty.analysis]
+replace-imports-with-any = [
+    "ants.**",
+    "patchify.**",
+    "torch.**",
+    "wandb.**",
+    "sklearn.**",
+    "matplotlib.**",
+    "allensdk.**",
+]
+
+[tool.ty.terminal]
+error-on-warning = false
+
+# PyTorch nn.Module dynamic attributes (self.layer = nn.Linear(...),
+# register_buffer attrs) are a known cross-checker problem. Suppress
+# possibly-missing-attribute and warn (not error) on unresolved-attribute
+# so real attribute bugs surface without failing CI on the dynamic-attr
+# false positives. Add explicit class-level annotations on nn.Module
+# subclasses where feasible.
+[[tool.ty.overrides]]
+include = ["liom_toolkit/segmentation/vseg/**"]
+rules = { possibly-missing-attribute = "ignore", unresolved-attribute = "warn" }
+
+# Test files: relax type-checking rules that are noisy in tests (fixtures,
+# mocks, importorskip-gated imports, white-box private access). Tests don't
+# need the same annotation rigor as production code.
+[[tool.ty.overrides]]
+include = ["tests/**", "**/test_*.py", "**/conftest.py"]
+rules = { possibly-unresolved-reference = "ignore", unresolved-attribute = "ignore", invalid-assignment = "ignore", missing-type-argument = "ignore", unresolved-import = "ignore", invalid-argument-type = "ignore", invalid-return-type = "ignore", not-subscriptable = "ignore", unsupported-operator = "ignore", unsound-return-statement = "ignore", missing-argument = "ignore", no-matching-overload = "ignore", unknown-argument = "ignore", not-iterable = "ignore", missing-override-decorator = "ignore", unsound-assignment = "ignore" }
+
+# docs/ is excluded from ruff (extend-exclude) and contains Sphinx config
+# + notebooks where try-block imports and Node|None unions fire type
+# warnings that are out of scope for shipped package code.
+[[tool.ty.overrides]]
+include = ["docs/**"]
+rules = { possibly-unresolved-reference = "ignore", unresolved-attribute = "ignore" }
+
+[tool.setuptools.package-data]
+liom_toolkit = ["py.typed"]
+
+# antspyx cp314 wheels are not published on PyPI (upstream's build matrix stops
+# at cp313, and the latest PyPI release 0.6.3 caps scipy<1.16). This repo's
+# "Build antspyx cp314 wheels" GitHub Actions workflow builds them from
+# ANTsX/ANTsPy main and attaches them (plus a generated index.html) to the
+# antspyx-cp314 GitHub Release. uv consumes that index.html as a flat index so
+# the 3.14 CI leg can install a prebuilt antspyx instead of source-building.
+# The index is explicit (only used for antspyx) so it never shadows PyPI.
+[[tool.uv.index]]
+name = "antspyx-cp314"
+url = "https://github.com/LIOMLab/liom-toolkit/releases/download/antspyx-cp314/index.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+# On Python 3.14, pull antspyx from the fork's cp314 wheel release. On <3.14
+# antspyx still comes from PyPI (0.6.3, which has cp312 wheels). The source
+# override is marker-gated so the 3.12 lock leg is unaffected.
+antspyx = [
+  { index = "antspyx-cp314", marker = "python_version >= '3.14'" },
+]
+

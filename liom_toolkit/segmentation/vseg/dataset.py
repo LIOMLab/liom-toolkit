@@ -1,102 +1,392 @@
+"""PyTorch Dataset classes for OME-Zarr vessel segmentation training."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import multiprocessing
+import pathlib
+from collections.abc import Iterator
+from multiprocessing import cpu_count
+
 import dask.array as da
 import numpy as np
 import torch
+import zarr
+from numpy.typing import NDArray
 from torch.utils.data import Dataset
-from tqdm.auto import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from .utils import apply_clahe
 
 
-class OmeZarrDataset(Dataset):
+def _level0_component(zarr_path: str, group_path: str = "") -> str:
+    """Resolve the level-0 (full-resolution) array component path from multiscales metadata.
+
+    NGFF v0.5 (zarr v3) names multiscale datasets ``s0``, ``s1``, ... while
+    legacy NGFF v0.4 used ``0``, ``1``, ... Hardcoding either convention
+    breaks when reading files written by the other. This reads the group's
+    ``ome.multiscales`` (v0.5) or ``multiscales`` (v0.4) metadata and returns
+    the first dataset's path so the reader follows whatever the writer used.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store.
+    group_path : str
+        Optional subpath to a group whose multiscales metadata should be
+        read (e.g. ``"labels/training"`` for a label group). Empty string
+        reads the root image group.
+
+    Returns
+    -------
+    str
+        The component path for ``da.from_zarr(..., component=...)`` —
+        ``"{group_path}/{level0_path}"`` (or just ``"{level0_path}"`` when
+        ``group_path`` is empty).
+
+    Raises
+    ------
+    ValueError
+        If the group has no OME multiscales metadata.
+    TypeError
+        If the multiscales metadata is not a list or tuple.
     """
-    Dataset class for loading vascular data from a zarr file.
+    root = zarr.open_group(zarr_path, mode="r")
+    group = root if not group_path else root[group_path]
+    ome = group.attrs.get("ome")
+    multiscales_raw = (
+        ome["multiscales"] if isinstance(ome, dict) else group.attrs.get("multiscales")
+    )
+    if not multiscales_raw:
+        raise ValueError(
+            f"No OME multiscales metadata found in {zarr_path}"
+            + (f" at group {group_path!r}" if group_path else "")
+            + " — cannot resolve the level-0 dataset path."
+        )
+    if not isinstance(multiscales_raw, (list, tuple)):
+        raise TypeError(
+            f"Unexpected multiscales metadata type {type(multiscales_raw)} in {zarr_path}"
+        )
+    multiscales = multiscales_raw
+    level0_path = str(multiscales[0]["datasets"][0]["path"])
+    return f"{group_path}/{level0_path}" if group_path else level0_path
+
+
+def _valid_indices_cache_key(
+    zarr_path: str,
+    node_name: str,
+    patch_size: tuple[int, int, int],
+    filter_empty: bool,
+    label_data: da.Array,
+) -> str:
+    """Compute the sha256 cache key for the valid-indices sidecar.
+
+    The key is the sha256 of a canonicalized JSON dict of
+    ``(zarr_path, node_name, patch_size, filter_empty)`` plus the zarr array
+    METADATA (shape, dtype, chunks) -- NOT a full-volume content hash. A
+    metadata change (different shape/dtype/chunks) invalidates the cache; a
+    content change without a metadata change does not (the cache is keyed on
+    metadata, not content, so there is no full-volume re-materialization per
+    training run -- PERF-01d). The trade-off is documented: a same-shape
+    content edit is not detected; users editing label content in place must
+    delete the sidecar manually.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store.
+    node_name : str
+        Label node name (``labels/{node_name}``).
+    patch_size : tuple[int, int, int]
+        The patch size used for grid validation.
+    filter_empty : bool
+        Whether empty-patch filtering is active.
+    label_data : da.Array
+        The label Dask array (read for its shape/dtype/chunks metadata only --
+        NOT computed, so no full-volume materialization).
+
+    Returns
+    -------
+    str
+        The hex sha256 digest of the canonicalized cache key.
+    """
+    # Cache key is METADATA-only (shape/dtype/chunks), NOT content. A
+    # same-shape content edit to the label zarr is not detected and stale
+    # valid_indices are returned. See the docstring above — users editing
+    # label content in place must delete the .valid_indices_cache.json
+    # sidecar manually. A content-based hash would require a full-volume
+    # re-materialization per training run (defeating PERF-01d), so the
+    # trade-off is documented rather than closed.
+    key = {
+        "zarr_path": str(pathlib.Path(zarr_path).resolve()),
+        "node_name": node_name,
+        "patch_size": tuple(int(p) for p in patch_size),
+        "filter_empty": bool(filter_empty),
+        "array_shape": tuple(int(s) for s in label_data.shape),
+        "array_dtype": str(label_data.dtype),
+        "array_chunks": tuple(tuple(int(c) for c in ch) for ch in (label_data.chunks or ())),
+    }
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _valid_indices_cache_path(zarr_path: str) -> str:
+    """Return the cache sidecar path for a zarr dataset.
+
+    The sidecar lives next to the zarr file as
+    ``{zarr_path}.valid_indices_cache.json``.
+
+    Returns
+    -------
+    str
+        The sidecar path.
+    """
+    return f"{zarr_path}.valid_indices_cache.json"
+
+
+def _load_valid_indices_cache(zarr_path: str, expected_hash: str) -> NDArray[np.int_] | None:
+    """Load valid_indices from the cache sidecar if the hash matches.
+
+    Returns ``None`` on a cache miss (no sidecar, unreadable sidecar, or hash
+    mismatch -- a hash mismatch means the dataset metadata changed and the
+    cached indices are stale, so they MUST NOT be returned per AGENTS section 2
+    no-silent-wrong-data).
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store (the sidecar is derived from this).
+    expected_hash : str
+        The sha256 hash the cached entry must match.
+
+    Returns
+    -------
+    NDArray[np.int_] | None
+        The cached valid_indices array, or ``None`` on a cache miss.
+    """
+    sidecar = pathlib.Path(_valid_indices_cache_path(zarr_path))
+    if not sidecar.exists():
+        return None
+    try:
+        with sidecar.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # Corrupt sidecar -- treat as a cache miss (do not return wrong data).
+        return None
+    if not isinstance(payload, dict) or payload.get("hash") != expected_hash:
+        return None
+    indices = payload.get("valid_indices")
+    if not isinstance(indices, list):
+        return None
+    return np.asarray(indices, dtype=np.int_)
+
+
+def _save_valid_indices_cache(
+    zarr_path: str, cache_hash: str, valid_indices: NDArray[np.int_]
+) -> None:
+    """Write the valid_indices cache sidecar atomically.
+
+    Writes to a ``{sidecar}.partial`` temp file first, then renames it into
+    place via :func:`pathlib.Path.replace` so an interrupted write never leaves
+    a corrupt sidecar. The temp file is removed on any exception (copied from
+    the atomic-write pattern in ``utils/allen_sdk.py``).
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store (the sidecar is derived from this).
+    cache_hash : str
+        The sha256 cache key to store (used for invalidation on the next load).
+    valid_indices : NDArray[np.int_]
+        The valid_indices array to cache (stored as a JSON list).
+    """
+    sidecar = pathlib.Path(_valid_indices_cache_path(zarr_path))
+    tmp = sidecar.with_suffix(sidecar.suffix + ".partial")
+    payload = {
+        "hash": cache_hash,
+        "valid_indices": np.asarray(valid_indices).astype(np.int_).tolist(),
+    }
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        tmp.replace(sidecar)
+    except BaseException:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+class OmeZarrDataset(Dataset):
+    """Dataset class for loading vascular data from a zarr file.
+
     Can generalize to 2D when the first index of the patch_size is 1.
     """
+
     zarr_path: str
     data: da.Array
-    patch_size: tuple
+    patch_size: tuple[int, int, int]
     device: torch.device
     pre_process: bool
     normalise: bool
-    max_value: int
-    grid_shape: tuple
+    max_value: int | float
+    grid_shape: tuple[int, int, int]
     rotate_patches: bool
     # CLAHE parameters
     kernel_size: int = 10
     clip_limit: float = 0.05
 
-    def __init__(self, zarr_path: str, patch_size: tuple = (32, 32, 32), device: str | torch.device = 'cuda',
-                 pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535,
-                 rotate_patches: bool = True, channel=0):
-        """"
-        Initialise the dataset. Creates pointers to the data but does not load anything yet.
+    def __init__(
+        self,
+        zarr_path: str,
+        patch_size: tuple[int, int, int] = (32, 32, 32),
+        device: str | torch.device = "cuda",
+        pre_process: bool = True,
+        normalise: bool = True,
+        normalisation_value: int | float = 65535,
+        rotate_patches: bool = True,
+        channel: int = 0,
+        z_range: tuple[int, int] | None = None,
+    ) -> None:
+        """Initialise the dataset.
 
-        :param zarr_path: Path to the zarr file
-        :type zarr_path: str
-        :param patch_size: Size of the patches to extract
-        :type patch_size: tuple
-        :param device: Device to load the data on
-        :type device: str
-        :param pre_process: Whether to apply pre-processing (CLAHE) to the data
-        :type pre_process: bool
-        :param normalise: Whether to normalise the data
-        :type normalise: bool
-        :param normalisation_value: The value to use for normalisation
-        :type normalisation_value: int | float
-        :param rotate_patches: Whether to rotate the patches. Performs 4 rotations, so the dataset size is multiplied by 4.
-        :type rotate_patches: bool
+        Creates pointers to the data but does not load anything yet.
+
+        Parameters
+        ----------
+        zarr_path : str
+            Path to the zarr file.
+        patch_size : tuple[int, int, int]
+            Size of the patches to extract.
+        device : str | torch.device
+            Device to load the data on.
+        pre_process : bool
+            Whether to apply pre-processing (CLAHE) to the data.
+        normalise : bool
+            Whether to normalise the data.
+        normalisation_value : int | float
+            The value to use for normalisation.
+        rotate_patches : bool
+            Whether to rotate the patches. Performs 4 rotations, so the
+            dataset size is multiplied by 4.
+        channel : int
+            Channel index to select when the data has 4 dimensions.
+        z_range : tuple[int, int] | None
+            Optional ``(z_start, z_end)`` slice applied to the data.
         """
         self.zarr_path = zarr_path
         self.patch_size = patch_size
-        if type(device) == str:
+        if isinstance(device, str):
             device = torch.device(device)
         self.device = device
         self.pre_process = pre_process
         self.normalise = normalise
         self.max_value = normalisation_value
         self.rotate_patches = rotate_patches
-        self.data = da.from_zarr(self.zarr_path, component='0')
+        self.data = da.from_zarr(self.zarr_path, component=_level0_component(self.zarr_path))
         if len(self.data.shape) == 4:
             self.data = self.data[channel]
 
+        if z_range is not None:
+            # If a z_range is provided, slice the data accordingly
+            z_start, z_end = z_range
+            self.data = self.data[z_start:z_end]
+
         # Determine the number of patches that can be extracted from the data
         data_shape = self.data.shape
-        self.grid_shape = (data_shape[0] // patch_size[0]), (data_shape[1] // patch_size[1]), (
-                data_shape[2] // patch_size[2])
+        self.grid_shape = (
+            (data_shape[0] // patch_size[0]),
+            (data_shape[1] // patch_size[1]),
+            (data_shape[2] // patch_size[2]),
+        )
 
     def __len__(self) -> int:
+        """Return the number of patches in the dataset (x4 when rotating).
+
+        Returns
+        -------
+        int
+            The number of patches (multiplied by 4 when ``rotate_patches`` is set).
+        """
         length = self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2]
         if self.rotate_patches:
             length *= 4
         return length
 
-    def __getitem__(self, idx) -> (torch.Tensor, torch.Tensor):
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        """Load a patch from the dataset.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the patch to load.
+
+        Returns
+        -------
+        torch.Tensor
+            The loaded (and optionally normalised/pre-processed) patch tensor.
         """
-        Load a patch from the dataset. The idx parameter is used to determine which patch to load.
+        return self.load_patch(
+            self.data, idx, self.pre_process, normalise=True, normalisation_value=self.max_value
+        )
 
-        :param idx: Index of the patch to load
-        :type idx: int
-        :return: Tuple of the image and the corresponding label
-        :rtype: tuple(torch.Tensor, torch.Tensor)
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        """Iterate over patches in the dataset.
+
+        Yields
+        ------
+        torch.Tensor
+            Each patch tensor in the dataset.
         """
-        patch_image = self.load_patch(self.data, idx, self.pre_process, normalise=True,
-                                      normalisation_value=self.max_value)
+        for i in range(len(self)):
+            yield self[i]
 
-        return patch_image
+    def get_patch_coordinates(self, idx: int) -> tuple[int, int, int, int, int, int]:
+        """Compute the ``(z1, z2, y1, y2, x1, x2)`` slice bounds for a grid patch index.
 
-    def get_patch_coordinates(self, idx):
+        Returns
+        -------
+        tuple[int, int, int, int, int, int]
+            The ``(z1, z2, y1, y2, x1, x2)`` slice bounds.
+        """
         patch_idx = np.unravel_index(idx, self.grid_shape)
-        z1 = patch_idx[0] * self.patch_size[0]
-        z2 = (patch_idx[0] + 1) * self.patch_size[0]
-        y1 = patch_idx[1] * self.patch_size[1]
-        y2 = (patch_idx[1] + 1) * self.patch_size[1]
-        x1 = patch_idx[2] * self.patch_size[2]
-        x2 = (patch_idx[2] + 1) * self.patch_size[2]
+        z1 = int(patch_idx[0] * self.patch_size[0])
+        z2 = int((patch_idx[0] + 1) * self.patch_size[0])
+        y1 = int(patch_idx[1] * self.patch_size[1])
+        y2 = int((patch_idx[1] + 1) * self.patch_size[1])
+        x1 = int(patch_idx[2] * self.patch_size[2])
+        x2 = int((patch_idx[2] + 1) * self.patch_size[2])
         return z1, z2, y1, y2, x1, x2
 
-    def load_patch(self, data, idx, pre_process=False, normalise: bool = True,
-                   normalisation_value: int | float = 65535) -> torch.Tensor:
+    def load_patch(
+        self,
+        data: da.Array,
+        idx: int,
+        pre_process: bool = False,
+        normalise: bool = True,
+        normalisation_value: int | float = 65535,
+    ) -> torch.Tensor:
+        """Load and optionally rotate/normalise/pre-process a single patch.
+
+        Parameters
+        ----------
+        data : dask.array.Array
+            The dask array to slice the patch from.
+        idx : int
+            Dataset index of the patch to load.
+        pre_process : bool
+            Whether to apply CLAHE pre-processing.
+        normalise : bool
+            Whether to normalise the patch by ``normalisation_value``.
+        normalisation_value : int | float
+            Value to divide the patch by when normalising.
+
+        Returns
+        -------
+        torch.Tensor
+            The loaded patch as a float32 tensor on ``self.device``.
+        """
         # The index corresponds to the place in the grid, the rest is for the rotation
+        rest = 0
         if self.rotate_patches:
             idx = idx // 4
             rest = idx % 4
@@ -118,82 +408,277 @@ class OmeZarrDataset(Dataset):
         if pre_process:
             patch_data = self.pre_process_patch(patch_data)
 
-        patch_data = torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
-        return patch_data
+        return torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
 
-    def normalise_patch(self, patch, normalisation_value: int | float = 65535) -> torch.Tensor:
-        patch = patch / normalisation_value
-        return patch
+    def normalise_patch(
+        self, patch: NDArray[np.floating], normalisation_value: int | float = 65535
+    ) -> NDArray[np.floating]:
+        """Divide the patch by ``normalisation_value``.
 
-    def pre_process_patch(self, patch):
-        # Apply CLAHE to the patch
-        new_patch = apply_clahe(patch, kernel_size=self.kernel_size, clip_limit=self.clip_limit)
+        Returns
+        -------
+        NDArray[np.floating]
+            The normalised patch (dtype follows the input).
+        """
+        return patch / normalisation_value
 
-        return new_patch
+    def pre_process_patch(self, patch: NDArray[np.generic]) -> NDArray[np.generic]:
+        """Apply CLAHE to the patch using the dataset's kernel size and clip limit.
+
+        Returns
+        -------
+        NDArray[np.generic]
+            The CLAHE-processed patch.
+        """
+        return apply_clahe(patch, kernel_size=self.kernel_size, clip_limit=self.clip_limit)
 
 
 class OmeZarrLabelDataSet(OmeZarrDataset):
-    """
-    Dataset class for loading vascular data from a zarr file. Includes labels.
+    """Dataset class for loading vascular data from a zarr file. Includes labels.
+
     Can generalize to 2D when the first index of the patch_size is 1.
     """
+
     label_data: da.Array
+    label_node_name: str
     normalise_label: bool
     max_label_value: int = 255
-    valid_indices: np.array
+    valid_indices: NDArray[np.int_]
+    percentage_empty: float = 0.01
+    filter_empty: bool = False
 
-    def __init__(self, zarr_path: str, label_node_name: str, patch_size: tuple = (32, 32, 32), device='cuda',
-                 pre_process=True, normalise: bool = True, normalisation_value: int | float = 65535, channel=0,
-                 normalise_label: bool = False, max_label_value: int = 255, filter_empty=True, rotate_patches=True):
-        super(OmeZarrLabelDataSet, self).__init__(zarr_path, patch_size, device, pre_process, normalise,
-                                                  normalisation_value, rotate_patches, channel)
-        self.label_data = da.from_zarr(self.zarr_path, component=f'labels/{label_node_name}/0')
+    def __init__(
+        self,
+        zarr_path: str,
+        label_node_name: str,
+        patch_size: tuple[int, int, int] = (32, 32, 32),
+        device: str | torch.device = "cuda",
+        pre_process: bool = True,
+        normalise: bool = True,
+        normalisation_value: int | float = 65535,
+        channel: int = 0,
+        z_range: tuple[int, int] | None = None,
+        normalise_label: bool = False,
+        max_label_value: int = 255,
+        filter_empty: bool = True,
+        rotate_patches: bool = True,
+        empty_percentage: float = 0.01,
+    ) -> None:
+        super().__init__(
+            zarr_path,
+            patch_size,
+            device,
+            pre_process,
+            normalise,
+            normalisation_value,
+            rotate_patches,
+            channel,
+            z_range,
+        )
+        self.filter_empty = filter_empty
+        self.label_node_name = label_node_name
+        self.label_data = da.from_zarr(
+            self.zarr_path,
+            component=_level0_component(self.zarr_path, group_path=f"labels/{label_node_name}"),
+        )
+        if len(self.label_data.shape) == 4:
+            self.label_data = self.label_data[channel]
+        if z_range is not None:
+            # If a z_range is provided, slice the label data accordingly
+            z_start, z_end = z_range
+            self.label_data = self.label_data[z_start:z_end]
         self.normalise_label = normalise_label
         self.max_label_value = max_label_value
+        self.percentage_empty = empty_percentage
 
         if filter_empty:
             self.get_valid_indices()
 
-    def __getitem__(self, idx):
-        patch_image = super(OmeZarrLabelDataSet, self).__getitem__(idx)
-        patch_label = self.load_patch(self.label_data, idx, False, normalise=self.normalise_label,
-                                      normalisation_value=self.max_label_value)
+    def __len__(self) -> int:
+        """Return the number of valid patches (filtered) or the full dataset length.
+
+        Returns
+        -------
+        int
+            The number of patches available for iteration.
+        """
+        if hasattr(self, "valid_indices") and self.filter_empty:
+            return len(self.valid_indices)
+        # If not filtering empty patches, return the full length
+        return super().__len__()
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load a (image, label) patch pair.
+
+        Parameters
+        ----------
+        idx : int
+            Dataset index of the patch to load.
+
+        Returns
+        -------
+        patch_image : torch.Tensor
+            The loaded image patch tensor.
+        patch_label : torch.Tensor
+            The loaded label patch tensor.
+        """
+        patch_image = super().__getitem__(idx)
+        patch_label = self.load_patch(
+            self.label_data,
+            idx,
+            False,
+            normalise=self.normalise_label,
+            normalisation_value=self.max_label_value,
+        )
         return patch_image, patch_label
 
-    def get_valid_indices(self):
-        """
-        Validate the patches in the dataset. This function is used to remove patches that are not suitable for training.
-        """
-        valid_indices = []
-        dataset_length = len(self) // 4
-        for idx in tqdm(range(dataset_length), desc='Validating patches', leave=False, total=dataset_length,
-                        unit='patches'):
-            patch = self[idx * 4][1]
-            if self.check_patch(patch):
-                valid_indices.append(idx)
+    def _process_patch(self, idx: int) -> bool:
+        """Classify one grid patch as valid for training.
 
-        valid_indices = np.array(valid_indices)
+        Defined as a method (not a closure inside ``get_valid_indices``) so
+        it pickles as a bound method and ``process_map`` can ship it to
+        spawned workers on start-method=spawn runtimes (macOS). The validity
+        bit travels back to the parent via the ``process_map`` return list,
+        not via a shared list mutated by forked workers (D-11 — forked-worker
+        list mutations are lost).
 
-        # Add 1% of the invalid patches to the valid patches to ensure training data includes empty patches but not too many
-        all_indexes = range(len(self))
-        invalid_indexes = list(set(all_indexes) - set(valid_indices))
-        invalid_indexes = invalid_indexes[:len(invalid_indexes) // 100]
-        valid_indices = np.concatenate([valid_indices, invalid_indexes])
-        valid_indices = np.sort(valid_indices)
+        ``idx`` is a GRID patch index (0..grid_product-1), not a dataset
+        index. When ``rotate_patches=True`` each grid patch occupies 4
+        consecutive dataset indices (4*grid_idx + 0..3) and ``load_patch``
+        divides the dataset index by 4, so ``self[idx * 4]`` resolves to
+        grid patch ``idx``. When ``rotate_patches=False`` the dataset index
+        maps 1:1 to a grid patch (no division in ``load_patch``), so
+        ``self[idx * 4]`` would resolve to grid patch ``idx * 4`` and skip
+        3 of every 4 grid patches -- use ``self[idx]`` instead.
+
+        Parameters
+        ----------
+        idx : int
+            Grid patch index to validate.
+
+        Returns
+        -------
+        bool
+            ``True`` if the patch is valid for training (non-empty).
+        """
+        patch_idx = idx * 4 if self.rotate_patches else idx
+        patch = self[patch_idx][1]
+        return bool(self.check_patch(patch))
+
+    def get_valid_indices(self) -> None:
+        """Validate the patches in the dataset.
+
+        Used to remove patches that are not suitable for training. Populates
+        ``self.valid_indices`` with the dataset indices of patches kept for
+        training (valid patches plus a small percentage of empty patches).
+
+        A disk cache (sidecar JSON next to the zarr file) skips the expensive
+        ``process_map`` validation on a cache hit. The cache key is a sha256
+        of ``(zarr_path, node_name, patch_size, filter_empty)`` plus the zarr
+        array metadata (shape, dtype, chunks) -- a metadata change invalidates
+        the cache (no stale indices, AGENTS section 2). No full-volume content
+        hash is computed (no re-materialization per training run, PERF-01d).
+        """
+        # Cache lookup: if a sidecar with a matching metadata hash exists,
+        # load valid_indices directly and skip the process_map validation.
+        cache_hash = _valid_indices_cache_key(
+            self.zarr_path,
+            self.label_node_name,
+            self.patch_size,
+            self.filter_empty,
+            self.label_data,
+        )
+        cached = _load_valid_indices_cache(self.zarr_path, cache_hash)
+        if cached is not None:
+            self.valid_indices = cached
+            return
+
+        # dataset_length is the number of GRID patches to validate. When
+        # rotate_patches=True the dataset length is grid_product * 4 (each
+        # grid patch occupies 4 rotation indices), so dividing by 4 yields
+        # grid_product. When rotate_patches=False the dataset length IS
+        # grid_product (1:1 mapping), so dividing by 4 would validate only
+        # every 4th grid patch -- use grid_product directly. len(self) here
+        # is the pre-filter length because valid_indices is not set yet
+        # (get_valid_indices runs during __init__ before valid_indices
+        # exists, so __len__ falls through to super().__len__()).
+        dataset_length = len(self) // 4 if self.rotate_patches else len(self)
+
+        # Use spawn (not fork) for the process pool. This module imports
+        # torch at the top level, and torch starts internal threads at import
+        # time. On Linux the default start method is fork; forking a
+        # multithreaded process deadlocks (the child inherits the threads in
+        # a broken state). Spawn creates a fresh interpreter with no
+        # inherited state, avoiding the deadlock. macOS defaults to spawn
+        # already, so this is a no-op there.
+        #
+        # The _lock kwarg is also created from the spawn context. tqdm's
+        # ensure_lock would otherwise create a lock from the default (fork)
+        # context, and passing a fork-context SemLock to a spawn-context
+        # ProcessPoolExecutor raises RuntimeError.
+        spawn_ctx = multiprocessing.get_context("spawn")
+        results = process_map(
+            self._process_patch,
+            range(dataset_length),
+            unit="patches",
+            desc="Validating patches",
+            position=0,
+            leave=True,
+            max_workers=max(1, cpu_count() - 2),
+            chunksize=100,
+            mp_context=spawn_ctx,
+            _lock=spawn_ctx.Lock(),
+        )
+
+        # ``results`` is one validity bit per GRID patch (length
+        # ``dataset_length`` == grid_product), so ``valid_grid`` and the
+        # invalid-patch sampling MUST stay in grid-index space
+        # (0..grid_product-1). The pre-fix code computed invalid patches from
+        # ``range(len(self))`` -- which is grid_product*4 when
+        # rotate_patches=True -- so the set difference included all rotation
+        # indices (grid_product..grid_product*4-1), and the subsequent
+        # ``valid_indices *= 4`` expansion multiplied those already-expanded
+        # dataset indices by 4 again, producing indices up to
+        # (grid_product*4-1)*4 -- far beyond the dataset length.
+        # ``__getitem__`` then called ``np.unravel_index(idx, grid_shape)``
+        # which silently wraps modularly, mapping to wrong grid patches
+        # (silent data corruption). Compute everything in grid-index space
+        # and expand once at the end.
+        grid_product = self.grid_shape[0] * self.grid_shape[1] * self.grid_shape[2]
+        valid_grid = np.array([i for i, is_valid in enumerate(results) if is_valid])
+
+        # Add a percentage of the invalid patches to the valid patches so
+        # training data includes some empty patches but not too many. Use a
+        # sorted set difference so the sampled empty patches are reproducible
+        # across Python versions and data orderings (set iteration order is
+        # hash-based and not guaranteed to be stable across interpreters).
+        invalid_grid = sorted(set(range(grid_product)) - set(valid_grid.tolist()))
+        invalid_grid = invalid_grid[: int(len(invalid_grid) * self.percentage_empty)]
+        valid_grid = np.concatenate([valid_grid, invalid_grid])
+        valid_grid = np.sort(valid_grid)
 
         if self.rotate_patches:
-            valid_indices *= 4
-            # Insert the rotations
-            valid_indices = np.concatenate([valid_indices, valid_indices + 1, valid_indices + 2, valid_indices + 3])
+            # Each grid patch occupies 4 consecutive dataset indices
+            # (4*grid_idx + 0..3); expand once, in grid-index space.
+            valid_indices = np.concatenate(
+                [valid_grid * 4, valid_grid * 4 + 1, valid_grid * 4 + 2, valid_grid * 4 + 3]
+            )
             valid_indices = np.sort(valid_indices)
+        else:
+            valid_indices = valid_grid
         self.valid_indices = valid_indices
 
-    def check_patch(self, patch):
-        """
-        Check if the patch is valid for training.
+        # Cache write: persist valid_indices atomically so the next dataset
+        # instance with the same metadata hash skips the process_map pass.
+        _save_valid_indices_cache(self.zarr_path, cache_hash, valid_indices)
+
+    def check_patch(self, patch: NDArray[np.generic]) -> bool:
+        """Check if the patch is valid for training (non-empty).
+
+        Returns
+        -------
+        bool
+            ``True`` if the patch has any non-zero pixel.
         """
         # Check if the patch is empty
-        if patch.max() > 0:
-            return True
-
-        return False
+        return bool(patch.max() > 0)

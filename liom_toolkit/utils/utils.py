@@ -1,14 +1,25 @@
-import os
+"""Cross-cutting helpers: even-number fixup, directory cleanup, PNG normalization."""
+
+from __future__ import annotations
+
+import pathlib
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 
 def fix_even(number: int) -> int:
-    """
-    Fix even numbers by adding 1
+    """Fix even numbers by adding 1.
 
-    :param number: The number to fix
-    :return: The fixed number
+    Parameters
+    ----------
+    number : int
+        The number to fix.
+
+    Returns
+    -------
+    int
+        The fixed number (``number + 1`` when ``number`` is even, else ``number``).
     """
     if number % 2 == 0:
         number += 1
@@ -16,26 +27,40 @@ def fix_even(number: int) -> int:
 
 
 def clean_dir(directory: str) -> None:
-    """
-    Remove default files in a directory.
+    """Remove default files in a directory.
 
-    :param directory: The directory to clean.
-    :type directory: str
+    Parameters
+    ----------
+    directory : str
+        The directory to clean.
     """
-    if os.path.exists(directory + '.DS_Store'):
-        os.remove(directory + '.DS_Store')
+    ds_store = pathlib.Path(directory) / ".DS_Store"
+    if ds_store.exists():
+        ds_store.unlink()
 
 
-def convert_to_png_for_saving(img: np.ndarray) -> np.ndarray:
-    """
-    Convert the array to be suitable for PNG saving with skimage.io.imsave.
+def convert_to_png_for_saving(img: ArrayLike) -> NDArray[np.uint8]:
+    """Convert the array to be suitable for PNG saving with imageio.v3.imwrite.
 
-    :param img: The image to convert
-    :type img: np.ndarray
-    :return: The converted image
-    :rtype: np.ndarray
+    Parameters
+    ----------
+    img : ArrayLike
+        The image to convert.
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        The converted image, normalized to ``[0, 255]`` and cast to ``uint8``.
+        A constant image (``max == min``) returns an all-zero array of the
+        same shape rather than dividing by zero.
     """
-    normalized_image = (img - np.min(img)) * (
-            255.0 / (np.max(img) - np.min(img)))
-    normalized_image = normalized_image.astype('uint8')
-    return normalized_image
+    img = np.asarray(img)
+    min_val = np.min(img)
+    max_val = np.max(img)
+    if max_val == min_val:
+        # Constant image: division would produce inf -> NaN -> 0 via
+        # implementation-defined uint8 cast. Return an explicit all-zero
+        # array instead (a constant image has no contrast to normalize).
+        return np.zeros_like(img, dtype=np.uint8)
+    normalized_image = (img - min_val) * (255.0 / (max_val - min_val))
+    return normalized_image.astype(np.uint8)

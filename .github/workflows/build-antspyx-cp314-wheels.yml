@@ -227,11 +227,14 @@ jobs:
           path: wheelhouse
 
       - name: Generate uv flat index (index.html)
+        env:
+          GH_RELEASE_BASE: "https://github.com/${{ github.repository }}/releases/download/antspyx-cp314"
         run: |
           set -euxo pipefail
           cd wheelhouse
           python3 - <<'PY'
           import os, html, hashlib
+          base = os.environ["GH_RELEASE_BASE"]
           files = sorted(f for f in os.listdir(".") if f.endswith(".whl"))
           assert files, "no wheels found"
           with open("index.html", "w") as f:
@@ -239,7 +242,13 @@ jobs:
               for fn in files:
                   data = open(fn, "rb").read()
                   digest = hashlib.sha256(data).hexdigest()
-                  f.write(f'<a href="{html.escape(fn)}#sha256={digest}" data-requires-python="&gt;=3.14">{html.escape(fn)}</a><br/>\n')
+                  # Absolute URLs: GitHub release asset URLs 302-redirect to a
+                  # signed Azure CDN URL with query params. Relative URLs in the
+                  # index would resolve against that CDN URL (with its query
+                  # string) and break, so uv would fetch garbage instead of the
+                  # wheel. Absolute URLs ensure each wheel hits the correct 302.
+                  url = f"{base}/{fn}"
+                  f.write(f'<a href="{html.escape(url)}#sha256={digest}" data-requires-python="&gt;=3.14">{html.escape(fn)}</a><br/>\n')
               f.write("</body>\n</html>\n")
           print(f"indexed {len(files)} wheels")
           PY
