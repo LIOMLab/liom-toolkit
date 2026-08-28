@@ -8,6 +8,13 @@ root logger, which propagates records from the ``liom_toolkit`` logger via
 its ``NullHandler``. Calling ``configure_logging`` from a notebook while a
 CLI is also running would double-log; pick one pattern per process.
 
+``configure_logging`` is idempotent: a second call removes the
+``StreamHandler`` installed by the first call (tagged with
+``_liom_toolkit_handler``) before attaching a new one, so repeated calls in
+a notebook iteration loop do not stack handlers and double-log. The
+``NullHandler`` attached at import time and any user-installed handlers are
+preserved.
+
 Example
 -------
 ::
@@ -55,7 +62,17 @@ def configure_logging(level: int | str = logging.INFO, stream: TextIO | None = N
             raise TypeError(f"Resolved log level is not an integer: {level!r}")
         level = resolved
     logger = logging.getLogger("liom_toolkit")
+    # Remove handlers added by a previous configure_logging call so
+    # repeated calls do not stack handlers (a common notebook iteration
+    # pattern — without this, every record is emitted once per stacked
+    # handler). Only handlers we tagged ourselves are removed; the
+    # NullHandler attached at import time and any user-installed handlers
+    # are preserved.
+    for h in list(logger.handlers):
+        if getattr(h, "_liom_toolkit_handler", False):
+            logger.removeHandler(h)
     handler = logging.StreamHandler(stream or sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    handler._liom_toolkit_handler = True
     logger.addHandler(handler)
     logger.setLevel(level)
