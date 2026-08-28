@@ -22,6 +22,7 @@ from .dask_client import (
 from .io import (
     create_and_write_mask,
     extract_zarr_to_image,
+    generate_label_color_dict_mask,
     load_node_by_name,
     load_zarr,
     save_atlas_to_zarr,
@@ -48,6 +49,7 @@ __all__ = [
     "dask_client_manager",
     "download_allen_template",
     "extract_zarr_to_image",
+    "generate_label_color_dict_mask",
     "is_step_done",
     "load_node_by_name",
     "load_zarr",
