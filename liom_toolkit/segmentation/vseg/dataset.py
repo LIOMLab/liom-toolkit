@@ -110,6 +110,13 @@ def _valid_indices_cache_key(
     str
         The hex sha256 digest of the canonicalized cache key.
     """
+    # Cache key is METADATA-only (shape/dtype/chunks), NOT content. A
+    # same-shape content edit to the label zarr is not detected and stale
+    # valid_indices are returned. See the docstring above — users editing
+    # label content in place must delete the .valid_indices_cache.json
+    # sidecar manually. A content-based hash would require a full-volume
+    # re-materialization per training run (defeating PERF-01d), so the
+    # trade-off is documented rather than closed.
     key = {
         "zarr_path": str(pathlib.Path(zarr_path).resolve()),
         "node_name": node_name,
