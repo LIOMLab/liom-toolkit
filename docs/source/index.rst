@@ -78,6 +78,7 @@ edits or hardcoded lab config.
    package_structure
    notebooks/index
    reference/autoapi/index
+   changelog
 
 
 Indices and tables
