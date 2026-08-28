@@ -21,10 +21,10 @@ dependencies = [
     "tqdm>=4.70.0",
     'scikit-image>=0.26',
     # scipy.ndimage is used directly in stats.py & plane_segmentation.py.
-    # antspyx (3.12-only, see [antspy] extra) caps scipy<1.16, so on 3.12 the
-    # lock pins 1.15.x (has cp312 wheels). On 3.14 antspyx is excluded, so we
-    # require scipy>=1.16.1 there — the first release with cp314 macOS arm64
-    # wheels — to avoid a source build (no OpenBLAS in the default env).
+    # On 3.12, antspyx 0.6.3 (PyPI) caps scipy<1.16, so the lock pins 1.15.x
+    # there (has cp312 wheels). On 3.14, antspyx 0.6.4 (from this repo's
+    # antspyx-cp314 wheel release) removed the cap, so we require scipy>=1.16.1
+    # — the first release with cp314 macOS arm64 wheels.
     'scipy>=1.11.4; python_version < "3.14"',
     'scipy>=1.16.1; python_version >= "3.14"',
     'imageio>=2.30',
@@ -65,11 +65,11 @@ ai = [
     "scikit-learn>=1.9.0",
 ]
 antspy = [
-    # antspyx 0.6.3 (latest) ships no cp314 wheel (max cp313) and caps scipy<1.16,
-    # which conflicts with the cp314-wheeled scipy (>=1.16) needed on Python 3.14.
-    # Restrict antspyx to <3.14 so the 3.14 lock leg resolves scipy to a prebuilt
-    # wheel instead of a source build. Registration is CI-tested on the 3.12+all leg.
-    'antspyx>=0.6.3; python_version < "3.14"',
+    # antspyx 0.6.4 (built from ANTsX/ANTsPy main) removed the scipy<1.16 cap
+    # that was in 0.6.3. On 3.12 it installs from PyPI (0.6.3 has cp312 wheels);
+    # on 3.14 it installs from this repo's antspyx-cp314 GitHub Release via the
+    # uv flat index in [tool.uv.sources] (upstream has no cp314 wheels on PyPI).
+    'antspyx>=0.6.3',
 ]
 
 all = [
@@ -544,4 +544,25 @@ rules = { possibly-unresolved-reference = "ignore", unresolved-attribute = "igno
 
 [tool.setuptools.package-data]
 liom_toolkit = ["py.typed"]
+
+# antspyx cp314 wheels are not published on PyPI (upstream's build matrix stops
+# at cp313, and the latest PyPI release 0.6.3 caps scipy<1.16). This repo's
+# "Build antspyx cp314 wheels" GitHub Actions workflow builds them from
+# ANTsX/ANTsPy main and attaches them (plus a generated index.html) to the
+# antspyx-cp314 GitHub Release. uv consumes that index.html as a flat index so
+# the 3.14 CI leg can install a prebuilt antspyx instead of source-building.
+# The index is explicit (only used for antspyx) so it never shadows PyPI.
+[[tool.uv.index]]
+name = "antspyx-cp314"
+url = "https://github.com/LIOMLab/liom-toolkit/releases/download/antspyx-cp314/index.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+# On Python 3.14, pull antspyx from the fork's cp314 wheel release. On <3.14
+# antspyx still comes from PyPI (0.6.3, which has cp312 wheels). The source
+# override is marker-gated so the 3.12 lock leg is unaffected.
+antspyx = [
+  { index = "antspyx-cp314", marker = "python_version >= '3.14'" },
+]
 
