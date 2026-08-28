@@ -103,6 +103,12 @@ def convert_hdf5_to_nifti(hdf5_file: str, nifti_file: str) -> None:
     data = load_hdf5(hdf5_file)
 
     logger.info("Saving...")
+    # BOUNDARY-REQUIRED materialization: nib.Nifti1Image requires a real
+    # numpy array, not a dask array. The full volume is materialized here
+    # because nibabel does not support chunked/streaming NIfTI writes.
+    # This is a genuine compute boundary (not a laziness-defeating
+    # .compute()) — large volumes will need a chunked writer to avoid OOM,
+    # tracked as a known limitation.
     data = data.compute()
     ni_img = nib.Nifti1Image(data, affine=np.eye(4), dtype=np.uint16)
     nib.save(ni_img, nifti_file)
