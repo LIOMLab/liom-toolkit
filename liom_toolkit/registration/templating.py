@@ -668,10 +668,11 @@ def build_template_for_resolution(
                 moving=template,
                 transformlist=template_transform["fwdtransforms"],
             )
-        # Mask template to remove noise
+        # Mask template to remove noise. segment_3d operates on numpy arrays
+        # (it indexes with boolean masks); convert the ANTsImage to numpy first.
         from ..segmentation import segment_3d
 
-        template_mask = segment_3d(template)
+        template_mask = segment_3d(template.numpy())
         new_template = template * template_mask
 
         # Apply properties after multiplication
@@ -741,8 +742,11 @@ def load_volume_for_registration(
         mask.set_direction(direction)
     brain_volume = ants.reorient_image2(brain_volume, "RAS")
     mask = ants.reorient_image2(mask, "RAS")
-    # Fix for physical shape being reset after multiplication
-    brain_volume.physical_shape = mask.physical_shape
+    # Fix for physical shape being reset after multiplication. physical_shape
+    # is a read-only property in ANTsPy >= 0.5 (computed as spacing * shape);
+    # the shape is unchanged by the mask multiply, so restoring the mask's
+    # spacing restores the physical shape.
+    brain_volume.set_spacing(mask.spacing)
     return brain_volume, mask
 
 
