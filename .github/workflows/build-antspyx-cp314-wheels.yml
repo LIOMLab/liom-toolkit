@@ -178,7 +178,38 @@ jobs:
           path: ./wheelhouse/*.whl
           if-no-files-found: error
 
-      - name: Attach wheels to antspyx-cp314 release
+  publish_release:
+    name: Publish wheels + flat index to antspyx-cp314 release
+    runs-on: ubuntu-latest
+    needs: build_wheels
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: wheels-cp314-*
+          merge-multiple: true
+          path: wheelhouse
+
+      - name: Generate uv flat index (index.html)
+        run: |
+          set -euxo pipefail
+          cd wheelhouse
+          python3 - <<'PY'
+          import os, html, hashlib
+          files = sorted(f for f in os.listdir(".") if f.endswith(".whl"))
+          assert files, "no wheels found"
+          with open("index.html", "w") as f:
+              f.write("<!DOCTYPE html>\n<html>\n<body>\n")
+              for fn in files:
+                  data = open(fn, "rb").read()
+                  digest = hashlib.sha256(data).hexdigest()
+                  f.write(f'<a href="{html.escape(fn)}#sha256={digest}" data-requires-python="&gt;=3.14">{html.escape(fn)}</a><br/>\n')
+              f.write("</body>\n</html>\n")
+          print(f"indexed {len(files)} wheels")
+          PY
+          ls -la index.html *.whl
+
+      - name: Attach wheels + index to antspyx-cp314 release
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           allowUpdates: true
@@ -189,6 +220,6 @@ jobs:
           body: |
             Prebuilt cp314 (Python 3.14) wheels for antspyx, built from ANTsX/ANTsPy ${{ inputs.antspy_ref }}.
 
-            These exist because upstream has not added cp314 to its build matrix and the latest PyPI release (0.6.3) caps scipy<1.16. Consumed by liom-toolkit via a uv flat index pointing at this release's assets.
-          artifacts: ./wheelhouse/*.whl
+            These exist because upstream has not added cp314 to its build matrix and the latest PyPI release (0.6.3) caps scipy<1.16. Consumed by liom-toolkit via a uv flat index pointing at this release's index.html asset.
+          artifacts: wheelhouse/*.whl,wheelhouse/index.html
           token: ${{ secrets.GITHUB_TOKEN }}
