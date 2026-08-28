@@ -74,9 +74,12 @@ need:
 
    .. note::
 
-      ``antspyx`` publishes wheels for CPython 3.12 only — there is no
-      ``cp314`` wheel. If you run Python 3.14, install the toolkit into a
-      3.12 environment (conda or pyenv) before adding the ``antspy`` extra.
+      ``antspyx`` publishes wheels for CPython 3.12 on PyPI. For Python 3.14,
+      this repo publishes prebuilt ``cp314`` wheels via a GitHub Release and
+      consumes them through a uv flat index (``[tool.uv.sources]`` in
+      ``pyproject.toml``). If you install with ``uv``, 3.14 works
+      automatically; with plain ``pip`` on 3.14 you need to point pip at the
+      flat index URL documented in ``pyproject.toml``.
 
 ``all``
    Convenience meta-extra that pulls in both ``ai`` and ``antspy``.

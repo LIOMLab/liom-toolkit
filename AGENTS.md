@@ -95,11 +95,14 @@ library code. `from __future__ import annotations` is present in most modules
 and is load-bearing for 3.12 forward-ref support (a no-op on 3.14) — do not
 remove it. Ruff `target-version = "py312"` is load-bearing for the same reason.
 
-**antsypy has no cp314 wheel.** Registration is fully testable on 3.12 (the CI
-`3.12+all` leg installs antspyx and runs real registration tests). On 3.14 the
-`3.14+all` leg is best-effort (`continue-on-error`) and installs only the `ai`
-extras; registration tests there are mock-only. The lazy-import guard ensures
-the package still imports without ants on 3.14.
+**antspyx on 3.14 uses prebuilt cp314 wheels.** Upstream antspyx has no cp314
+wheel; this repo builds them from ANTsX/ANTsPy main via a manual GitHub Actions
+workflow (`build-antspyx-cp314-wheels.yml`) and publishes them to the
+`antspyx-cp314` GitHub Release. The `[tool.uv.sources]` marker-gated override
+pulls antspyx from that flat index on 3.14, so both CI legs (`3.12+all`,
+`3.14+all`) install antspyx and run real registration tests with the 60%
+coverage gate enforced. The lazy-import guard still ensures the package imports
+without ants installed.
 
 ## 4. uv — environment, lock, and dependency management
 
@@ -192,14 +195,13 @@ uv run ty check                       # type check
 pytest config lives in `pyproject.toml` under `[tool.pytest.ini_options]`:
 `testpaths = ["tests"]`, `--strict-markers`, pytest-xdist parallelism
 (`-n auto --dist=loadscope`), and bare `--cov` (coverage source/report/gate
-read from `[tool.coverage.*]`; `fail_under = 60`). CI overrides the gate to 0
-on the 3.14 legs via `--cov-fail-under=0` because `importorskip`-gated tests
-skip there. Do NOT add a zero-value `--cov-fail-under` in `addopts` —
-pytest-cov uses the last value and `addopts` is prepended to the CLI, so a
-zero would defeat the ratchet everywhere.
+read from `[tool.coverage.*]`; `fail_under = 60`). Both CI legs (`3.12+all`,
+`3.14+all`) enforce the 60% floor. Do NOT add a zero-value
+`--cov-fail-under` in `addopts` — pytest-cov uses the last value and `addopts`
+is prepended to the CLI, so a zero would defeat the ratchet everywhere.
 
 **Markers** (registered, `--strict-markers`): `@pytest.mark.ai` (requires the
-`ai` extra / torch), `@pytest.mark.antspy` (requires antspyx; 3.12-only),
+`ai` extra / torch), `@pytest.mark.antspy` (requires antspyx),
 `@pytest.mark.slow`.
 
 **Deprecation filters are targeted, not blanket.** The only
@@ -333,7 +335,7 @@ tests/                         pytest suite (mirrors package layout)
   test_<subpkg>/test_<module>.py
 docs/                          Sphinx documentation (published to readthedocs)
   source/conf.py               sphinx-autoapi + autodoc config
-.github/workflows/ci.yml       CI: lint (ruff+ty) + test matrix (3.12 gating, 3.14 best-effort)
+.github/workflows/ci.yml       CI: lint (ruff+ty) + test matrix (3.12+all, 3.14+all — both gating, 60% cov)
 .github/workflows/release.yml  tag-triggered PyPI publish + GitHub Release
 .readthedocs.yaml              ReadTheDocs build config (native uv, Python 3.14)
 pyproject.toml                 package metadata, deps, extras, console scripts, pytest, ruff, ty

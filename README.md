@@ -35,7 +35,7 @@ For the heavy/optional dependencies, use the extras:
 
 ```bash
 pip install "liom-toolkit[ai]"        # torch/timm/einops/wandb — for the vseg U-Net
-pip install "liom-toolkit[antspy]"    # antspyx — for registration (Python 3.12 only)
+pip install "liom-toolkit[antspy]"    # antspyx — for registration
 pip install "liom-toolkit[all]"       # everything
 ```
 
@@ -45,31 +45,24 @@ The recommended way to work on the package itself is with
 ```bash
 uv sync                    # core package + dev tools (pytest, ruff, sphinx)
 uv sync --extra ai         # add the vseg deep-learning stack
-uv sync --extra antspy     # add antspyx (registration; Python 3.12 only)
+uv sync --extra antspy     # add antspyx (registration)
 uv sync --all-extras       # everything (heavy)
 ```
 
 ## Supported Python versions
 
-LIOM Toolkit supports **Python 3.12 and 3.14** for the core package
-(conversion, segmentation, visualization, stats, utils, and the CLIs).
+LIOM Toolkit supports **Python 3.12 and 3.14** for the full package,
+including registration. The core package (conversion, segmentation,
+visualization, stats, utils, and the CLIs) works on both versions with
+only the default dependencies.
 
 The **registration** module (`liom_toolkit.registration`) depends on
-[`antspyx`](https://github.com/ANTsX/ANTsPy) (ANTsPy), which is **supported on
-Python 3.12 only**. antspyx does not currently publish `cp314` wheels, so on
-Python 3.14 installing it requires a source build (ITK/VTK C++ compile) that
-frequently fails. **Users who need registration should use Python 3.12.**
-
-On Python 3.14:
-
-- the `antspy` extra is not installed in CI and is expected to fail to install
-  locally;
-- registration tests are mocked (`-m "not antspy"` deselects the real
-  `@pytest.mark.antspy` round-trip tests; the unmarked mock-orchestration tests
-  still run);
-- all other modules work as on 3.12.
-
-3.14 support for registration is pending upstream `cp314` wheels from antspyx.
+[`antspyx`](https://github.com/ANTsX/ANTsPy) (ANTsPy). On Python 3.12 it
+installs from PyPI (cp312 wheel). On Python 3.14 antspyx has no upstream
+cp314 wheel, so this repo publishes prebuilt cp314 wheels via a GitHub
+Actions workflow and consumes them through a uv flat index
+(`[tool.uv.sources]` in `pyproject.toml`). The `antspy` extra works on
+both versions.
 
 ## Command-line tools
 
