@@ -106,7 +106,9 @@ def test_align_volume_to_allen_round_trip(synthetic_ants_image):
     Smoke-only (D-02): asserts the public API runs without error and the
     internal ants.registration() was invoked (the call succeeds on 0.6.3 with
     use_legacy_histogram_matching=False wired through). No numerical oracle.
-    The 8^3 volume keeps the default SyN sub-second.
+    Uses resolution=100 (the 100-micron Allen template is ~1.5MB vs ~800MB
+    at 25 micron) so the download + SyN registration stays fast; the 8^3
+    volume keeps the SyN deformation itself sub-second.
     """
     pytest.importorskip("ants")  # body-level per pytest #9542
     import ants
@@ -120,7 +122,7 @@ def test_align_volume_to_allen_round_trip(synthetic_ants_image):
         origin=(0, 0, 0),
         direction=np.eye(3),
     )
-    aligned = align_volume_to_allen(img, mask, resolution=25)
+    aligned = align_volume_to_allen(img, mask, resolution=100)
     assert aligned is not None
     # ANTsImage instances expose .numpy()
     assert hasattr(aligned, "numpy")
