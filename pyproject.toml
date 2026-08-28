@@ -129,6 +129,7 @@ testpaths = ["tests"]
 addopts = [
     "-ra",
     "-n", "auto",
+    "--maxprocesses=6",
     "--dist=loadscope",
     "--strict-markers",
     "--cov=liom_toolkit",
@@ -140,6 +141,12 @@ addopts = [
     # coverage gate here: pytest-cov uses the last --cov-fail-under value and
     # addopts is prepended to the CLI, so a zero in addopts would defeat the
     # ratchet everywhere.
+    # --maxprocesses=6 caps xdist workers: -n auto spawns one worker per CPU
+    # (10 on the dev box), but each worker pays full interpreter startup +
+    # torch/dask/zarr imports (~1.3s). On a now-fast suite the per-worker
+    # overhead dominates past ~6 workers. The cap does not reduce workers
+    # below CPU count on smaller machines (CI 2-4 core runners get -n auto
+    # = their core count, unaffected by the cap).
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
