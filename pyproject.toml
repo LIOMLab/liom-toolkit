@@ -20,6 +20,13 @@ keywords = ["bioinformatics", "neuroinformatics", "lightsheet", "microscopy", "l
 dependencies = [
     "tqdm>=4.70.0",
     'scikit-image>=0.26',
+    # scipy.ndimage is used directly in stats.py & plane_segmentation.py.
+    # antspyx (3.12-only, see [antspy] extra) caps scipy<1.16, so on 3.12 the
+    # lock pins 1.15.x (has cp312 wheels). On 3.14 antspyx is excluded, so we
+    # require scipy>=1.16.1 there — the first release with cp314 macOS arm64
+    # wheels — to avoid a source build (no OpenBLAS in the default env).
+    'scipy>=1.11.4; python_version < "3.14"',
+    'scipy>=1.16.1; python_version >= "3.14"',
     'imageio>=2.30',
     'ome-zarr>=0.18.0',
     "nibabel>=5.4.2",
@@ -58,7 +65,11 @@ ai = [
     "scikit-learn>=1.9.0",
 ]
 antspy = [
-    'antspyx>=0.6.3',
+    # antspyx 0.6.3 (latest) ships no cp314 wheel (max cp313) and caps scipy<1.16,
+    # which conflicts with the cp314-wheeled scipy (>=1.16) needed on Python 3.14.
+    # Restrict antspyx to <3.14 so the 3.14 lock leg resolves scipy to a prebuilt
+    # wheel instead of a source build. Registration is CI-tested on the 3.12+all leg.
+    'antspyx>=0.6.3; python_version < "3.14"',
 ]
 
 all = [
