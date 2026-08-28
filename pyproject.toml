@@ -130,7 +130,8 @@ addopts = [
     "-ra",
     "-n", "auto",
     "--maxprocesses=6",
-    "--dist=loadscope",
+    "--dist=load",
+    "--max-worker-restart=0",
     "--strict-markers",
     "--cov=liom_toolkit",
     "--cov-report=term-missing",
@@ -146,18 +147,29 @@ addopts = [
     # torch/dask/zarr imports (~1.3s), and on a now-fast suite the per-worker
     # overhead dominates past ~6 workers. The cap does not reduce workers
     # below CPU count on smaller machines (CI 2-4 core runners get -n auto
-    # = their core count, unaffected by the cap). --dist=loadscope groups
-    # tests by module so each worker imports fewer modules.
+    # = their core count, unaffected by the cap).
+    #
+    # --dist=load (xdist default) dynamically sends pending tests to idle
+    # workers. Benchmarked against loadscope/loadfile/worksteal: load ~11.9s
+    # > loadscope ~12.9s > loadfile ~13.0s > worksteal ~15.0s. loadscope's
+    # module-pinning only helps when modules own expensive module/class
+    # fixtures that must stay set up on one worker; this suite has none (one
+    # trivial lazy-import module fixture, zero session fixtures) and tests
+    # are spread across many small modules, so dynamic balancing wins.
+    #
+    # --max-worker-restart=0 disables xdist's silent worker-restart (default
+    # up to 4 restarts), so a crashed worker fails the run loudly instead of
+    # masking a real failure. Matches the project's explicit-failure rule.
     #
     # pytest-parallex was evaluated and rejected for this suite:
     #  - fork mode segfaults on macOS (cv2/SimpleITK/torch pull in Apple
     #    frameworks whose ObjC +initialize trap is not disarmable from inside
     #    a running process — parallex's own fork-safety docs confirm this).
     #  - process mode is fresh interpreters like xdist but hardcodes
-    #    round-robin scheduling with no loadscope equivalent, so it cannot
-    #    match xdist's module-grouped scheduling (~17s vs ~12s here).
-    #    parallex's benchmarks page states fork "is not a CI play" — the win
-    #    is a flat ~1.5-2.3s for the local inner loop only.
+    #    round-robin scheduling with no load equivalent, so it cannot match
+    #    xdist's dynamic balancing (~17s vs ~12s here). parallex's benchmarks
+    #    page states fork "is not a CI play" — the win is a flat ~1.5-2.3s
+    #    for the local inner loop only.
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
