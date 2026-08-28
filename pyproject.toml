@@ -134,6 +134,15 @@ Changelog = "https://github.com/LIOMLab/liom-toolkit/blob/main/CHANGELOG.md"
 version_file = "liom_toolkit/_version.py"
 write_to_source = true
 
+# The repo also carries a non-version tag (antspyx-cp314, used by the
+# build-antspyx-cp314-wheels workflow to attach wheel release assets).
+# Without filtering, git describe picks it up as the nearest tag and
+# setuptools-scm raises ValueError because it has no dotted version.
+# tag.strict makes git describe only consider tags with at least one dot
+# (e.g. v1.0, 0.8.0), excluding antspyx-cp314.
+[tool.setuptools_scm.tag]
+strict = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
