@@ -526,6 +526,10 @@ python-version = "3.12"   # match ruff target-version (>=3.12 floor)
 #     not a declared dependency (visualization is optional).
 #   - allensdk.**: deprecated, not installable on Python 3.12+; only
 #     referenced in the test fixture regenerate.py (one-off oracle script).
+#   - SimpleITK.**: native C++ bindings, no py.typed, no stubs; moved into the
+#     [seg] extra (D-01) so it is absent from the core-only lint env. ty can't
+#     resolve it statically; replacing with Any avoids the unresolved-import
+#     error while the runtime try/except guard (D-05) gives the honest signal.
 [tool.ty.analysis]
 replace-imports-with-any = [
     "ants.**",
@@ -535,6 +539,7 @@ replace-imports-with-any = [
     "sklearn.**",
     "matplotlib.**",
     "allensdk.**",
+    "SimpleITK.**",
 ]
 
 [tool.ty.terminal]
