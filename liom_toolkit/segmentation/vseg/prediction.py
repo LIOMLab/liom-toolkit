@@ -229,7 +229,12 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         and the index-to-grid mapping in ``get_patch_coordinates`` only
         covers the unrotated grid (so iterating ``range(len(dataset))``
         would index past ``grid_shape`` and raise, or silently wrap to
-        wrong grid patches on older NumPy).
+        wrong grid patches on older NumPy). Also raised if the dataset
+        was constructed with ``filter_empty=True`` -- ``__getitem__`` then
+        maps ``idx`` through ``valid_indices`` while
+        ``get_patch_coordinates`` uses the unmapped ``idx``, so the
+        prediction for patch ``valid_indices[idx]`` would be written to
+        the location of patch ``idx`` (silent wrong-data).
     """
     try:
         import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
@@ -243,6 +248,23 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
             "(rotation is a training augmentation, not meaningful for "
             "inference). Construct the dataset with rotate_patches=False "
             f"before calling predict_volume. Got rotate_patches={dataset.rotate_patches}."
+        )
+    # filter_empty remaps dataset[idx] through valid_indices[idx] (so the
+    # loaded patch is grid patch valid_indices[idx]), but
+    # get_patch_coordinates(idx) uses the UNMAPPED idx (so the write
+    # location is grid patch idx). The prediction for patch
+    # valid_indices[idx] would be written to the location of patch idx --
+    # silent wrong-data, the dominant failure mode this package targets.
+    # Reject it explicitly, mirroring the rotate_patches guard above.
+    if getattr(dataset, "filter_empty", False):
+        raise ValueError(
+            "predict_volume requires filter_empty=False on the dataset "
+            "(filter_empty remaps indices through valid_indices, but "
+            "get_patch_coordinates uses the unmapped index -- the "
+            "prediction for patch valid_indices[idx] would be written to "
+            "the location of patch idx, producing silent wrong-data). "
+            "Construct an OmeZarrDataset (not OmeZarrLabelDataSet) or set "
+            f"filter_empty=False for prediction. Got filter_empty={dataset.filter_empty}."
         )
     # Normalize dask chunks (tuple of tuples per-dimension) to a flat chunk
     # shape tuple for zarr. dask.array.core.Array.chunksize already does this,
