@@ -81,12 +81,23 @@ def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
 
+    # Boundary validators (D-01): surface bad values at the argparse boundary
+    # with an actionable exit-2 message instead of letting them flow into the
+    # domain callee and produce a confusing deep traceback. parser.error exits
+    # 2 — never use assert for validation (it is stripped under python -O).
+    if args.local_threshold_size % 2 == 0:
+        parser.error(
+            f"--local-threshold-size must be odd, got {args.local_threshold_size}"
+        )
+
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(levelname)s %(name)s: %(message)s",
     )
 
     input_path = Path(args.input_file)
+    if not input_path.exists():
+        parser.error(f"input file does not exist: {args.input_file}")
     name = args.name if args.name is not None else input_path.stem
     image = np.asarray(iio.imread(str(input_path)), dtype=np.float64)
 
