@@ -16,6 +16,7 @@ the dask-jobqueue-native model (D-04c). Callers control it by choosing
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -118,7 +119,19 @@ def create_slurm_cluster(
     cluster.scale(jobs=n_workers)
     client = Client(cluster)
     # Readiness — no silent fallback. Let TimeoutError/OSError propagate; the
-    # caller decides retry/abort. The cluster is returned so the caller can
-    # close it on failure.
-    client.wait_for_workers(n_workers, timeout=timeout)
+    # caller decides retry/abort. On failure the cluster + client are closed
+    # here before re-raising — otherwise the caller never receives a reference
+    # to them (the function raises before returning the tuple) and the SLURM
+    # jobs stay submitted while the dask objects leak (open sockets, worker
+    # processes). The cleanup closes use contextlib.suppress with the specific
+    # exception types close() raises on a broken cluster (AGENTS §2: no bare
+    # except / except Exception).
+    try:
+        client.wait_for_workers(n_workers, timeout=timeout)
+    except (TimeoutError, OSError):
+        with contextlib.suppress(OSError, RuntimeError):
+            client.close()
+        with contextlib.suppress(OSError, RuntimeError):
+            cluster.close()
+        raise
     return cluster, client
