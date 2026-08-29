@@ -253,11 +253,28 @@ def evaluate(
             # Stack each (sum, count) pair into a 2-element tensor, all-reduce
             # with ReduceOp.SUM, then unpack. count is an int tensor so the
             # reduce sums the per-shard counts into the global count.
-            loss_pair = torch.tensor([loss_sum, float(loss_count)], dtype=torch.float64)
-            f1_pair = torch.tensor([f1_sum, float(f1_count)], dtype=torch.float64)
-            acc_pair = torch.tensor([accuracy_sum, float(accuracy_count)], dtype=torch.float64)
-            jac_pair = torch.tensor([jaccard_sum, float(jaccard_count)], dtype=torch.float64)
-            rec_pair = torch.tensor([recall_sum, float(recall_count)], dtype=torch.float64)
+            #
+            # The tensors MUST live on ``device`` (the same device the process
+            # group backend binds to). NCCL is CUDA-only — an all-reduce on a
+            # CPU tensor under NCCL raises "No backend type associated with
+            # device type cpu". gloo handles CPU, but selecting the backend by
+            # CUDA availability (training.py DDP entry) means a CUDA run uses
+            # NCCL, so the reduce tensors must be CUDA. Pinning them to
+            # ``device`` makes both backends work (gloo on CPU gets CPU
+            # tensors, NCCL on CUDA gets CUDA tensors).
+            loss_pair = torch.tensor(
+                [loss_sum, float(loss_count)], dtype=torch.float64, device=device
+            )
+            f1_pair = torch.tensor([f1_sum, float(f1_count)], dtype=torch.float64, device=device)
+            acc_pair = torch.tensor(
+                [accuracy_sum, float(accuracy_count)], dtype=torch.float64, device=device
+            )
+            jac_pair = torch.tensor(
+                [jaccard_sum, float(jaccard_count)], dtype=torch.float64, device=device
+            )
+            rec_pair = torch.tensor(
+                [recall_sum, float(recall_count)], dtype=torch.float64, device=device
+            )
             for pair in (loss_pair, f1_pair, acc_pair, jac_pair, rec_pair):
                 dist.all_reduce(pair, op=dist.ReduceOp.SUM)
             loss_sum = float(loss_pair[0].item())
