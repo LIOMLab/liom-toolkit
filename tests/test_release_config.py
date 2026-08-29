@@ -371,6 +371,54 @@ class TestReleaseWorkflow:
             f"release.yml is missing the 'test' job (CI gate). Present jobs: {sorted(jobs)!r}"
         )
 
+    def test_release_notes_extraction_yields_1_1_0_section(self) -> None:
+        """The release.yml awk extraction script must extract a NON-EMPTY
+        block for the v1.1.0 tag whose first non-empty line is the
+        ``## [1.1.0]`` header.
+
+        release.yml (the ``Extract changelog section`` step) runs awk over
+        CHANGELOG.md to populate the GitHub Release ``body_path``. The
+        version is the git tag with the leading ``v`` stripped; the awk
+        ``index($0,"## ["ver)==1`` prefix match means ``ver="1.1"`` matches
+        ``## [1.1.0]``. This is the config-as-data guard that the 1.1.0
+        release notes will actually populate the GitHub Release body when
+        the v1.1.0 tag is cut — a malformed header or missing section
+        would silently produce empty release notes (T-10-03).
+
+        Runs the EXACT awk script committed in release.yml via subprocess
+        (mirroring the ``test_gitignore_version_file`` subprocess pattern
+        with ``capture_output=True, check=False`` and asserts on
+        returncode/stdout). ``awk`` is invoked from PATH.
+        """
+        # The exact awk program from release.yml's "Extract changelog
+        # section" step (lines 112-125). Keep it in sync with that step.
+        awk_program = (
+            'index($0,"## ["ver)==1{flag=1} /^## \\[/{if(flag){if(first){exit}; first=1}} flag'
+        )
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]  # awk program is a committed-config literal, not untrusted input
+            ["awk", "-v", "ver=1.1", awk_program, "CHANGELOG.md"],  # ruff: ignore[start-process-with-partial-path]  # awk is on PATH
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            "awk extraction of the 1.1.0 changelog section failed. "
+            f"returncode={result.returncode}, "
+            f"stderr={result.stderr.decode().strip()!r}"
+        )
+        stdout = result.stdout.decode("utf-8")
+        assert stdout.strip(), (
+            "awk extraction of the 1.1.0 changelog section produced EMPTY "
+            "output — the release.yml GitHub Release body would be empty "
+            "when the v1.1.0 tag is cut (T-10-03)."
+        )
+        first_line = next((ln for ln in stdout.splitlines() if ln.strip()), "")
+        assert first_line.startswith("## [1.1.0]"), (
+            "awk extraction of the 1.1.0 changelog section must start with "
+            "the '## [1.1.0]' header (the release notes body). First "
+            f"non-empty line was: {first_line!r}"
+        )
+
 
 class TestCiNoPublish:
     """REL-01-6: the publish job has been removed from ci.yml.
@@ -414,6 +462,53 @@ class TestCiNoPublish:
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 DOCS_CHANGELOG = REPO_ROOT / "docs" / "source" / "changelog.md"
 INDEX_RST = REPO_ROOT / "docs" / "source" / "index.rst"
+
+
+def _changelog_sections() -> list[tuple[str, str]]:
+    """Parse CHANGELOG.md into ordered ``(header, body)`` sections split on
+    ``## [`` release headers.
+
+    Each section is the full ``## [x.y.z] - date`` header line plus the body
+    lines up to (but not including) the next ``## [`` header. The preamble
+    above the first ``## [`` header is discarded. This is config-as-data
+    parsing of the committed changelog as structured text (AGENTS.md §5
+    sanctions parsing committed config files as structured data) — NOT a
+    static-source test on a ``.py`` file.
+    """
+    text = CHANGELOG.read_text(encoding="utf-8")
+    sections: list[tuple[str, str]] = []
+    current_header: str | None = None
+    current_body: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## ["):
+            if current_header is not None:
+                sections.append((current_header, "\n".join(current_body)))
+            current_header = line
+            current_body = []
+        elif current_header is not None:
+            current_body.append(line)
+    if current_header is not None:
+        sections.append((current_header, "\n".join(current_body)))
+    return sections
+
+
+def _changelog_section(version: str) -> str:
+    """Return the body of the ``## [<version>]`` changelog section.
+
+    ``version`` is matched as a prefix on the header line so ``"1.1"``
+    matches ``## [1.1.0] - 2026-08-29`` (mirroring the release.yml awk
+    prefix-match extraction). Raises AssertionError if no section matches,
+    so a missing section surfaces as a test failure rather than a silent
+    empty-string return.
+    """
+    sections = _changelog_sections()
+    for header, body in sections:
+        if header.startswith(f"## [{version}"):
+            return body
+    headers = [h for h, _ in sections]
+    raise AssertionError(
+        f"CHANGELOG.md has no section starting with '## [{version}'; found headers: {headers!r}"
+    )
 
 
 class TestChangelog:
@@ -477,6 +572,76 @@ class TestChangelog:
         text = CHANGELOG.read_text(encoding="utf-8")
         assert "## [Unreleased]" in text, (
             "CHANGELOG.md must contain a '## [Unreleased]' section at the top"
+        )
+
+    def test_changelog_has_1_1_0_section(self) -> None:
+        """CHANGELOG.md must contain a ``## [1.1.0]`` release header.
+
+        This is the v1.1.0 lightweight-IO release section (PKG-03); the
+        release.yml awk extraction keys off the ``## [1.1`` prefix to
+        populate the GitHub Release body when the v1.1.0 tag is cut.
+        Removing the section would silently produce empty release notes
+        (T-10-03). Asserting on the parsed section headers — not a
+        whole-file substring check — pins the header to a real release
+        section boundary.
+        """
+        headers = [h for h, _ in _changelog_sections()]
+        assert any(h.startswith("## [1.1.0]") for h in headers), (
+            "CHANGELOG.md must contain a '## [1.1.0]' release header "
+            "(the v1.1.0 lightweight-IO release); found headers: "
+            f"{headers!r}"
+        )
+
+    def test_changelog_1_1_0_section_has_added(self) -> None:
+        """The ``## [1.1.0]`` section body must contain an ``### Added``
+        subsection (within the section, not anywhere in the file).
+
+        The Added subsection lists the ``[io]``/``[seg]``/``[stats]``/
+        ``[pipeline]`` extras. Asserting on the section body — not the
+        whole file — means removing the 1.1.0 Added subsection fails this
+        test even though the 1.0.0 section also has an ``### Added`` (the
+        existing ``test_changelog_has_added_section`` only checks the
+        whole file and would still pass).
+        """
+        body = _changelog_section("1.1")
+        assert "### Added" in body, (
+            "CHANGELOG.md ## [1.1.0] section must contain an '### Added' "
+            "subsection listing the [io]/[seg]/[stats]/[pipeline] extras. "
+            f"Section body was:\n{body}"
+        )
+
+    def test_changelog_1_1_0_section_has_changed(self) -> None:
+        """The ``## [1.1.0]`` section body must contain an ``### Changed``
+        subsection (within the section).
+
+        The Changed subsection carries the **Breaking:** core-slim entry
+        (bare install now IO-only). Asserting on the section body means
+        removing the 1.1.0 Changed subsection fails this test even though
+        the 1.0.0 section also has an ``### Changed``.
+        """
+        body = _changelog_section("1.1")
+        assert "### Changed" in body, (
+            "CHANGELOG.md ## [1.1.0] section must contain an '### Changed' "
+            "subsection with the Breaking core-slim entry. "
+            f"Section body was:\n{body}"
+        )
+
+    def test_changelog_1_1_0_section_has_migration(self) -> None:
+        """The ``## [1.1.0]`` section body must contain an ``### Migration``
+        subsection (T-10-05 mitigation).
+
+        The Migration note is the remedy for the bare-install breakage: it
+        tells users who relied on a bare ``pip install liom-toolkit`` for
+        segmentation/stats/atlas work to add ``[pipeline]``. Omitting it
+        silently breaks downstream labs. Asserting on the section body —
+        not the whole file — means removing the 1.1.0 Migration subsection
+        fails this test (no other section has an ``### Migration``).
+        """
+        body = _changelog_section("1.1")
+        assert "### Migration" in body, (
+            "CHANGELOG.md ## [1.1.0] section must contain an '### Migration' "
+            "subsection (the remedy for the bare-install breakage — tells "
+            f"users to add [pipeline]). Section body was:\n{body}"
         )
 
 
