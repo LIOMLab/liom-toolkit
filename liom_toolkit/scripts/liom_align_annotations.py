@@ -89,8 +89,9 @@ def main() -> None:
     for image_path in (args.target_volume, args.mask, args.template, args.atlas):
         if not Path(image_path).exists():
             parser.error(f"input file does not exist: {image_path}")
-    if not Path(args.data_dir).exists():
-        parser.error(f"data directory does not exist: {args.data_dir}")
+    data_dir_path = Path(args.data_dir)
+    if not data_dir_path.is_dir():
+        parser.error(f"data directory does not exist or is not a directory: {args.data_dir}")
 
     try:
         import ants
