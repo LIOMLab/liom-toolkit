@@ -534,7 +534,13 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         Parameters
         ----------
         idx : int
-            Dataset index of the patch to load.
+            Dataset index of the patch to load. When ``filter_empty`` is
+            active, ``idx`` is an index into the filtered dataset
+            (``0..len(valid_indices)-1``) and is mapped through
+            ``valid_indices`` to the underlying grid/rotation dataset
+            index before loading -- so direct iteration (or a
+            ``DataLoader`` without a pre-mapped ``Subset``) yields the
+            valid patches, not the first ``N`` grid patches.
 
         Returns
         -------
@@ -543,6 +549,14 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         patch_label : torch.Tensor
             The loaded label patch tensor.
         """
+        if self.filter_empty and hasattr(self, "valid_indices"):
+            # Map the filtered-dataset index through valid_indices to the
+            # underlying dataset index. Without this, dataset[0] returns
+            # grid patch 0 (which may have been filtered out as empty),
+            # dataset[1] returns grid patch 1, etc. -- silent wrong data
+            # for any caller that iterates the dataset directly or wraps
+            # it in a DataLoader without a pre-mapped Subset.
+            idx = int(self.valid_indices[idx])
         patch_image = super().__getitem__(idx)
         patch_label = self.load_patch(
             self.label_data,
