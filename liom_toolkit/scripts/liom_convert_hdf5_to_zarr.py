@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.conversion import convert_hdf5_to_zarr
 from liom_toolkit.scripts._common import build_common_parser
@@ -59,6 +60,13 @@ def main() -> None:
     """
     parser = _build_argument_parser()
     args = parser.parse_args()
+
+    # Validate the input_file positional at the argparse boundary so a
+    # nonexistent path exits 2 with an actionable message naming the offending
+    # file, instead of leaking a raw h5py traceback. parser.error exits 2 —
+    # never use assert for validation (it is stripped under python -O).
+    if not Path(args.input_file).exists():
+        parser.error(f"input file does not exist: {args.input_file}")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
