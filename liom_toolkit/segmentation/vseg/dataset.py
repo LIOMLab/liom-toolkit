@@ -11,11 +11,21 @@ from multiprocessing import cpu_count
 
 import dask.array as da
 import numpy as np
-import torch
 import zarr
 from numpy.typing import NDArray
-from torch.utils.data import Dataset
 from tqdm.contrib.concurrent import process_map
+
+# torch is moved into the [ai] extra (D-01/D-05). The upfront ImportError
+# here is the honest signal on an io-only install -- the message names [ai]
+# (the torch path), not [seg]. The `from e` chain preserves the underlying
+# error for debugging (AGENTS §2).
+try:
+    import torch
+    from torch.utils.data import Dataset
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[ai] to use the vessel segmentation dataset module."
+    ) from e
 
 from .utils import apply_clahe
 

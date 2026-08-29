@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-import torch
-import wandb
-from torch import nn
+# torch + wandb are moved into the [ai] extra (D-01/D-05). The upfront
+# ImportError here is the honest signal on an io-only install -- the message
+# names [ai] (the torch path), not [seg]. The `from e` chain preserves the
+# underlying error for debugging (AGENTS §2).
+try:
+    import torch
+    import wandb
+    from torch import nn
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[ai] to use the vessel segmentation model."
+    ) from e
 
 
 class ConvBlock(nn.Module):

@@ -6,13 +6,22 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import cv2
 import imageio.v3 as iio
 import numpy as np
 import zarr
 from numpy.typing import NDArray
-from skimage.color import gray2rgb, rgb2gray
 from tqdm.auto import tqdm
+
+# cv2 + scikit-image are moved into the [seg] extra (D-01/D-05). The upfront
+# ImportError here is the honest signal on an io-only install. The `from e`
+# chain preserves the underlying error for debugging (AGENTS §2).
+try:
+    import cv2
+    from skimage.color import gray2rgb, rgb2gray
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] to use the vessel segmentation prediction module."
+    ) from e
 
 from .utils import add_patch_to_empty_array, create_dir, numeric_filesort, process_image
 

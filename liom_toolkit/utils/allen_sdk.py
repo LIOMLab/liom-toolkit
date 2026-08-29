@@ -64,11 +64,10 @@ from typing import TYPE_CHECKING, Any
 
 import nrrd
 import numpy as np
-import pandas as pd
-import requests
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
+    import pandas as pd
     from ants.core.ants_image import ANTsImage
 
 
@@ -215,11 +214,21 @@ def _build_structure_metadata(structures: list[dict[str, Any]]) -> pd.DataFrame:
         is corrupt).
     TypeError
         If the constructed metadata is not a pandas DataFrame.
+    ImportError
+        If ``pandas`` is not installed (install ``liom-toolkit[stats]`` or
+        ``[antspy]``).
     """
     if not structures:
         raise ValueError(
             "Structure tree is empty — the download may have failed or the cache is corrupt."
         )
+    try:
+        import pandas as pd
+    except ImportError as e:
+        raise ImportError(
+            "Please install liom-toolkit[stats] or [antspy] to use "
+            "the Allen label metadata functions."
+        ) from e
     df = pd.DataFrame(
         [
             {
@@ -269,7 +278,20 @@ def _remap_to_id_type(
     tuple[NDArray[np.generic], pd.DataFrame]
         ``(new_annotation, new_label_description)`` — remapped if any IDX
         exceeds ``id_type`` max, else unchanged.
+
+    Raises
+    ------
+    ImportError
+        If ``pandas`` is not installed (install ``liom-toolkit[stats]`` or
+        ``[antspy]``).
     """
+    try:
+        import pandas as pd  # ruff: ignore[unused-import]  # guard: surface [stats]/[antspy] extra requirement
+    except ImportError as e:
+        raise ImportError(
+            "Please install liom-toolkit[stats] or [antspy] to use "
+            "the Allen label metadata functions."
+        ) from e
     if np.any(label_description["IDX"].to_numpy() > np.iinfo(id_type).max):
         label_description = label_description.sort_values(by="LABEL")
         label_description = label_description.reset_index(drop=True)
@@ -600,7 +622,18 @@ def _download_nrrd(url: str, dest: str) -> None:
         The URL to download from.
     dest : str
         The destination filesystem path for the NRRD file.
+
+    Raises
+    ------
+    ImportError
+        If ``requests`` is not installed (install ``liom-toolkit[antspy]``).
     """
+    try:
+        import requests
+    except ImportError as e:
+        raise ImportError(
+            "Please install liom-toolkit[antspy] to use the Allen atlas download functions."
+        ) from e
     tmp = dest + ".partial"
     try:
         with requests.get(url, stream=True, timeout=60) as r:
@@ -635,7 +668,18 @@ def _download_structure_tree(dest: str) -> list[dict[str, Any]]:
     -------
     list[dict[str, Any]]
         ``_flatten_structure_tree(msg)``.
+
+    Raises
+    ------
+    ImportError
+        If ``requests`` is not installed (install ``liom-toolkit[antspy]``).
     """
+    try:
+        import requests
+    except ImportError as e:
+        raise ImportError(
+            "Please install liom-toolkit[antspy] to use the Allen atlas download functions."
+        ) from e
     r = requests.get(_STRUCTURE_TREE_URL, timeout=60)
     r.raise_for_status()
     payload = r.json()
@@ -710,6 +754,29 @@ class _ReferenceSpace:
     def export_itksnap_labels(
         self, id_type: type[np.integer] = np.uint16
     ) -> tuple[NDArray[np.generic], pd.DataFrame]:
+        """Export the ITK-SNAP label-description DataFrame for the annotation.
+
+        Wraps ``_build_structure_metadata`` + ``_remap_to_id_type``.
+
+        Returns
+        -------
+        tuple[NDArray[np.generic], pd.DataFrame]
+            ``(annotation, label_description)`` — remapped if any IDX exceeds
+            ``id_type`` max, else unchanged.
+
+        Raises
+        ------
+        ImportError
+            If ``pandas`` is not installed (install ``liom-toolkit[stats]`` or
+            ``[antspy]``).
+        """
+        try:
+            import pandas as pd  # ruff: ignore[unused-import]  # guard: surface [stats]/[antspy] extra at the public entry point
+        except ImportError as e:
+            raise ImportError(
+                "Please install liom-toolkit[stats] or [antspy] to use "
+                "the Allen label metadata functions."
+            ) from e
         label_description = _build_structure_metadata(self.structure_tree.structures)
         return _remap_to_id_type(self.annotation, label_description, id_type)
 

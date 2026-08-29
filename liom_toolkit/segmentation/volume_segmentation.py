@@ -5,8 +5,17 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-import SimpleITK as sitk
 from numpy.typing import NDArray
+
+# SimpleITK is moved into the [seg] extra (D-01/D-05). The upfront ImportError
+# here is the honest signal on an io-only install. The `from e` chain
+# preserves the underlying error for debugging (AGENTS §2).
+try:
+    import SimpleITK as sitk
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] to use the classical segmentation module."
+    ) from e
 
 from liom_toolkit.segmentation import remove_small_structures
 
