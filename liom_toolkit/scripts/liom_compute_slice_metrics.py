@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.scripts._common import build_common_parser
 
@@ -32,7 +33,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("region_map_file", help="Path to the region map image (TIFF/PNG)")
     p.add_argument("vessel_exclude_file", help="Path to the vessel-exclude mask image (TIFF/PNG)")
     p.add_argument(
-        "--voxel_size",
+        "--voxel-size",
         type=float,
         default=0.65,
         help="Voxel size in micron (default=%(default)s)",
@@ -56,6 +57,22 @@ def main() -> None:
     """
     parser = _build_argument_parser()
     args = parser.parse_args()
+
+    # Validate the 4 input-file positionals at the argparse boundary so a
+    # nonexistent path exits 2 with an actionable message naming the offending
+    # file, instead of leaking a raw imageio traceback. output_dir is created
+    # by the domain callee and image is a label string, so neither is checked
+    # here. parser.error exits 2 — never use assert for validation (it is
+    # stripped under python -O).
+    for input_attr in (
+        "mask_file",
+        "vessel_mask_file",
+        "region_map_file",
+        "vessel_exclude_file",
+    ):
+        input_path = Path(getattr(args, input_attr))
+        if not input_path.exists():
+            parser.error(f"input file does not exist: {input_path}")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),

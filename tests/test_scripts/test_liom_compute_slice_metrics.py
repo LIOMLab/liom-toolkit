@@ -40,7 +40,7 @@ def test_liom_compute_slice_metrics_help_exits_0() -> None:
     out = _build_argument_parser().format_help()
     for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
-    for flag in ("output_dir", "image", "--voxel_size"):
+    for flag in ("output_dir", "image", "--voxel-size"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
 
 
@@ -82,7 +82,7 @@ def test_liom_compute_slice_metrics_main_smoke(tmp_path: Path, monkeypatch) -> N
             str(vessel_path),
             str(region_path),
             str(exclude_path),
-            "--voxel_size",
+            "--voxel-size",
             "0.65",
         ],
     )
@@ -101,9 +101,7 @@ def test_liom_compute_slice_metrics_main_smoke(tmp_path: Path, monkeypatch) -> N
     )
 
 
-def test_liom_compute_slice_metrics_missing_input_exits_2(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_liom_compute_slice_metrics_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
     """A nonexistent mask_file path exits 2 with a clear CLI error.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches
@@ -124,7 +122,7 @@ def test_liom_compute_slice_metrics_missing_input_exits_2(
             str(tmp_path / "nope_vessel.tif"),
             str(tmp_path / "nope_region.tif"),
             str(tmp_path / "nope_exclude.tif"),
-            "--voxel_size",
+            "--voxel-size",
             "0.65",
         ],
     )
