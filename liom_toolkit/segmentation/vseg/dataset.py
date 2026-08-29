@@ -414,7 +414,10 @@ class OmeZarrDataset(Dataset):
 
         z1, z2, y1, y2, x1, x2 = self.get_patch_coordinates(idx)
         patch_data = data[z1:z2, y1:y2, x1:x2]
-        # Get np array from Dask
+        # Materialize the Dask slice to a real NumPy array -- torch.tensor()
+        # below requires a concrete array, not a Dask array (removing this
+        # .compute() would pass a Dask Array to torch.tensor, which raises
+        # TypeError). This is a genuine Dask->PyTorch boundary.
         patch_data = patch_data.compute()
 
         # Do rotation based on the rest
