@@ -233,8 +233,7 @@ def _save_valid_indices_cache(
             json.dump(payload, f)
         tmp.replace(sidecar)
     except BaseException:
-        if tmp.exists():
-            tmp.unlink()
+        tmp.unlink(missing_ok=True)
         raise
 
 
