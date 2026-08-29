@@ -6,7 +6,6 @@ import hashlib
 import json
 import pathlib
 from collections.abc import Iterator
-from multiprocessing import cpu_count
 
 import dask.array as da
 import numpy as np
@@ -625,10 +624,12 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         # and passing that to a spawn-context ProcessPoolExecutor raises
         # RuntimeError.
         #
-        # The per-call max_workers=max(1, cpu_count() - 2) override preserves
-        # the current -2 headroom (parent + Dask worker) -- this is
-        # consolidation, not tuning. chunksize=100 stays a per-call kwarg
-        # (chunksize is workload-specific; the layer has no default for it).
+        # No per-call max_workers override: let the layer's
+        # _default_process_cap() (min(cpu-1, 8)) apply so this caller is
+        # subject to the same 8-worker ceiling as every other process-pool
+        # caller -- the cap prevents OOM on high-core machines where each
+        # spawn worker is a full interpreter. chunksize=100 stays a per-call
+        # kwarg (chunksize is workload-specific; the layer has no default).
         results = process_map_tqdm(
             self._process_patch,
             range(dataset_length),
@@ -636,7 +637,6 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             desc="Validating patches",
             position=0,
             leave=True,
-            max_workers=max(1, cpu_count() - 2),
             chunksize=100,
         )
 
