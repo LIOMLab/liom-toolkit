@@ -166,7 +166,7 @@ addopts = [
     "--maxprocesses=6",
     "--dist=load",
     "--max-worker-restart=0",
-    "--cov",
+    "--cov=liom_toolkit",
 ]
 markers = [
     "ai: requires the ai extra (torch) - skip with -m 'not ai'",
