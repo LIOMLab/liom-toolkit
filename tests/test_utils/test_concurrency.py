@@ -381,14 +381,17 @@ def test_no_uncapped_pools_outside_concurrency_module():
     structure, not text, so it is sanctioned where regex-on-source is
     forbidden. Catches both the ``Name(...)`` form (``ThreadPoolExecutor()``)
     and the ``Attr.(...)`` form (``concurrent.process_map(...)``). The
-    ``concurrency.py`` layer itself is skipped — it is the only sanctioned
-    construction site.
+    sanctioned ``utils/concurrency.py`` layer itself is skipped — it is the
+    only sanctioned construction site. The skip matches by resolved full
+    path, NOT by basename, so a future ``liom_toolkit/<subpackage>/concurrency.py``
+    is NOT silently exempted (a basename match would defeat the guard).
     """
     import ast
 
     import liom_toolkit
 
     pkg_root = Path(liom_toolkit.__file__).parent
+    sanctioned = (pkg_root / "utils" / "concurrency.py").resolve()
     forbidden_calls = {
         "ThreadPoolExecutor",
         "ProcessPoolExecutor",
@@ -397,7 +400,7 @@ def test_no_uncapped_pools_outside_concurrency_module():
     }
     violations: list[str] = []
     for py in pkg_root.rglob("*.py"):
-        if py.name == "concurrency.py":
+        if py.resolve() == sanctioned:
             continue
         tree = ast.parse(py.read_text(), filename=str(py))
         for node in ast.walk(tree):
