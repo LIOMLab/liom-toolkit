@@ -130,10 +130,19 @@ def train(
         scaler.update()
         epoch_loss += loss.item()
 
-    # Normalize cumulative loss for number of examples. Guard the
-    # divide-by-zero when the loader is empty (len(loader) == 0).
-    if len(loader) > 0:
-        epoch_loss = epoch_loss / len(loader)
+    # Normalize cumulative loss for number of examples. An empty loader
+    # (len(loader) == 0) means no batches were seen -- the loop never
+    # assigned y/y_pred/x, so returning them as None would crash callers
+    # downstream (create_images calls x.cpu() on None -> confusing
+    # AttributeError). Raise an explicit ValueError naming the cause so
+    # the user sees the real problem (empty dataset / over-aggressive
+    # filter_empty) instead of a NoneType crash several frames later.
+    if len(loader) == 0:
+        raise ValueError(
+            "train: loader yielded no batches -- cannot train on an empty "
+            "dataset. Check the dataset size and filter_empty settings."
+        )
+    epoch_loss = epoch_loss / len(loader)
     return epoch_loss, y, y_pred, x
 
 
@@ -288,14 +297,24 @@ def evaluate(
             recall_sum = float(rec_pair[0].item())
             recall_count = int(rec_pair[1].item())
 
-        # Global mean = global_sum / global_count. Guard the divide-by-zero
-        # when the loader is empty (count == 0) — the existing empty-loader
-        # guard applies (D-02a empty edge).
-        epoch_loss = loss_sum / loss_count if loss_count > 0 else 0.0
-        f1 = f1_sum / f1_count if f1_count > 0 else 0.0
-        accuracy = accuracy_sum / accuracy_count if accuracy_count > 0 else 0.0
-        jaccard = jaccard_sum / jaccard_count if jaccard_count > 0 else 0.0
-        recall = recall_sum / recall_count if recall_count > 0 else 0.0
+        # Global mean = global_sum / global_count. An empty loader
+        # (loss_count == 0) means no batches were seen -- the loop never
+        # assigned y/y_pred/x, so returning them as None would crash
+        # callers downstream (create_images calls x.cpu() on None ->
+        # confusing AttributeError). Raise an explicit ValueError naming
+        # the cause so the user sees the real problem (empty validation
+        # dataset) instead of a NoneType crash several frames later.
+        if loss_count == 0:
+            raise ValueError(
+                "evaluate: loader yielded no batches -- cannot evaluate on "
+                "an empty dataset. Check the dataset size and filter_empty "
+                "settings."
+            )
+        epoch_loss = loss_sum / loss_count
+        f1 = f1_sum / f1_count
+        accuracy = accuracy_sum / accuracy_count
+        jaccard = jaccard_sum / jaccard_count
+        recall = recall_sum / recall_count
 
     return epoch_loss, y, y_pred, x, f1, accuracy, jaccard, recall
 
