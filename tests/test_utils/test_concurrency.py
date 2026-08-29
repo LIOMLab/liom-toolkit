@@ -29,6 +29,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -257,3 +258,61 @@ def _default_thread_cap_under(value: int | None) -> int:
 def _default_process_cap_under(value: int | None) -> int:
     with _patched_cpu_count(value):
         return _default_process_cap()
+
+
+# ---------------------------------------------------------------------------
+# SC-3 AST regression guard — no uncapped pool construction outside the layer
+# ---------------------------------------------------------------------------
+
+
+def test_no_uncapped_pools_outside_concurrency_module():
+    """SC-3: no direct ``ThreadPoolExecutor()`` / ``ProcessPoolExecutor()`` /
+    ``process_map(`` / ``thread_map(`` construction outside
+    ``utils/concurrency.py`` in ``liom_toolkit/`` source.
+
+    The managed concurrency layer is the single sanctioned construction site
+    for stdlib thread/process executors and tqdm map helpers. Any other module
+    that constructs one of these directly bypasses the layer's caps and the
+    mandatory spawn-context + spawn-lock wiring (D-11), reintroducing the
+    fork-mutation deadlock and resource-exhaustion failure modes the
+    consolidation exists to prevent.
+
+    This is an AST walk (not a string grep) per AGENTS §5 — ``ast`` parses
+    structure, not text, so it is sanctioned where regex-on-source is
+    forbidden. Catches both the ``Name(...)`` form (``ThreadPoolExecutor()``)
+    and the ``Attr.(...)`` form (``concurrent.process_map(...)``). The
+    ``concurrency.py`` layer itself is skipped — it is the only sanctioned
+    construction site.
+    """
+    import ast
+    import liom_toolkit
+
+    pkg_root = Path(liom_toolkit.__file__).parent
+    forbidden_calls = {
+        "ThreadPoolExecutor",
+        "ProcessPoolExecutor",
+        "process_map",
+        "thread_map",
+    }
+    violations: list[str] = []
+    for py in pkg_root.rglob("*.py"):
+        if py.name == "concurrency.py":
+            continue
+        tree = ast.parse(py.read_text(), filename=str(py))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in forbidden_calls
+            ):
+                violations.append(f"{py}:{node.lineno} constructs {node.func.id}()")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in forbidden_calls
+            ):
+                violations.append(f"{py}:{node.lineno} constructs .{node.func.attr}()")
+    assert not violations, (
+        "uncapped pool construction outside utils/concurrency.py:\n"
+        + "\n".join(violations)
+    )
