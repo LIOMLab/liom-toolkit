@@ -174,3 +174,47 @@ def test_io_only_imports_under_sentinel_masking(io_only_sentinels):
     assert convert_hdf5_to_zarr
     assert convert_nifti_to_zarr
     assert convert_nrrd_to_zarr
+
+
+# ---------------------------------------------------------------------------
+# Segmentation honest-signal guard (D-05)
+#
+# segmentation is the ONE subpackage that genuinely cannot work in io-only
+# (it needs scikit-image/scipy/SimpleITK/cv2 at module scope). The honest UX
+# is an upfront ImportError naming the extra to install, not a bare
+# ModuleNotFoundError. The module-top try/except ImportError guards in
+# plane_segmentation/volume_segmentation/stats/vseg/* propagate up through
+# segmentation/__init__.py so `import liom_toolkit.segmentation` raises the
+# user-facing message.
+# ---------------------------------------------------------------------------
+
+
+def test_segmentation_raises_honest_importerror_under_masking(io_only_sentinels):
+    """Under sentinel masking, `import liom_toolkit.segmentation` raises
+    ImportError (not ModuleNotFoundError) with a message naming the extra to
+    install (liom-toolkit[seg] or liom-toolkit[ai]).
+
+    Why: a bare ModuleNotFoundError is not actionable -- the user does not
+    know which extra to install. The module-top guards wrap the moved-dep
+    imports in try/except ImportError: raise ImportError(...) from e, so the
+    honest signal propagates up through the segmentation barrel. This test
+    would fail (with a bare ModuleNotFoundError or a wrong message) if any
+    segmentation module's guard is missing or its message omits the extra
+    name.
+    """
+    # Purge any already-imported liom_toolkit submodules so the masked
+    # imports re-fire through the sentinel finder. Without this, a previously
+    # imported (and cached) liom_toolkit.segmentation would short-circuit
+    # the test to a false green.
+    for name in list(sys.modules):
+        if name == "liom_toolkit" or name.startswith("liom_toolkit."):
+            sys.modules.pop(name, None)
+
+    with pytest.raises(ImportError) as excinfo:
+        import liom_toolkit.segmentation  # ruff: ignore[unused-import]
+
+    message = str(excinfo.value)
+    assert "liom-toolkit[seg]" in message or "liom-toolkit[ai]" in message, (
+        "segmentation ImportError must name the extra to install "
+        f"(liom-toolkit[seg] or liom-toolkit[ai]), got: {message!r}"
+    )
