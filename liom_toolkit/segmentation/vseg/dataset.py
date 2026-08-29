@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import multiprocessing
 import pathlib
 from collections.abc import Iterator
 from multiprocessing import cpu_count
@@ -13,7 +12,8 @@ import dask.array as da
 import numpy as np
 import zarr
 from numpy.typing import NDArray
-from tqdm.contrib.concurrent import process_map
+
+from liom_toolkit.utils.concurrency import process_map_tqdm
 
 # torch is moved into the [ai] extra (D-01/D-05). The upfront ImportError
 # here is the honest signal on an io-only install -- the message names [ai]
@@ -614,20 +614,22 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         # exists, so __len__ falls through to super().__len__()).
         dataset_length = len(self) // 4 if self.rotate_patches else len(self)
 
-        # Use spawn (not fork) for the process pool. This module imports
+        # Validate patches through the managed concurrency layer
+        # (utils.concurrency.process_map_tqdm). The layer injects the spawn
+        # context and the spawn-context Lock centrally: this module imports
         # torch at the top level, and torch starts internal threads at import
-        # time. On Linux the default start method is fork; forking a
-        # multithreaded process deadlocks (the child inherits the threads in
-        # a broken state). Spawn creates a fresh interpreter with no
-        # inherited state, avoiding the deadlock. macOS defaults to spawn
-        # already, so this is a no-op there.
+        # time, so forking a multithreaded process (the Linux default start
+        # method) deadlocks. Spawn creates a fresh interpreter with no
+        # inherited state. The spawn-context _lock is load-bearing too --
+        # tqdm's ensure_lock would otherwise source a fork-context SemLock,
+        # and passing that to a spawn-context ProcessPoolExecutor raises
+        # RuntimeError.
         #
-        # The _lock kwarg is also created from the spawn context. tqdm's
-        # ensure_lock would otherwise create a lock from the default (fork)
-        # context, and passing a fork-context SemLock to a spawn-context
-        # ProcessPoolExecutor raises RuntimeError.
-        spawn_ctx = multiprocessing.get_context("spawn")
-        results = process_map(
+        # The per-call max_workers=max(1, cpu_count() - 2) override preserves
+        # the current -2 headroom (parent + Dask worker) -- this is
+        # consolidation, not tuning. chunksize=100 stays a per-call kwarg
+        # (chunksize is workload-specific; the layer has no default for it).
+        results = process_map_tqdm(
             self._process_patch,
             range(dataset_length),
             unit="patches",
@@ -636,8 +638,6 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
             leave=True,
             max_workers=max(1, cpu_count() - 2),
             chunksize=100,
-            mp_context=spawn_ctx,
-            _lock=spawn_ctx.Lock(),
         )
 
         # ``results`` is one validity bit per GRID patch (length

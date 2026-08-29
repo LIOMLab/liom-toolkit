@@ -29,19 +29,20 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fast_process_map(request, monkeypatch):
-    """Replace ``process_map`` with a fast serial version for tests that don't
-    need the real forked-worker path.
+    """Replace ``process_map_tqdm`` with a fast serial version for tests that
+    don't need the real forked-worker path.
 
-    ``OmeZarrLabelDataSet.get_valid_indices`` calls ``tqdm.contrib.concurrent.
-    process_map``, which spawns a process pool. On spawn-start-method runtimes
-    (macOS), each worker re-imports torch/dask/zarr (~2.7s startup per pool
-    invocation), dominating test runtime for the cache/indexing tests that
-    don't care about fork semantics.
+    ``OmeZarrLabelDataSet.get_valid_indices`` calls
+    ``liom_toolkit.utils.concurrency.process_map_tqdm`` (which wraps
+    ``tqdm.contrib.concurrent.process_map``), which spawns a process pool. On
+    spawn-start-method runtimes (macOS), each worker re-imports
+    torch/dask/zarr (~2.7s startup per pool invocation), dominating test
+    runtime for the cache/indexing tests that don't care about fork semantics.
 
-    This fixture replaces ``process_map`` with a serial list comprehension that
-    produces identical results (the validity bits are deterministic) without
-    spawning workers. Tests that MUST exercise the real forked-worker path
-    (the D-11 fork-mutation regression) opt out via
+    This fixture replaces ``process_map_tqdm`` with a serial list comprehension
+    that produces identical results (the validity bits are deterministic)
+    without spawning workers. Tests that MUST exercise the real forked-worker
+    path (the D-11 fork-mutation regression) opt out via
     ``@pytest.mark.real_process_map``.
     """
     if request.node.get_closest_marker("real_process_map"):
@@ -52,7 +53,7 @@ def _fast_process_map(request, monkeypatch):
     def fast_pm(fn, *iterables, **kwargs):
         return list(starmap(fn, zip(*iterables, strict=False)))
 
-    monkeypatch.setattr(dataset_mod, "process_map", fast_pm)
+    monkeypatch.setattr(dataset_mod, "process_map_tqdm", fast_pm)
     yield
 
 
@@ -377,13 +378,13 @@ def test_valid_indices_cache_hit(tmp_path, monkeypatch):
 
     # Track process_map calls for the second instance.
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map
+    real_process_map = dataset_mod.process_map_tqdm
 
     def tracking_process_map(*args, **kwargs):
         call_count["n"] += 1
         return real_process_map(*args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
 
     ds2 = OmeZarrLabelDataSet(
         zarr_path,
@@ -426,13 +427,13 @@ def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
 
     # Track process_map calls for the second instance with a different patch_size.
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map
+    real_process_map = dataset_mod.process_map_tqdm
 
     def tracking_process_map(*args, **kwargs):
         call_count["n"] += 1
         return real_process_map(*args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
 
     ds2 = OmeZarrLabelDataSet(
         zarr_path,
@@ -510,13 +511,13 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
     )
 
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map
+    real_process_map = dataset_mod.process_map_tqdm
 
     def tracking_process_map(*args, **kwargs):
         call_count["n"] += 1
         return real_process_map(*args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map", tracking_process_map)
+    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
 
     _ds2 = OmeZarrLabelDataSet(
         zarr_path,

@@ -42,7 +42,6 @@ from liom_toolkit.utils.concurrency import (
     thread_map_tqdm,
 )
 
-
 # ---------------------------------------------------------------------------
 # Cap helpers
 # ---------------------------------------------------------------------------
@@ -285,6 +284,7 @@ def test_no_uncapped_pools_outside_concurrency_module():
     construction site.
     """
     import ast
+
     import liom_toolkit
 
     pkg_root = Path(liom_toolkit.__file__).parent
@@ -312,7 +312,6 @@ def test_no_uncapped_pools_outside_concurrency_module():
                 and node.func.attr in forbidden_calls
             ):
                 violations.append(f"{py}:{node.lineno} constructs .{node.func.attr}()")
-    assert not violations, (
-        "uncapped pool construction outside utils/concurrency.py:\n"
-        + "\n".join(violations)
+    assert not violations, "uncapped pool construction outside utils/concurrency.py:\n" + "\n".join(
+        violations
     )
