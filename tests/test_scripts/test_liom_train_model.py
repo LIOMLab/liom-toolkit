@@ -42,17 +42,24 @@ def test_liom_train_model_help_exits_0() -> None:
         assert flag in out, f"liom-train-model --help missing {flag}"
 
 
-def test_importerror_surfacing_train_model(monkeypatch) -> None:
+def test_importerror_surfacing_train_model(tmp_path, monkeypatch) -> None:
     """liom-train-model surfaces a clear ImportError mentioning 'PyTorch' or
-    'wandb' when torch/wandb is not importable."""
+    'wandb' when torch/wandb is not importable.
+
+    The dataset_file positional must exist on disk so the post-parse
+    file-existence check (which runs BEFORE the import torch guard) does not
+    exit 2 first; the ImportError then fires in main()'s lazy-import guard.
+    """
     # Make `import torch` raise ImportError by poisoning sys.modules.
     monkeypatch.setitem(sys.modules, "torch", None)
-    # Provide required positional args so parse_args succeeds; the ImportError
-    # fires in main()'s lazy-import guard before train_model is called.
+    # Materialize the dataset path so the D-01 file-existence check passes
+    # before the import torch guard fires.
+    dataset_file = tmp_path / "dataset.zarr"
+    dataset_file.touch()
     monkeypatch.setattr(
         sys,
         "argv",
-        ["liom-train-model", "dataset.zarr", "node_name"],
+        ["liom-train-model", str(dataset_file), "node_name"],
     )
 
     import pytest
@@ -61,6 +68,31 @@ def test_importerror_surfacing_train_model(monkeypatch) -> None:
 
     with pytest.raises(ImportError, match=r"PyTorch|wandb"):
         main()
+
+
+def test_liom_train_model_missing_dataset_exits_2(tmp_path, fake_torch, fake_wandb, monkeypatch) -> None:
+    """liom-train-model exits 2 with a clear message when dataset_file does not exist.
+
+    A nonexistent dataset_file path must surface as ``parser.error`` (exit 2)
+    with the offending path in the message, instead of a raw zarr/torch
+    traceback from inside ``train_model``. The file-existence check runs
+    BEFORE the import torch lazy-import guard, so the heavy-dep import is
+    never attempted for a bad path.
+    """
+    missing = str(tmp_path / "nope.zarr")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["liom-train-model", missing, "node_name"],
+    )
+
+    import pytest
+
+    from liom_toolkit.scripts.liom_train_model import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
 
 
 def test_liom_train_model_main_smoke(tmp_path, fake_torch, fake_wandb, monkeypatch) -> None:
