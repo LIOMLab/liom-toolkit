@@ -18,9 +18,9 @@ from tqdm.auto import tqdm
 # pandas + scipy + scikit-image are moved into the [seg]/[stats] extras
 # (D-01/D-05). The upfront ImportError here is the honest signal on an
 # io-only install. pandas is shared between [stats] and [antspy]; scipy is
-# shared between [seg] and [stats] -- the message names both so the user
-# picks the extra matching their workflow. The `from e` chain preserves the
-# underlying error for debugging (AGENTS §2).
+# shared between [seg] and [stats]; scikit-image is in [seg] -- so the
+# message names both [seg] and [stats] (or [pipeline] for the full set).
+# The `from e` chain preserves the underlying error for debugging (AGENTS §2).
 try:
     import pandas as pd
     import scipy.ndimage as ndi
@@ -34,7 +34,8 @@ try:
     from skimage.util import img_as_ubyte
 except ImportError as e:
     raise ImportError(
-        "Please install liom-toolkit[seg] or [stats] to use the segmentation stats module."
+        "Please install liom-toolkit[seg] and [stats] (or [pipeline]) to use the "
+        "segmentation stats module."
     ) from e
 
 from liom_toolkit.utils.dask_client import dask_client_manager

@@ -21,7 +21,7 @@ try:
     from skimage.color import gray2rgb, label2rgb
 except ImportError as e:
     raise ImportError(
-        "Please install liom-toolkit[seg] or [stats] to use the "
+        "Please install liom-toolkit[seg] and [stats] (or [pipeline]) to use the "
         "vessel segmentation training module."
     ) from e
 
