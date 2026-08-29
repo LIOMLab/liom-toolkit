@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-import torch
-import torch.nn.functional as F
-from torch import nn
+# torch is in the [ai] extra. The upfront ImportError here is the honest
+# signal on an io-only install -- the message names [ai] (the torch path),
+# matching the guard pattern used in the other vseg modules. The `from e`
+# chain preserves the underlying error for debugging (AGENTS §2).
+try:
+    import torch
+    import torch.nn.functional as F
+    from torch import nn
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[ai] to use the vessel segmentation loss functions."
+    ) from e
 
 
 class DiceLoss(nn.Module):
