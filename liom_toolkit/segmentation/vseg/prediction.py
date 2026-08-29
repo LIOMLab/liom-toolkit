@@ -223,6 +223,13 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         If PyTorch is not installed (re-raised with an actionable message).
     TypeError
         If the opened zarr volume is not a zarr Array.
+    ValueError
+        If the dataset was constructed with ``rotate_patches=True`` --
+        rotation is a training augmentation, not meaningful for inference,
+        and the index-to-grid mapping in ``get_patch_coordinates`` only
+        covers the unrotated grid (so iterating ``range(len(dataset))``
+        would index past ``grid_shape`` and raise, or silently wrap to
+        wrong grid patches on older NumPy).
     """
     try:
         import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
@@ -230,6 +237,13 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
+    if getattr(dataset, "rotate_patches", False):
+        raise ValueError(
+            "predict_volume requires rotate_patches=False on the dataset "
+            "(rotation is a training augmentation, not meaningful for "
+            "inference). Construct the dataset with rotate_patches=False "
+            f"before calling predict_volume. Got rotate_patches={dataset.rotate_patches}."
+        )
     # Normalize dask chunks (tuple of tuples per-dimension) to a flat chunk
     # shape tuple for zarr. dask.array.core.Array.chunksize already does this,
     # but the _array_expr Array variant does not expose chunksize, so we
