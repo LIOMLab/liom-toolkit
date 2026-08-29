@@ -36,12 +36,12 @@ import pytest
 from liom_toolkit.utils.concurrency import (
     _default_process_cap,
     _default_thread_cap,
+    _validate_max_workers,
     get_process_pool,
     get_thread_pool,
     process_map_tqdm,
     thread_map_tqdm,
 )
-from liom_toolkit.utils.concurrency import _validate_max_workers
 
 # ---------------------------------------------------------------------------
 # Cap helpers

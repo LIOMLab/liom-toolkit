@@ -136,11 +136,6 @@ def get_thread_pool(max_workers: int | None = None) -> ThreadPoolExecutor:
     ThreadPoolExecutor
         A configured stdlib thread pool. The caller is responsible for
         shutting it down (``with`` block or ``shutdown()``).
-
-    Raises
-    ------
-    ValueError
-        If ``max_workers`` is not ``None`` and is less than 1.
     """
     _validate_max_workers(max_workers)
     return ThreadPoolExecutor(max_workers=max_workers or _default_thread_cap())
@@ -173,11 +168,6 @@ def get_process_pool(
     ProcessPoolExecutor
         A configured stdlib process pool. The caller is responsible for
         shutting it down (``with`` block or ``shutdown()``).
-
-    Raises
-    ------
-    ValueError
-        If ``max_workers`` is not ``None`` and is less than 1.
     """
     _validate_max_workers(max_workers)
     ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
@@ -216,11 +206,6 @@ def thread_map_tqdm(
     -------
     list
         Results in input order (``thread_map`` preserves order).
-
-    Raises
-    ------
-    ValueError
-        If ``max_workers`` is not ``None`` and is less than 1.
     """
     _validate_max_workers(max_workers)
     return thread_map(
@@ -274,11 +259,6 @@ def process_map_tqdm(
     -------
     list
         Results in input order (``process_map`` preserves order).
-
-    Raises
-    ------
-    ValueError
-        If ``max_workers`` is not ``None`` and is less than 1.
     """
     _validate_max_workers(max_workers)
     ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
