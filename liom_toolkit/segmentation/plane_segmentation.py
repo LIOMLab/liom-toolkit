@@ -5,12 +5,23 @@ from __future__ import annotations
 import imageio.v3 as iio
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import median_filter
-from skimage import filters, morphology, restoration
-from skimage.filters import frangi, thresholding
-from skimage.measure import label, regionprops
-from skimage.morphology import disk, erosion
-from skimage.util import img_as_ubyte
+
+# scikit-image + scipy are moved into the [seg] extra (D-01/D-05). The
+# upfront ImportError here is the honest signal on an io-only install --
+# `import liom_toolkit.segmentation` raises a user-facing message naming the
+# extra to install, instead of a bare ModuleNotFoundError. The `from e`
+# chain preserves the underlying error for debugging (AGENTS §2).
+try:
+    from scipy.ndimage import median_filter
+    from skimage import filters, morphology, restoration
+    from skimage.filters import frangi, thresholding
+    from skimage.measure import label, regionprops
+    from skimage.morphology import disk, erosion
+    from skimage.util import img_as_ubyte
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] to use the classical segmentation module."
+    ) from e
 
 
 def subtract_background(img: NDArray[np.generic], radius: int = 70) -> NDArray[np.float64]:

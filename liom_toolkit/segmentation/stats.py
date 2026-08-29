@@ -10,20 +10,32 @@ from typing import Any
 import dask.array as da
 import imageio.v3 as iio
 import numpy as np
-import pandas as pd
 import PIL.Image
-import scipy.ndimage as ndi
 from dask.distributed import Future
 from numpy.typing import NDArray
-from scipy.ndimage import distance_transform_edt
-from skimage import measure
-from skimage.color import gray2rgb
-from skimage.draw import circle_perimeter
-from skimage.measure import label
-from skimage.measure._regionprops import RegionProperties
-from skimage.morphology import skeletonize
-from skimage.util import img_as_ubyte
 from tqdm.auto import tqdm
+
+# pandas + scipy + scikit-image are moved into the [seg]/[stats] extras
+# (D-01/D-05). The upfront ImportError here is the honest signal on an
+# io-only install. pandas is shared between [stats] and [antspy]; scipy is
+# shared between [seg] and [stats] -- the message names both so the user
+# picks the extra matching their workflow. The `from e` chain preserves the
+# underlying error for debugging (AGENTS §2).
+try:
+    import pandas as pd
+    import scipy.ndimage as ndi
+    from scipy.ndimage import distance_transform_edt
+    from skimage import measure
+    from skimage.color import gray2rgb
+    from skimage.draw import circle_perimeter
+    from skimage.measure import label
+    from skimage.measure._regionprops import RegionProperties
+    from skimage.morphology import skeletonize
+    from skimage.util import img_as_ubyte
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] or [stats] to use the segmentation stats module."
+    ) from e
 
 from liom_toolkit.utils.dask_client import dask_client_manager
 
