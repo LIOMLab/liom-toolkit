@@ -20,9 +20,19 @@ def cl_score(image: NDArray[np.number], skeleton: NDArray[np.number]) -> float:
     Returns
     -------
     float
-        The computed skeleton volume intersection ratio.
+        The computed skeleton volume intersection ratio. Returns ``0.0``
+        when the skeleton is empty (no topology to intersect) so the
+        ``cl_dice`` denominator guard triggers correctly instead of
+        propagating ``NaN``.
     """
-    return float(np.sum(image * skeleton) / np.sum(skeleton))
+    skeleton_sum = np.sum(skeleton)
+    if skeleton_sum == 0:
+        # Empty skeleton: no topology to intersect. Return 0.0 so the
+        # cl_dice denom guard (tprec + tsens == 0) triggers correctly
+        # and cl_dice returns 0.0 as documented, instead of returning
+        # NaN (which would silently propagate into the metrics CSV).
+        return 0.0
+    return float(np.sum(image * skeleton) / skeleton_sum)
 
 
 def cl_dice(image_predicted: NDArray[np.number], image_truth: NDArray[np.number]) -> float:
