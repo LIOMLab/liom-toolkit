@@ -906,6 +906,19 @@ wheels = [
 ]
 
 [[package]]
+name = "dask-jobqueue"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dask" },
+    { name = "distributed" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/32/2a/751bb5ba28533476b1c667eac158e5aa1840c416fd61d425328ef48a894a/dask_jobqueue-0.9.0.tar.gz", hash = "sha256:494ef64b7bb3848c7d72ed334c288030caca6a09dca54cfaa3f395f4ba7f5c47", size = 56475, upload-time = "2024-08-22T09:25:21.56Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/77/606f138bf70b14865842b3ec9a58dc1ba97153f466e5876fe4ced980f91f/dask_jobqueue-0.9.0-py2.py3-none-any.whl", hash = "sha256:253dfc4f0b8722201a08e05b841859dfeea1f6698ff21eff0d9370e5aa8ae20f", size = 52037, upload-time = "2024-08-22T09:25:20.106Z" },
+]
+
+[[package]]
 name = "debugpy"
 version = "1.8.21"
 source = { registry = "https://pypi.org/simple" }
@@ -1820,6 +1833,7 @@ ai = [
 all = [
     { name = "antspyx", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "antspyx", version = "0.6.4", source = { registry = "https://github.com/LIOMLab/liom-toolkit/releases/download/antspyx-cp314/index.html" }, marker = "python_full_version >= '3.14'" },
+    { name = "dask-jobqueue" },
     { name = "einops" },
     { name = "opencv-python" },
     { name = "openpyxl" },
@@ -1841,9 +1855,13 @@ antspy = [
     { name = "pandas" },
     { name = "requests" },
 ]
+dask-cluster = [
+    { name = "dask-jobqueue" },
+]
 pipeline = [
     { name = "antspyx", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "antspyx", version = "0.6.4", source = { registry = "https://github.com/LIOMLab/liom-toolkit/releases/download/antspyx-cp314/index.html" }, marker = "python_full_version >= '3.14'" },
+    { name = "dask-jobqueue" },
     { name = "einops" },
     { name = "opencv-python" },
     { name = "openpyxl" },
@@ -1909,12 +1927,13 @@ requires-dist = [
     { name = "antspyx", marker = "python_full_version < '3.14' and extra == 'antspy'", specifier = ">=0.6.3" },
     { name = "bokeh", specifier = ">=3.1.0" },
     { name = "dask", specifier = ">=2026.8.0" },
+    { name = "dask-jobqueue", marker = "extra == 'dask-cluster'", specifier = ">=0.9.0" },
     { name = "distributed", specifier = ">=2026.8.0" },
     { name = "einops", marker = "extra == 'ai'", specifier = ">=0.8.2" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "imageio", specifier = ">=2.30" },
-    { name = "liom-toolkit", extras = ["ai", "antspy", "io", "seg", "stats"], marker = "extra == 'pipeline'" },
-    { name = "liom-toolkit", extras = ["ai", "antspy", "seg", "stats"], marker = "extra == 'all'" },
+    { name = "liom-toolkit", extras = ["ai", "antspy", "dask-cluster", "io", "seg", "stats"], marker = "extra == 'pipeline'" },
+    { name = "liom-toolkit", extras = ["ai", "antspy", "dask-cluster", "seg", "stats"], marker = "extra == 'all'" },
     { name = "natsort", specifier = ">=8.4.0" },
     { name = "nibabel", specifier = ">=5.4.2" },
     { name = "ome-zarr", specifier = ">=0.18.0" },
@@ -1939,7 +1958,7 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'ai'", specifier = ">=0.29.0" },
     { name = "zarr", specifier = ">=3.0" },
 ]
-provides-extras = ["io", "seg", "stats", "ai", "antspy", "pipeline", "all"]
+provides-extras = ["io", "seg", "stats", "ai", "antspy", "pipeline", "all", "dask-cluster"]
 
 [package.metadata.requires-dev]
 dev = [

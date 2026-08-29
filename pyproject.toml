@@ -85,9 +85,12 @@ antspy = [
 # the full conversion→registration→segmentation→stats dep set. Preserves the
 # project's core value ("other labs pip install and run the full pipeline")
 # after core was slimmed to the IO set (D-01/D-04).
-pipeline = ["liom-toolkit[io,seg,stats,ai,antspy]"]
+pipeline = ["liom-toolkit[io,seg,stats,ai,antspy,dask-cluster]"]
 all = [
-    "liom-toolkit[ai,antspy,seg,stats]",
+    "liom-toolkit[ai,antspy,seg,stats,dask-cluster]",
+]
+dask-cluster = [
+    "dask-jobqueue>=0.9.0",
 ]
 
 [dependency-groups]
