@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 
 from dask.distributed import Client, LocalCluster
@@ -27,7 +28,12 @@ class DaskClientManager:
         self.client: Client | None = None
         self.cluster: LocalCluster | None = None
 
-    def get_client(self, address: str = "", n_workers: int | None = None) -> Client:
+    def get_client(
+        self,
+        address: str = "",
+        n_workers: int | None = None,
+        threads_per_worker: int = 1,
+    ) -> Client:
         """Get the client to a local cluster or a cluster.
 
         Implicitly sets the client when not yet initialized. Defaults to a
@@ -40,7 +46,12 @@ class DaskClientManager:
         n_workers : int, optional
             Number of workers for the local cluster. Ignored when connecting
             to a remote scheduler (``address`` non-empty). Defaults to
-            ``min(cpu_count() - 1, 8)`` when ``None``.
+            ``min(cpu_count() - 1, 8)`` when ``None``. When ``min_workers`` is
+            unset, this also drives the readiness check on the remote path.
+        threads_per_worker : int, default 1
+            Threads per worker for the local cluster. Ignored on the remote
+            path (the remote scheduler controls its own thread count). Default
+            ``1`` preserves the pre-hardening behavior.
 
         Returns
         -------
@@ -50,34 +61,75 @@ class DaskClientManager:
         Raises
         ------
         RuntimeError
-            If the client could not be initialized after the setup attempt.
+            If the client could not be initialized after the setup attempt,
+            or if connecting to a remote scheduler times out / is unreachable
+            (the offending address is included in the message — never falls
+            back to a ``LocalCluster``).
         """
         if self.client is None and address == "":
-            self.__create_local_cluster__(n_workers)
+            self.__create_local_cluster__(n_workers, threads_per_worker)
         elif self.client is None and address != "":
-            self.__connect_to_cluster__(address)
+            self.__connect_to_cluster__(address, min_workers=n_workers)
         if self.client is None:
             raise RuntimeError("Dask client was not initialized")
         return self.client
 
-    def set_client(self, address: str = "", n_workers: int | None = None) -> None:
+    def set_client(
+        self,
+        address: str = "",
+        n_workers: int | None = None,
+        min_workers: int | None = None,
+        timeout: float | None = None,
+        threads_per_worker: int = 1,
+    ) -> None:
         """Set the client to a local cluster or a cluster. Explicit function.
 
         Parameters
         ----------
         address : str
-            The address of the cluster.
+            The address of the cluster. Empty string constructs a
+            ``LocalCluster``; a non-empty string connects to a remote
+            scheduler and **never** falls back to a ``LocalCluster`` on
+            failure (AGENTS §2 — raise with the offending address instead).
         n_workers : int, optional
             Number of workers for the local cluster. Ignored when connecting
             to a remote scheduler (``address`` non-empty). Defaults to
             ``min(cpu_count() - 1, 8)`` when ``None``.
+        min_workers : int, optional
+            Readiness threshold for the remote path: ``wait_for_workers`` is
+            called with this many workers. When ``None`` and ``n_workers`` is
+            supplied, defaults to ``n_workers`` so the existing ``--n-workers``
+            CLI flag drives readiness with no new flag. Ignored on the
+            empty-address (local) path.
+        timeout : float, optional
+            Timeout in seconds for the remote ``wait_for_workers`` readiness
+            check. ``None`` means dask's default. Ignored on the local path.
+        threads_per_worker : int, default 1
+            Threads per worker for the local cluster. Ignored on the remote
+            path. Default ``1`` preserves the pre-hardening behavior.
+
+        Notes
+        -----
+        On the local path, ``ValueError`` propagates from
+        ``__create_local_cluster__`` if ``n_workers`` resolves to less than 1.
+        On the remote path, ``RuntimeError`` propagates from
+        ``__connect_to_cluster__`` if the scheduler is unreachable or does not
+        reach ``min_workers`` within ``timeout`` — the offending address is
+        included in the message and no ``LocalCluster`` fallback is constructed
+        (AGENTS §2).
         """
         if self.client is None and address == "":
-            self.__create_local_cluster__(n_workers)
+            self.__create_local_cluster__(n_workers, threads_per_worker)
         elif self.client is None and address != "":
-            self.__connect_to_cluster__(address)
+            if min_workers is None:
+                min_workers = n_workers
+            self.__connect_to_cluster__(address, min_workers=min_workers, timeout=timeout)
 
-    def __create_local_cluster__(self, n_workers: int | None = None) -> None:
+    def __create_local_cluster__(
+        self,
+        n_workers: int | None = None,
+        threads_per_worker: int = 1,
+    ) -> None:
         """Create a local cluster.
 
         Parameters
@@ -86,6 +138,9 @@ class DaskClientManager:
             Number of workers. Defaults to ``min(cpu_count() - 1, 8)`` when
             ``None`` (the cap prevents OOM on high-core machines). An explicit
             value less than 1 raises ``ValueError``.
+        threads_per_worker : int, default 1
+            Threads per worker. Default ``1`` preserves the pre-hardening
+            behavior.
 
         Raises
         ------
@@ -106,21 +161,81 @@ class DaskClientManager:
         # Client.close(). The dashboard is a development/debugging web UI and is
         # not needed for the library's use case.
         self.cluster = LocalCluster(
-            n_workers=n_workers, threads_per_worker=1, dashboard_address=False
+            n_workers=n_workers,
+            threads_per_worker=threads_per_worker,
+            dashboard_address=False,
         )
         self.client = Client(self.cluster)
 
-    def __connect_to_cluster__(self, address: str) -> None:
-        """Connect to a cluster.
+    def __connect_to_cluster__(
+        self,
+        address: str,
+        *,
+        min_workers: int | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Connect to a remote cluster and wait for worker readiness.
 
         Parameters
         ----------
         address : str
-            The address of the cluster.
+            The address of the cluster scheduler.
+        min_workers : int, optional
+            When not ``None``, call ``client.wait_for_workers(min_workers,
+            timeout=timeout)`` after connecting to block until at least this
+            many workers are up. ``None`` skips the readiness check (preserves
+            the pre-hardening behavior for callers that don't pass it).
+        timeout : float, optional
+            Timeout in seconds for the readiness check. ``None`` means dask's
+            default.
+
+        Raises
+        ------
+        RuntimeError
+            If ``Client(address)`` raises ``OSError`` (unreachable address) or
+            ``wait_for_workers`` raises ``TimeoutError`` / ``OSError`` (not
+            enough workers came up in time). The offending address and the
+            actual worker count are included in the message. The half-connected
+            client is closed and cleared so no leaked state persists.
+
+        Notes
+        -----
+        This method **never** falls back to a ``LocalCluster`` on failure
+        (AGENTS §2 — a wrong cluster returning plausible-looking results is
+        the dominant failure mode for this pipeline). A non-empty ``address``
+        is a hard contract: either it connects and reaches ``min_workers``, or
+        it raises.
         """
         if self.client is not None:
             return
-        self.client = Client(address)
+        try:
+            self.client = Client(address)
+            if min_workers is not None:
+                self.client.wait_for_workers(min_workers, timeout=timeout)
+        except (TimeoutError, OSError) as e:
+            # Defensive worker-count for the message; do NOT swallow if this
+            # also raises — just format around it. ncores() on a broken client
+            # realistically raises OSError (transport) or RuntimeError (state).
+            actual: str
+            if self.client is None:
+                actual = "0"
+            else:
+                try:
+                    actual = str(len(self.client.ncores()))
+                except (OSError, RuntimeError):
+                    actual = "unknown"
+            # Clean up any half-connected client so no leaked state persists.
+            # close() failures on a broken client are typically OSError /
+            # RuntimeError — suppress those specifically (AGENTS §2: no bare
+            # except / except Exception). The original RuntimeError below is
+            # the one that must surface; the cleanup must not mask it.
+            if self.client is not None:
+                with contextlib.suppress(OSError, RuntimeError):
+                    self.client.close()
+                self.client = None
+            raise RuntimeError(
+                f"connect to Dask scheduler {address!r} failed: {e}; {actual} workers came up"
+            ) from e
 
     def close(self) -> None:
         """Close the client and cluster, releasing worker processes.
