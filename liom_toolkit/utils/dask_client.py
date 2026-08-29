@@ -193,10 +193,12 @@ class DaskClientManager:
         ------
         RuntimeError
             If ``Client(address)`` raises ``OSError`` (unreachable address) or
-            ``wait_for_workers`` raises ``TimeoutError`` / ``OSError`` (not
-            enough workers came up in time). The offending address and the
-            actual worker count are included in the message. The half-connected
-            client is closed and cleared so no leaked state persists.
+            ``wait_for_workers`` raises ``TimeoutError`` / ``OSError`` /
+            ``RuntimeError`` (not enough workers came up in time, or the
+            scheduler disconnected mid-wait / entered a broken state). The
+            offending address and the actual worker count are included in the
+            message. The half-connected client is closed and cleared so no
+            leaked state persists.
 
         Notes
         -----
@@ -221,7 +223,7 @@ class DaskClientManager:
                 self.client = Client(address)
             if min_workers is not None:
                 self.client.wait_for_workers(min_workers, timeout=timeout)
-        except (TimeoutError, OSError) as e:
+        except (TimeoutError, OSError, RuntimeError) as e:
             # Defensive worker-count for the message; do NOT swallow if this
             # also raises — just format around it. ncores() on a broken client
             # realistically raises OSError (transport) or RuntimeError (state).
