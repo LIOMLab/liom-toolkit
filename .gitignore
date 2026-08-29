@@ -48,8 +48,13 @@ liom_toolkit/_version.py
 # committed fixture; it is not needed by the regression test).
 tests/test_utils/fixtures/allen_itksnap_25um/manifest.json
 
-# Stray metric-output CSV from local CLI runs (not a committed artifact).
+# Metric-output CSV from local CLI training runs (not a committed artifact).
+# Relocated from the repo root to Path(output_train)/final_metrics.csv to
+# eliminate the concurrent-run CWD collision. The default output_train is
+# "training", so cover both the repo-root stray (defensive) and the
+# in-output_train location.
 /final_metrics.csv
+training/final_metrics.csv
 
 # Installer logs
 pip-log.txt

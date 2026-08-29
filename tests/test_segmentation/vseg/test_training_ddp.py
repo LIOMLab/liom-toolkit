@@ -127,21 +127,26 @@ def test_evaluate_sum_count_all_reduce(monkeypatch):
 
     loader = torch.utils.data.DataLoader(_TinyDataset(), batch_size=1)
 
-    # The all_reduce helper needs the "remote" contribution. We attach it
-    # via a wrapper that sets _remote on the tensors evaluate() passes to
-    # all_reduce. Since evaluate() builds the sum/count tensors internally,
-    # we intercept all_reduce to add the remote contribution based on the
-    # tensor's shape/role. Simpler: make all_reduce add a fixed remote
-    # scalar to whatever tensor it receives (loss_sum += 0.4, count += 1).
-    # We distinguish by tracking call order: first call = loss_sum, second
-    # = count, then per-metric (sum, count) pairs.
-    remote_adds = [0.4, 1.0]  # loss_sum, count
+    # The all_reduce helper simulates the other rank's contribution.
+    # evaluate() calls all_reduce 5 times, each on a 2-element [sum, count]
+    # tensor (loss, f1, accuracy, jaccard, recall). We add a 2-element
+    # remote contribution per call: loss gets [0.4, 1.0] (remote shard has
+    # 1 batch with loss 0.4); metrics get [0.0, 0.0] (we only assert on
+    # epoch_loss — the metric remote contributions don't affect the loss
+    # assertion).
+    remote_pairs = [
+        torch.tensor([0.4, 1.0], dtype=torch.float64),  # loss [sum, count]
+        torch.tensor([0.0, 0.0], dtype=torch.float64),  # f1
+        torch.tensor([0.0, 0.0], dtype=torch.float64),  # accuracy
+        torch.tensor([0.0, 0.0], dtype=torch.float64),  # jaccard
+        torch.tensor([0.0, 0.0], dtype=torch.float64),  # recall
+    ]
     call_order = {"n": 0}
 
     def _all_reduce_sum_ordered(tensor, op=None):
         idx = call_order["n"]
-        if idx < len(remote_adds):
-            tensor.add_(torch.tensor(float(remote_adds[idx])))
+        if idx < len(remote_pairs):
+            tensor.add_(remote_pairs[idx])
         call_order["n"] += 1
         return tensor
 

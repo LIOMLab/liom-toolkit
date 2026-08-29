@@ -77,7 +77,18 @@ def train(
         The predicted labels from the last batch.
     x : torch.Tensor
         The inputs from the last batch.
+
+    Raises
+    ------
+    ImportError
+        If PyTorch is not installed (re-raised with an actionable message).
     """
+    try:
+        import torch
+    except ImportError as e:
+        raise ImportError(
+            "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
+        ) from e
     # Initialize epoch loss to 0. Pre-bind the loop variables to None so an
     # empty loader does not raise UnboundLocalError at the return statement
     # (the for-loop body never assigns them when the loader yields nothing).
@@ -85,6 +96,17 @@ def train(
     y = None
     y_pred = None
     x = None
+
+    # AMP GradScaler — no-ops on CPU/gloo (enabled=use_amp and
+    # torch.cuda.is_available()) so the same code path serves both modes.
+    # When use_amp=False, scaler.scale(loss).backward() == loss.backward(),
+    # scaler.unscale_ is a no-op, scaler.step == optimizer.step, and
+    # scaler.update is a no-op — the existing single-process numerics are
+    # byte-identical (D-03a).
+    scaler = torch.amp.GradScaler(enabled=use_amp and torch.cuda.is_available())
+    # max_norm for gradient clipping (D-03a — 1.0 is a sensible default;
+    # documented here so a future tuner knows the value).
+    max_norm = 1.0
 
     # Put in training mode
     model.train()
@@ -96,8 +118,16 @@ def train(
         optimizer.zero_grad()
         y_pred = model(x)
         loss = loss_fn(y_pred, y)
-        loss.backward()
-        optimizer.step()
+        # AMP+DDP scaler ordering (D-03a): scale → backward → unscale →
+        # clip_grad_norm_ → step → update. unscale_ may only be called once
+        # per optimizer per step (RuntimeError otherwise). When use_amp=False
+        # the scaler no-ops so this is equivalent to loss.backward() +
+        # optimizer.step() with grad clipping.
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        scaler.step(optimizer)
+        scaler.update()
         epoch_loss += loss.item()
 
     # Normalize cumulative loss for number of examples. Guard the
@@ -153,14 +183,34 @@ def evaluate(
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
-    # Initialize epoch loss to 0
-    # Added metrics. Pre-bind the loop variables to None so an empty loader
-    # does not raise UnboundLocalError at the return statement.
-    epoch_loss = 0.0
-    f1 = 0.0
-    accuracy = 0.0
-    jaccard = 0.0
-    recall = 0.0
+    # Detect DDP: when torch.distributed is initialized and world_size > 1,
+    # the per-shard mean is wrong (val shards differ in size when
+    # len(val_set) % world_size != 0). Use sum+count all-reduce to compute
+    # the true global mean (D-02a — sum+count, NOT mean-of-means). The
+    # reduce is skipped when world_size==1 (single-process path unchanged).
+    try:
+        import torch.distributed as dist
+
+        ddp_active = dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
+    except ImportError:
+        dist = None
+        ddp_active = False
+
+    # Accumulate (sum, count) for the loss and each metric. Under DDP these
+    # are all-reduced (ReduceOp.SUM) to get the global sum + global count,
+    # then divided for the global mean. Single-process: the reduce is
+    # skipped and the local sum / local count gives the per-batch mean
+    # (unchanged behavior).
+    loss_sum = 0.0
+    loss_count = 0
+    f1_sum = 0.0
+    f1_count = 0
+    accuracy_sum = 0.0
+    accuracy_count = 0
+    jaccard_sum = 0.0
+    jaccard_count = 0
+    recall_sum = 0.0
+    recall_count = 0
     y = None
     y_pred = None
     x = None
@@ -174,7 +224,8 @@ def evaluate(
             y = y.to(device, dtype=torch.float32)
             y_pred = model(x)
             loss = loss_fn(y_pred, y)
-            epoch_loss += loss.item()
+            loss_sum += loss.item()
+            loss_count += 1
             # metrics
             y_m = y.to("cpu")
             y_m = y_m.numpy()
@@ -183,19 +234,51 @@ def evaluate(
             [score_f1, score_recall, score_acc, score_jaccard, _score_precision] = (
                 calculate_metrics(y_m, y_pred_m)
             )
-            f1 += score_f1
-            accuracy += score_acc
-            jaccard += score_jaccard
-            recall += score_recall
+            f1_sum += score_f1
+            f1_count += 1
+            accuracy_sum += score_acc
+            accuracy_count += 1
+            jaccard_sum += score_jaccard
+            jaccard_count += 1
+            recall_sum += score_recall
+            recall_count += 1
 
-        # Normalize cumulative loss for number of examples. Guard the
-        # divide-by-zero when the loader is empty (len(loader) == 0).
-        if len(loader) > 0:
-            epoch_loss = epoch_loss / len(loader)
-            f1 = f1 / len(loader)
-            accuracy = accuracy / len(loader)
-            jaccard = jaccard / len(loader)
-            recall = recall / len(loader)
+        # Under DDP, all-reduce the (sum, count) pairs to get the global
+        # sum and global count, then divide for the global mean. This is
+        # the correctness boundary: mean-of-means is wrong when val shards
+        # differ in size (D-02a). Single-process (ddp_active=False) skips
+        # the reduce — the local sum / local count gives the per-batch mean
+        # (unchanged behavior).
+        if ddp_active:
+            # Stack each (sum, count) pair into a 2-element tensor, all-reduce
+            # with ReduceOp.SUM, then unpack. count is an int tensor so the
+            # reduce sums the per-shard counts into the global count.
+            loss_pair = torch.tensor([loss_sum, float(loss_count)], dtype=torch.float64)
+            f1_pair = torch.tensor([f1_sum, float(f1_count)], dtype=torch.float64)
+            acc_pair = torch.tensor([accuracy_sum, float(accuracy_count)], dtype=torch.float64)
+            jac_pair = torch.tensor([jaccard_sum, float(jaccard_count)], dtype=torch.float64)
+            rec_pair = torch.tensor([recall_sum, float(recall_count)], dtype=torch.float64)
+            for pair in (loss_pair, f1_pair, acc_pair, jac_pair, rec_pair):
+                dist.all_reduce(pair, op=dist.ReduceOp.SUM)
+            loss_sum = float(loss_pair[0].item())
+            loss_count = int(loss_pair[1].item())
+            f1_sum = float(f1_pair[0].item())
+            f1_count = int(f1_pair[1].item())
+            accuracy_sum = float(acc_pair[0].item())
+            accuracy_count = int(acc_pair[1].item())
+            jaccard_sum = float(jac_pair[0].item())
+            jaccard_count = int(jac_pair[1].item())
+            recall_sum = float(rec_pair[0].item())
+            recall_count = int(rec_pair[1].item())
+
+        # Global mean = global_sum / global_count. Guard the divide-by-zero
+        # when the loader is empty (count == 0) — the existing empty-loader
+        # guard applies (D-02a empty edge).
+        epoch_loss = loss_sum / loss_count if loss_count > 0 else 0.0
+        f1 = f1_sum / f1_count if f1_count > 0 else 0.0
+        accuracy = accuracy_sum / accuracy_count if accuracy_count > 0 else 0.0
+        jaccard = jaccard_sum / jaccard_count if jaccard_count > 0 else 0.0
+        recall = recall_sum / recall_count if recall_count > 0 else 0.0
 
     return epoch_loss, y, y_pred, x, f1, accuracy, jaccard, recall
 

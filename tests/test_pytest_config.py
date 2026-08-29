@@ -284,22 +284,25 @@ class TestTyConfig:
 
 
 class TestGitignore:
-    """The stray ``final_metrics.csv`` local-run output is gitignored.
+    """The ``final_metrics.csv`` training-run output is gitignored.
 
-    The entry is repo-root-scoped (``/final_metrics.csv``), not a global
-    ``*.csv`` that would silently exclude future legitimate CSVs in
-    subdirs. A subprocess ``git check-ignore`` call guards against a
-    malformed pattern (e.g. a trailing-slash typo) that matches the
-    .gitignore text but does not actually ignore the file.
+    The file was relocated from the repo root to
+    ``Path(output_train)/final_metrics.csv`` (default ``output_train`` is
+    ``"training"``) to eliminate the concurrent-run CWD collision. The
+    .gitignore covers both the repo-root stray (defensive) and the
+    in-output_train location. A subprocess ``git check-ignore`` call
+    guards against a malformed pattern that matches the .gitignore text
+    but does not actually ignore the file.
     """
 
     def test_final_metrics_csv_is_ignored(self) -> None:
         """``.gitignore`` must contain ``final_metrics.csv`` AND
-        ``git check-ignore final_metrics.csv`` must exit 0.
+        ``git check-ignore training/final_metrics.csv`` must exit 0.
 
         The text check proves the entry is present; the subprocess check
-        proves the entry is effective (the pattern actually matches the
-        file at the repo root).
+        proves the entry is effective for the relocated in-output_train
+        location (the default ``output_train`` is ``"training"``). The
+        repo-root stray is also covered defensively.
         """
         gitignore_text = GITIGNORE.read_text(encoding="utf-8")
         assert "final_metrics.csv" in gitignore_text, ".gitignore missing final_metrics.csv entry"
@@ -307,14 +310,16 @@ class TestGitignore:
         # rather than raising on non-zero, because check-ignore exits 1 when
         # the path is NOT ignored, which is exactly the failure we want to
         # surface as an assertion. `git` is invoked from PATH (S607).
+        # Assert the relocated in-output_train location is ignored (the
+        # default output_train is "training").
         result = subprocess.run(
-            ["git", "check-ignore", "final_metrics.csv"],  # ruff: ignore[start-process-with-partial-path]  # git is on PATH
+            ["git", "check-ignore", "training/final_metrics.csv"],  # ruff: ignore[start-process-with-partial-path]  # git is on PATH
             cwd=REPO_ROOT,
             capture_output=True,
             check=False,
         )
         assert result.returncode == 0, (
-            "git check-ignore final_metrics.csv did not exit 0 — the "
-            ".gitignore entry is not effective. stderr: "
-            f"{result.stderr.decode().strip()!r}"
+            "git check-ignore training/final_metrics.csv did not exit 0 — the "
+            ".gitignore entry is not effective for the relocated final_metrics.csv. "
+            f"stderr: {result.stderr.decode().strip()!r}"
         )
