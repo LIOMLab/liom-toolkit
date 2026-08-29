@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.scripts._common import build_common_parser
 
@@ -31,16 +32,17 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--resolution",
         type=int,
         default=25,
+        choices=[10, 25, 50, 100],
         help="Atlas resolution in micron, must be 10/25/50/100 (default=%(default)s)",
     )
     p.add_argument(
-        "--rigid_type",
+        "--rigid-type",
         type=str,
         default="Similarity",
         help="Rigid registration type (default=%(default)s)",
     )
     p.add_argument(
-        "--deformable_type",
+        "--deformable-type",
         type=str,
         default="SyN",
         help="Deformable registration type (default=%(default)s)",
@@ -76,6 +78,19 @@ def main() -> None:
         level=getattr(logging, args.log_level.upper()),
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    # File-existence check at the argparse boundary: a nonexistent input
+    # path produces a clear CLI error (exit 2) instead of a raw
+    # ants.image_read traceback deep in the domain call. Runs before the
+    # ants lazy-import guard so the error surfaces regardless of whether
+    # the extra is installed. Uses parser.error (not assert) per the
+    # project's validation rule; the offending path is included in the
+    # message so the error is actionable.
+    for image_path in (args.target_volume, args.mask, args.template, args.atlas):
+        if not Path(image_path).exists():
+            parser.error(f"input file does not exist: {image_path}")
+    if not Path(args.data_dir).exists():
+        parser.error(f"data directory does not exist: {args.data_dir}")
 
     try:
         import ants

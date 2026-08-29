@@ -3,9 +3,13 @@
 Exercises:
 * ``--help`` exits 0 and contains the 4 shared flags + the curated
   registration flags (target_volume, mask, template, atlas, data_dir,
-  --resolution, --rigid_type, --deformable_type).
+  --resolution, --rigid-type, --deformable-type).
 * The CLI surfaces a clear ``ImportError`` mentioning ``antspy`` when the
   ``ants`` extra is not importable (lazy-import guard pattern).
+* ``--resolution`` rejects values outside [10, 25, 50, 100] with exit 2
+  (argparse ``choices=`` constraint at the boundary).
+* A nonexistent input path exits 2 with an actionable message
+  (file-existence check before the ants lazy-import guard).
 
 The ``--help`` smoke check invokes the script's ``_build_argument_parser()``
 in-process and formats its help text, rather than spawning a ``uv run``
@@ -28,27 +32,43 @@ def test_liom_align_annotations_help_exits_0() -> None:
         assert flag in out, f"liom-align-annotations --help missing {flag}"
     for flag in ("target_volume", "mask", "template", "atlas", "data_dir"):
         assert flag in out, f"liom-align-annotations --help missing {flag}"
-    for flag in ("--resolution", "--rigid_type", "--deformable_type"):
+    for flag in ("--resolution", "--rigid-type", "--deformable-type"):
         assert flag in out, f"liom-align-annotations --help missing {flag}"
 
 
-def test_importerror_surfacing_align_annotations(monkeypatch) -> None:
+def test_importerror_surfacing_align_annotations(tmp_path, monkeypatch) -> None:
     """liom-align-annotations surfaces a clear ImportError mentioning 'antspy'
-    when ants is not importable (mock ants import to raise ImportError)."""
+    when ants is not importable (mock ants import to raise ImportError).
+
+    The four image positionals + data_dir are materialized in ``tmp_path`` so
+    the argparse-boundary file-existence check passes before the ants
+    lazy-import guard fires -- the ImportError is the behaviour under test
+    here, not the path check (covered by
+    ``test_liom_align_annotations_missing_input_exits_2``).
+    """
     # Make `import ants` raise ImportError by poisoning sys.modules.
     monkeypatch.setitem(sys.modules, "ants", None)
-    # Provide required positional args so parse_args succeeds; the ImportError
-    # fires in main()'s lazy-import guard before any image loading.
+    # Materialize the input paths so the file-existence check passes; the
+    # ImportError fires in main()'s lazy-import guard after the path check
+    # and before any image loading.
+    tv = tmp_path / "tv.nii"
+    mask = tmp_path / "mask.nii"
+    tmpl = tmp_path / "tmpl.nii"
+    atlas = tmp_path / "atlas.nii"
+    data_dir = tmp_path / "data"
+    for p in (tv, mask, tmpl, atlas):
+        p.touch()
+    data_dir.mkdir()
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "liom-align-annotations",
-            "tv.nii",
-            "mask.nii",
-            "tmpl.nii",
-            "atlas.nii",
-            "data_dir",
+            str(tv),
+            str(mask),
+            str(tmpl),
+            str(atlas),
+            str(data_dir),
         ],
     )
 
@@ -72,23 +92,40 @@ def test_liom_align_annotations_main_smoke(tmp_path, fake_ants, monkeypatch) -> 
     against the verified kwarg map. A kwarg-name typo in ``main()``'s call to
     ``align_annotations_to_volume`` raises ``TypeError`` at the ``main()``
     call site before the spy is invoked.
+
+    The four image positionals + data_dir are materialized in ``tmp_path`` so
+    the argparse-boundary file-existence check passes before the spy fires
+    (the critical D-01/D-04 coupling). The argv uses the hyphenated
+    ``--rigid-type`` / ``--deformable-type`` flag strings; argparse
+    auto-derives ``dest`` (hyphen to underscore), so ``main()`` reads
+    ``args.rigid_type`` / ``args.deformable_type`` unchanged and the spy
+    kwargs assertions stay identical.
     """
-    data_dir = str(tmp_path / "data")
+    tv = tmp_path / "tv.nii"
+    mask = tmp_path / "mask.nii"
+    tmpl = tmp_path / "tmpl.nii"
+    atlas = tmp_path / "atlas.nii"
+    data_dir = tmp_path / "data"
+    # Touch the image paths + mkdir data_dir so the file-existence check in
+    # main() passes before the spy fires.
+    for p in (tv, mask, tmpl, atlas):
+        p.touch()
+    data_dir.mkdir()
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "liom-align-annotations",
-            "tv.nii",
-            "mask.nii",
-            "tmpl.nii",
-            "atlas.nii",
-            data_dir,
+            str(tv),
+            str(mask),
+            str(tmpl),
+            str(atlas),
+            str(data_dir),
             "--resolution",
             "25",
-            "--rigid_type",
+            "--rigid-type",
             "Similarity",
-            "--deformable_type",
+            "--deformable-type",
             "SyN",
         ],
     )
@@ -109,7 +146,7 @@ def test_liom_align_annotations_main_smoke(tmp_path, fake_ants, monkeypatch) -> 
         "main() did not call align_annotations_to_volume -- the domain callee was not reached"
     )
     kwargs = spy.call_args.kwargs
-    assert kwargs["data_dir"] == data_dir
+    assert kwargs["data_dir"] == str(data_dir)
     assert kwargs["resolution"] == 25
     assert kwargs["rigid_type"] == "Similarity"
     assert kwargs["deformable_type"] == "SyN"
