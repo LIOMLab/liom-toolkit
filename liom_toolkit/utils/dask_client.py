@@ -209,7 +209,16 @@ class DaskClientManager:
         if self.client is not None:
             return
         try:
-            self.client = Client(address)
+            # Pass `timeout` to Client(address) too, not just wait_for_workers.
+            # Without it, an unreachable scheduler blocks for dask's default
+            # 30s connect timeout regardless of the caller's `timeout` — the
+            # `timeout` arg is meant to bound the whole connect+ready attempt,
+            # and a 30s wait when the user asked for 5s is a latent UX bug.
+            # `Client(timeout=None)` raises ValueError, so pass it only when set.
+            if timeout is not None:
+                self.client = Client(address, timeout=timeout)
+            else:
+                self.client = Client(address)
             if min_workers is not None:
                 self.client.wait_for_workers(min_workers, timeout=timeout)
         except (TimeoutError, OSError) as e:
