@@ -516,13 +516,18 @@ class DDPResumeManager(ResumeManager):
     def restore_weights(self, model: Any, ckpt_file: str, *, device: Any = None) -> None:
         """Restore model weights from ``ckpt_file`` and barrier-sync all ranks.
 
-        Rank 0 (or single-process) loads the checkpoint with
-        ``weights_only=True`` (no arbitrary pickle code execution —
-        matches the ``model.py`` load path) and calls
-        ``model.load_state_dict(...)``. When ``torch.distributed`` is
-        initialized, calls ``dist.barrier()`` exactly ONCE after the load
-        so all ranks sync before training (the next backward AllReduce is
-        the subsequent sync point — no second barrier).
+        ALL ranks load the checkpoint with ``weights_only=True`` (no
+        arbitrary pickle code execution — matches the ``model.py`` load
+        path) and call ``model.load_state_dict(...)``. Reading the
+        checkpoint is safe on shared storage (no write race), and DDP
+        requires every rank to start from identical weights — DDP
+        synchronizes gradients during backward, NOT initial weights, so a
+        rank-0-only load would leave non-rank-0 ranks with random init
+        weights and the models would diverge permanently. When
+        ``torch.distributed`` is initialized, calls ``dist.barrier()``
+        exactly ONCE after the load so all ranks sync before training
+        (the next backward AllReduce is the subsequent sync point — no
+        second barrier).
 
         Parameters
         ----------
@@ -542,16 +547,22 @@ class DDPResumeManager(ResumeManager):
         """
         import torch
 
-        if self._is_rank0():
-            state = torch.load(ckpt_file, weights_only=True, map_location=device)
-            model.load_state_dict(state)
+        # All ranks load the checkpoint — reading is safe (no write race
+        # on shared storage). DDP requires all ranks to start with
+        # identical weights; it only synchronizes gradients during
+        # backward, not initial weights. A rank-0-only load here would
+        # leave non-rank-0 ranks with random init weights and the models
+        # would diverge permanently (the AllReduce-averaged gradient is
+        # applied to different weights on each rank).
+        state = torch.load(ckpt_file, weights_only=True, map_location=device)
+        model.load_state_dict(state)
         try:
             import torch.distributed as dist
         except ImportError:
             return
         if dist.is_available() and dist.is_initialized():
-            # Single barrier after rank-0 load; the next backward AllReduce
-            # is the subsequent sync point (no second barrier).
+            # Single barrier after all ranks load; the next backward
+            # AllReduce is the subsequent sync point (no second barrier).
             dist.barrier()
 
     def save_weights(self, model: Any, path: str) -> None:
