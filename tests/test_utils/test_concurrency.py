@@ -84,9 +84,11 @@ def test_process_cap_cpu_count_one():
     ``dask_client.py:100-101``).
     """
     for cpu in (1, None):
-        with _patched_cpu_count(cpu):
-            with pytest.raises(ValueError, match=r"process pool cap must be >= 1"):
-                _default_process_cap()
+        with (
+            _patched_cpu_count(cpu),
+            pytest.raises(ValueError, match=r"process pool cap must be >= 1"),
+        ):
+            _default_process_cap()
 
 
 # ---------------------------------------------------------------------------
