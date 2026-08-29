@@ -91,9 +91,7 @@ def test_liom_segment_2d_even_threshold_size_exits_2(tmp_path: Path, monkeypatch
     assert exc.value.code == 2
 
 
-def test_liom_segment_2d_negative_threshold_size_exits_2(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_liom_segment_2d_negative_threshold_size_exits_2(tmp_path: Path, monkeypatch) -> None:
     """A negative odd --local-threshold-size exits 2 at the argparse boundary.
 
     The odd-check alone accepts negative odd values (e.g. -3, since -3 % 2 == 1
@@ -125,9 +123,7 @@ def test_liom_segment_2d_negative_threshold_size_exits_2(
     assert exc.value.code == 2
 
 
-def test_liom_segment_2d_missing_input_exits_2(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_liom_segment_2d_missing_input_exits_2(tmp_path: Path, monkeypatch, capsys) -> None:
     """A nonexistent input_file exits 2 with a clear message, not a raw imageio traceback.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches

@@ -194,9 +194,7 @@ def test_liom_build_template_nonexistent_zarr_exits_2(tmp_path, monkeypatch, cap
     assert missing_zarr in captured.err
 
 
-def test_liom_build_template_mismatched_lengths_exits_2(
-    tmp_path, monkeypatch, capsys
-) -> None:
+def test_liom_build_template_mismatched_lengths_exits_2(tmp_path, monkeypatch, capsys) -> None:
     """Mismatched --zarr-files / --brain-names lengths exit 2 at the CLI boundary.
 
     Both options are ``nargs="+"`` so argparse cannot enforce equal length.

@@ -87,7 +87,8 @@ def main() -> None:
     # 2 — never use assert for validation (it is stripped under python -O).
     if args.local_threshold_size < 1:
         parser.error(
-            f"--local-threshold-size must be a positive odd integer, got {args.local_threshold_size}"
+            f"--local-threshold-size must be a positive odd integer, "
+            f"got {args.local_threshold_size}"
         )
     if args.local_threshold_size % 2 == 0:
         parser.error(f"--local-threshold-size must be odd, got {args.local_threshold_size}")
