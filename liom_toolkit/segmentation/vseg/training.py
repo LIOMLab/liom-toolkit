@@ -610,6 +610,17 @@ def train_model(
         train_dataset = Subset(full_dataset, train_valid_indices)
         test_dataset = Subset(full_dataset, test_valid_indices)
 
+    # Pin memory only when the dataset yields CPU tensors. ``OmeZarrLabelDataSet``
+    # creates tensors directly on ``dev`` (its ``__getitem__`` does
+    # ``torch.tensor(..., device=self.device)``), so when ``dev`` is CUDA the
+    # DataLoader's pin-memory worker receives already-CUDA tensors and raises
+    # ``RuntimeError: cannot pin 'torch.cuda.FloatTensor' only dense CPU
+    # tensors can be pinned``. Pinning is an async CPU→GPU staging optimization;
+    # when the data is already on the target GPU it is wrong, not just redundant.
+    # Gate it on the dataset device being CPU so both the DDP and non-DDP CUDA
+    # paths are correct (the CPU gloo smoke keeps pin_memory=True).
+    pin_memory = pin_memory and dev.type == "cpu"
+
     # Create data loaders. Under DDP, wrap both loaders with
     # DistributedSampler (D-02b: set_epoch called per-epoch on the train
     # sampler so each epoch sees a different shuffle across ranks). The val

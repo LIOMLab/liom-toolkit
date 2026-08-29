@@ -117,6 +117,22 @@ def test_ddp_nccl_ssh_run():
             f"{probe.stderr.decode(errors='replace')[:200]}"
         )
 
+    # --- Resolve the repo path against the REMOTE home dir ----------------
+    # ``shlex.quote`` wraps the path in single quotes, which prevents ``~``
+    # and ``$HOME`` expansion on the remote (``cd '~/code/...'`` is a literal
+    # no-such-directory). Resolve ``~``/``$HOME`` to the remote home so the
+    # quoted ``cd`` lands on a real absolute path. A user-supplied absolute
+    # LIOM_CUDA_REPO is used verbatim.
+    home_probe = _ssh(host, user, "echo $HOME", timeout=15)
+    if home_probe.returncode != 0:
+        pytest.skip(f"$HOME probe failed on {host} (exit {home_probe.returncode})")
+    remote_home = home_probe.stdout.decode(errors="replace").strip().splitlines()[-1].strip()
+    repo = _LIOM_CUDA_REPO
+    if repo.startswith(("~", "$HOME")):
+        repo = remote_home + repo[repo.find("/") :]
+    elif not os.path.isabs(repo):
+        repo = f"{remote_home}/{repo}"
+
     # --- GPU count probe (skip if no CUDA to run NCCL on) ----------------
     nproc_env = os.environ.get("LIOM_CUDA_NPROC")
     if nproc_env:
@@ -164,7 +180,8 @@ def test_ddp_nccl_ssh_run():
         WANDB_MODE=disabled uv run torchrun \\
             --nproc_per_node={shlex.quote(str(nproc))} \\
             --standalone \\
-            liom-train-model "$DS" training --ddp --amp --epochs 1 --batch-size 2 \\
+            --module liom_toolkit.scripts.liom_train_model \\
+            "$DS" training --ddp --amp --epochs 1 --batch-size 2 \\
             --output-train "$OUT" --wandb-mode disabled
         test -f "$OUT/final_metrics.csv"
         test -f "$OUT/_liom_checkpoints/train_model.json"
