@@ -92,6 +92,32 @@ def _default_process_cap() -> int:
     return cap
 
 
+def _validate_max_workers(max_workers: int | None) -> None:
+    """Raise ``ValueError`` if ``max_workers`` is an explicit invalid value.
+
+    ``None`` is the sentinel for "use the layer default" and is always
+    accepted. An explicit ``int < 1`` (e.g. ``0``) is invalid — both
+    ``ThreadPoolExecutor(max_workers=0)`` and ``ProcessPoolExecutor(max_workers=0)``
+    raise ``ValueError`` — but the ``max_workers or _default_cap()`` fallback
+    would silently replace ``0`` with the default cap due to Python's falsiness
+    of ``0``, masking a caller bug. Surface the invalid value explicitly
+    (AGENTS section 2 — no silent wrong-behavior fallbacks).
+
+    Parameters
+    ----------
+    max_workers : int or None
+        The caller-supplied ``max_workers`` value.
+
+    Raises
+    ------
+    ValueError
+        If ``max_workers`` is not ``None`` and is less than 1. The offending
+        value is included in the message.
+    """
+    if max_workers is not None and max_workers < 1:
+        raise ValueError(f"max_workers must be >= 1 or None, got {max_workers}")
+
+
 def get_thread_pool(max_workers: int | None = None) -> ThreadPoolExecutor:
     """Return a ``ThreadPoolExecutor`` with the layer's default cap applied.
 
@@ -102,14 +128,21 @@ def get_thread_pool(max_workers: int | None = None) -> ThreadPoolExecutor:
     ----------
     max_workers : int, optional
         Explicit override. ``None`` (the default) resolves to
-        ``_default_thread_cap()``; an explicit value wins (D-02a).
+        ``_default_thread_cap()``; an explicit value wins (D-02a). An
+        explicit value < 1 raises ``ValueError`` (no silent fallback).
 
     Returns
     -------
     ThreadPoolExecutor
         A configured stdlib thread pool. The caller is responsible for
         shutting it down (``with`` block or ``shutdown()``).
+
+    Raises
+    ------
+    ValueError
+        If ``max_workers`` is not ``None`` and is less than 1.
     """
+    _validate_max_workers(max_workers)
     return ThreadPoolExecutor(max_workers=max_workers or _default_thread_cap())
 
 
@@ -126,7 +159,8 @@ def get_process_pool(
     ----------
     max_workers : int, optional
         Explicit override. ``None`` (the default) resolves to
-        ``_default_process_cap()``; an explicit value wins (D-02a).
+        ``_default_process_cap()``; an explicit value wins (D-02a). An
+        explicit value < 1 raises ``ValueError`` (no silent fallback).
     mp_context : str or StartContext, optional
         Start context for the worker processes. Defaults to ``"spawn"``
         (D-11 — mandatory for torch-importing callers; forking a
@@ -139,7 +173,13 @@ def get_process_pool(
     ProcessPoolExecutor
         A configured stdlib process pool. The caller is responsible for
         shutting it down (``with`` block or ``shutdown()``).
+
+    Raises
+    ------
+    ValueError
+        If ``max_workers`` is not ``None`` and is less than 1.
     """
+    _validate_max_workers(max_workers)
     ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
     return ProcessPoolExecutor(
         max_workers=max_workers or _default_process_cap(),
@@ -167,7 +207,8 @@ def thread_map_tqdm(
         One or more iterables passed to ``fn``.
     max_workers : int, optional
         Explicit override. ``None`` (the default) resolves to
-        ``_default_thread_cap()``; an explicit value wins (D-02a).
+        ``_default_thread_cap()``; an explicit value wins (D-02a). An
+        explicit value < 1 raises ``ValueError`` (no silent fallback).
     **kwargs
         Forwarded verbatim to ``tqdm.contrib.concurrent.thread_map``.
 
@@ -175,7 +216,13 @@ def thread_map_tqdm(
     -------
     list
         Results in input order (``thread_map`` preserves order).
+
+    Raises
+    ------
+    ValueError
+        If ``max_workers`` is not ``None`` and is less than 1.
     """
+    _validate_max_workers(max_workers)
     return thread_map(
         fn,
         *iterables,
@@ -213,7 +260,8 @@ def process_map_tqdm(
         One or more iterables passed to ``fn``.
     max_workers : int, optional
         Explicit override. ``None`` (the default) resolves to
-        ``_default_process_cap()``; an explicit value wins (D-02a).
+        ``_default_process_cap()``; an explicit value wins (D-02a). An
+        explicit value < 1 raises ``ValueError`` (no silent fallback).
     mp_context : str or StartContext, optional
         Start context. Defaults to ``"spawn"`` (D-11). The ``_lock`` is
         sourced from the SAME context as ``mp_context`` — the lock and
@@ -226,7 +274,13 @@ def process_map_tqdm(
     -------
     list
         Results in input order (``process_map`` preserves order).
+
+    Raises
+    ------
+    ValueError
+        If ``max_workers`` is not ``None`` and is less than 1.
     """
+    _validate_max_workers(max_workers)
     ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
     return process_map(
         fn,

@@ -41,6 +41,7 @@ from liom_toolkit.utils.concurrency import (
     process_map_tqdm,
     thread_map_tqdm,
 )
+from liom_toolkit.utils.concurrency import _validate_max_workers
 
 # ---------------------------------------------------------------------------
 # Cap helpers
@@ -150,6 +151,68 @@ def test_process_pool_mp_context_override():
         assert pool_ctx._mp_context is fork_ctx
     finally:
         pool_ctx.shutdown(wait=True)
+
+
+# ---------------------------------------------------------------------------
+# max_workers=0 / negative validation (IN-01)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [0, -1, -5])
+def test_validate_max_workers_rejects_explicit_invalid(bad):
+    """``_validate_max_workers`` raises ``ValueError`` for explicit ``< 1``
+    values, with the offending value in the message.
+
+    ``None`` is the "use the default" sentinel and is always accepted. An
+    explicit ``0`` would otherwise be silently replaced by the default cap
+    due to Python's falsiness of ``0`` (``max_workers or _default_cap()``),
+    masking a caller bug — surface it instead (AGENTS section 2).
+    """
+    with pytest.raises(ValueError, match=r"max_workers must be >= 1 or None"):
+        _validate_max_workers(bad)
+
+
+def test_validate_max_workers_accepts_none():
+    """``None`` is the default sentinel and must NOT raise."""
+    _validate_max_workers(None)  # no exception
+
+
+def test_validate_max_workers_accepts_positive():
+    """A positive explicit value is valid."""
+    _validate_max_workers(1)
+    _validate_max_workers(8)
+
+
+def test_get_thread_pool_rejects_zero_workers():
+    """``get_thread_pool(max_workers=0)`` raises ``ValueError`` rather than
+    silently falling back to the default cap (IN-01).
+    """
+    with pytest.raises(ValueError, match=r"max_workers must be >= 1 or None"):
+        get_thread_pool(max_workers=0)
+
+
+def test_get_process_pool_rejects_zero_workers():
+    """``get_process_pool(max_workers=0)`` raises ``ValueError`` rather than
+    silently falling back to the default cap (IN-01).
+    """
+    with pytest.raises(ValueError, match=r"max_workers must be >= 1 or None"):
+        get_process_pool(max_workers=0)
+
+
+def test_thread_map_tqdm_rejects_zero_workers():
+    """``thread_map_tqdm(max_workers=0)`` raises ``ValueError`` rather than
+    silently falling back to the default cap (IN-01).
+    """
+    with pytest.raises(ValueError, match=r"max_workers must be >= 1 or None"):
+        thread_map_tqdm(_double, range(4), max_workers=0)
+
+
+def test_process_map_tqdm_rejects_zero_workers():
+    """``process_map_tqdm(max_workers=0)`` raises ``ValueError`` rather than
+    silently falling back to the default cap (IN-01).
+    """
+    with pytest.raises(ValueError, match=r"max_workers must be >= 1 or None"):
+        process_map_tqdm(_double, range(4), max_workers=0)
 
 
 # ---------------------------------------------------------------------------
