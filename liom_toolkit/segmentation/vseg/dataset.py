@@ -347,7 +347,7 @@ class OmeZarrDataset(Dataset):
             The loaded (and optionally normalised/pre-processed) patch tensor.
         """
         return self.load_patch(
-            self.data, idx, self.pre_process, normalise=True, normalisation_value=self.max_value
+            self.data, idx, self.pre_process, normalise=self.normalise, normalisation_value=self.max_value
         )
 
     def __iter__(self) -> Iterator[torch.Tensor]:
