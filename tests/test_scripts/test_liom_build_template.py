@@ -97,3 +97,55 @@ def test_liom_build_template_main_smoke(tmp_path, fake_ants, monkeypatch) -> Non
     assert kwargs["atlas_resolution"] == 25
     assert kwargs["iterations"] == 1
     assert kwargs["resume"] is False
+
+
+def test_liom_build_template_two_zarr_two_brains_no_misassignment(
+    tmp_path, fake_ants, monkeypatch
+) -> None:
+    """``liom-build-template`` assigns 2 zarr files + 2 brain names correctly.
+
+    Regression test for the silent mis-assignment footgun: with the old
+    consecutive ``nargs="+"`` positionals, ``out.nii b1.zarr b2.zarr brain1
+    brain2`` resolved to ``zarr_files=['b1.zarr','b2.zarr','brain1']`` and
+    ``brain_names=['brain2']`` — a plausible-shaped-but-wrong result that
+    silently propagated into the groupwise registration. The repeatable
+    ``--zarr-files`` / ``--brain-names`` options make the assignment
+    unambiguous. The domain callee is spied so the test does not need real
+    OME-Zarr brains; the spy's ``call_args`` kwargs are asserted against the
+    exact lists passed on the command line.
+    """
+    out_file = str(tmp_path / "template.nii")
+    zarr1 = str(tmp_path / "brain1.zarr")
+    zarr2 = str(tmp_path / "brain2.zarr")
+    # Touch the zarr paths so the file-existence check in main() passes.
+    for p in (zarr1, zarr2):
+        with open(p, "w"):
+            pass
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-build-template",
+            out_file,
+            "--zarr-files",
+            zarr1,
+            zarr2,
+            "--brain-names",
+            "brain1",
+            "brain2",
+            "--iterations",
+            "1",
+        ],
+    )
+
+    from liom_toolkit.scripts.liom_build_template import main
+
+    with patch("liom_toolkit.registration.build_template_for_resolution") as spy:
+        main()
+
+    assert spy.called, (
+        "main() did not call build_template_for_resolution -- the domain callee was not reached"
+    )
+    kwargs = spy.call_args.kwargs
+    assert kwargs["zarr_files"] == [zarr1, zarr2]
+    assert kwargs["brain_names"] == ["brain1", "brain2"]
