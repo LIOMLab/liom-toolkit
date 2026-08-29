@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, patch
 
 import h5py
 import numpy as np
+import pytest
 
 
 def _make_dask_mock() -> MagicMock:
@@ -92,4 +93,35 @@ def test_liom_convert_hdf5_to_zarr_main_smoke(tmp_path: Path, monkeypatch) -> No
     assert zarr_out.exists(), (
         f"main() did not write the zarr store at {zarr_out} -- the real "
         "convert_hdf5_to_zarr domain callee was not reached"
+    )
+
+
+def test_liom_convert_hdf5_to_zarr_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
+    """A nonexistent input_file path exits 2 with a clear CLI error.
+
+    Without a file-existence check at the argparse boundary, ``main()`` reaches
+    ``convert_hdf5_to_zarr`` which opens the HDF5 file via h5py and raises a
+    raw third-party traceback instead of the argparse-style exit code 2. This
+    regression test pins the D-01 file-existence mitigation: the check
+    surfaces the missing path via ``parser.error`` before any Dask client
+    setup.
+    """
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-convert-hdf5-to-zarr",
+            str(tmp_path / "nope.h5"),
+            str(tmp_path / "out.zarr"),
+        ],
+    )
+
+    from liom_toolkit.scripts.liom_convert_hdf5_to_zarr import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2, (
+        "main() should exit 2 via parser.error on a nonexistent input_file, "
+        f"got exit code {exc.value.code}"
     )
