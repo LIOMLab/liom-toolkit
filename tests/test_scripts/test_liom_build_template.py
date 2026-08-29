@@ -2,8 +2,8 @@
 
 Exercises:
 * ``--help`` exits 0 and contains the 4 shared flags + the curated
-  template-building flags (output_file, zarr_files, brain_names,
-  --resolution_level, --template_resolution, --iterations, --atlas_resolution).
+  template-building flags (output_file, --zarr-files, --brain-names,
+  --resolution-level, --template-resolution, --iterations, --atlas-resolution).
 * ``main()`` reaches the real ``build_template_for_resolution`` domain callee
   (D-01 expansion slice for an ants-gated CLI). The ``ants`` lazy-import guard
   is satisfied via the ``fake_ants`` fixture (leaf-only ``sys.modules``

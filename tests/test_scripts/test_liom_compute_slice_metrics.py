@@ -2,7 +2,7 @@
 
 Exercises:
 * ``--help`` exits 0 and contains the 4 shared flags + the curated stats flags
-  (output_dir, image, --voxel_size).
+  (output_dir, image, --voxel-size).
 * ``main()`` reaches the real ``compute_slice_metrics`` domain callee and
   writes ``regions.xlsx`` (and ``regions.png``) via the real openpyxl path
   (D-03 coordination -- this smoke also exercises the real ``df.to_excel``
