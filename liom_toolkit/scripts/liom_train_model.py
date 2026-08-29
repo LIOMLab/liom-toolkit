@@ -100,18 +100,18 @@ def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
-    # D-01: validate the dataset_file positional at the argparse boundary so a
+    # Validate the dataset_file positional at the argparse boundary so a
     # nonexistent path exits 2 with a clear message instead of a raw
     # zarr/torch traceback from inside train_model. Runs BEFORE the heavy-dep
     # lazy-import guard so a bad path surfaces regardless of whether the ai
     # extra is installed. node_name is a string label, not a path — not checked.
     if not Path(args.dataset_file).exists():
         parser.error(f"input file does not exist: {args.dataset_file}")
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper()),
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     try:
         import torch  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before train_model

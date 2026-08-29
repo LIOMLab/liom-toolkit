@@ -86,11 +86,6 @@ def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
     # File-existence check at the argparse boundary: a nonexistent input
     # path produces a clear CLI error (exit 2) instead of a raw
     # ants.image_read / ome-zarr traceback deep in the domain call. Runs
@@ -112,6 +107,11 @@ def main() -> None:
             f"got {len(args.zarr_files)} zarr file(s) and "
             f"{len(args.brain_names)} brain name(s)"
         )
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper()),
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     try:
         import ants  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before the domain call

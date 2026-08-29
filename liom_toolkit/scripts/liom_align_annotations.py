@@ -74,11 +74,6 @@ def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
     # File-existence check at the argparse boundary: a nonexistent input
     # path produces a clear CLI error (exit 2) instead of a raw
     # ants.image_read traceback deep in the domain call. Runs before the
@@ -92,6 +87,11 @@ def main() -> None:
     data_dir_path = Path(args.data_dir)
     if not data_dir_path.is_dir():
         parser.error(f"data directory does not exist or is not a directory: {args.data_dir}")
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper()),
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     try:
         import ants
