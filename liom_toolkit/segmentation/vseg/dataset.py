@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
+import tempfile
 from collections.abc import Iterator
 
 import dask.array as da
@@ -210,13 +212,24 @@ def _save_valid_indices_cache(
         The valid_indices array to cache (stored as a JSON list).
     """
     sidecar = pathlib.Path(_valid_indices_cache_path(zarr_path))
-    tmp = sidecar.with_suffix(sidecar.suffix + ".partial")
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "hash": cache_hash,
         "valid_indices": np.asarray(valid_indices).astype(np.int_).tolist(),
     }
+    # Use tempfile.mkstemp for a UNIQUE temp name in the sidecar's directory
+    # (the sanctioned atomic-write pattern in checkpoint.write_manifest). A
+    # fixed ``{sidecar}.partial`` name races under DDP: both ranks call
+    # get_valid_indices, both write the same ``.partial``, one rank's
+    # replace removes it, the other's replace raises FileNotFoundError. A
+    # unique temp per writer eliminates the race regardless of concurrency
+    # (the manifest's rank-0 guard is a separate, complementary invariant).
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(sidecar.parent), suffix=".tmp", prefix=".valid_indices_"
+    )
+    tmp = pathlib.Path(tmp_name)
     try:
-        with tmp.open("w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f)
         tmp.replace(sidecar)
     except BaseException:

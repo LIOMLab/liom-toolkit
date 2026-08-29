@@ -450,8 +450,11 @@ def train_model(
         ``torchrun`` env vars (``RANK``/``WORLD_SIZE``/``LOCAL_RANK``) to
         be set — raises :class:`RuntimeError` naming the missing env state
         if any is absent (no silent single-process fallback). When the env
-        vars are present, calls ``dist.init_process_group()`` (no backend
-        arg — torchrun injects everything; auto-selects gloo/nccl), guards
+        vars are present, calls ``dist.init_process_group(backend=...)``
+        with the backend selected from CUDA availability (``nccl`` on CUDA,
+        ``gloo`` on CPU — torch 2.6+ requires an explicit backend or a
+        ``device_id`` kwarg to auto-select, and a CUDA-less host has no
+        device to pass), guards
         ``torch.cuda.set_device(int(LOCAL_RANK))`` behind
         ``torch.cuda.is_available()`` (CPU-only torch raises
         ``AttributeError`` otherwise), wraps the model with
@@ -515,12 +518,31 @@ def train_model(
         from torch.nn.parallel import DistributedDataParallel
         from torch.utils.data import DistributedSampler
 
-        dist.init_process_group()  # no backend arg — torchrun injects everything
+        # Select the backend explicitly from CUDA availability. Since torch
+        # 2.6, ``init_process_group(backend=None)`` only auto-selects when a
+        # ``device_id`` kwarg is supplied; without one, no CPU backend is
+        # registered and the subsequent ``DistributedDataParallel`` construct
+        # raises ``RuntimeError: No backend type associated with device type
+        # cpu``. On a CUDA-less host (CI runners, the CPU gloo smoke) there is
+        # no cuda device to pass as ``device_id``, so explicit backend
+        # selection is the robust path: gloo on CPU, nccl on CUDA. torchrun
+        # still injects RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT.
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend)
         if torch.cuda.is_available():
             torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         rank = dist.get_rank()
         if torch.cuda.is_available():
             dev = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+        else:
+            # CPU-only DDP (the 2-rank CPU gloo smoke is the in-CI bar;
+            # CI runners and CPU-only dev machines have no CUDA). Override
+            # the ``dev = torch.device("cuda")`` default set above so
+            # ``model.to(dev)`` does not raise on a CUDA-less host. The
+            # non-DDP default is unchanged (preserves the resume manifest's
+            # ``"dev": "cuda"`` params-hash contract — single-process
+            # CPU training is a pre-existing limitation, not a regression).
+            dev = torch.device("cpu")
     else:
         rank = 0
         dist = None
@@ -831,11 +853,18 @@ def train_model(
         artifact.add_file(f"{checkpoint_path}.latest.pth")
         run.log_artifact(artifact)
 
-        # For sweeps
+        # For sweeps — save a model.pt copy into the W&B run dir. In
+        # ``disabled`` mode (and on filesystems where wandb defers dir
+        # creation) ``wandb.run.dir`` may not exist yet; create it before
+        # the save so the sweeps artifact lands regardless of mode. The
+        # mkdir is idempotent (exist_ok=True) so online/offline modes that
+        # already created the dir are unaffected.
+        sweep_dir = Path(wandb.run.dir)
+        sweep_dir.mkdir(parents=True, exist_ok=True)
         if ddp:
-            resume_mgr.save_weights(model, str(Path(wandb.run.dir) / "model.pt"))
+            resume_mgr.save_weights(model, str(sweep_dir / "model.pt"))
         else:
-            torch.save(model.state_dict(), str(Path(wandb.run.dir) / "model.pt"))
+            torch.save(model.state_dict(), str(sweep_dir / "model.pt"))
         run.finish()
 
     # final_metrics.csv relocated to Path(output_train)/final_metrics.csv

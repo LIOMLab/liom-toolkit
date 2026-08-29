@@ -1,18 +1,23 @@
 """Tests for DDP training entry hardening.
 
 Covers the ``--ddp``-without-torchrun-env-vars raise (no silent
-single-process fallback — AGENTS §2) and the ``evaluate()`` sum+count
-all-reduce correctness under DDP (D-02a — sum+count, NOT mean-of-means,
-because val shards differ in size when ``len(val_set) % world_size != 0``).
-
-The 2-rank CPU gloo subprocess smoke (DEFER-04/SC-1) lives in a separate
-plan; this file owns the unit-level DDP entry + all-reduce tests.
+single-process fallback — AGENTS §2), the ``evaluate()`` sum+count
+all-reduce correctness under DDP (sum+count, NOT mean-of-means, because
+val shards differ in size when ``len(val_set) % world_size != 0``), and
+the 2-rank CPU gloo subprocess ``torchrun`` smoke (the in-CI bar
+exercising the real launch contract users run).
 """
 
 from __future__ import annotations
 
+import json
+import os
+import socket
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - torchrun smoke legitimately spawns a subprocess
+import sys
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 
@@ -162,4 +167,138 @@ def test_evaluate_sum_count_all_reduce(monkeypatch):
     assert abs(epoch_loss - expected_global) < 1e-5, (
         f"evaluate() under DDP must return the global sum+count mean "
         f"{expected_global}, got per-shard mean {epoch_loss}"
+    )
+
+
+def _make_tiny_labeled_zarr_for_smoke(tmp_path) -> str:
+    """Build a (2, 256, 256) uint16 image zarr + matching uint8 label for the gloo smoke.
+
+    ``train_model`` hardcodes ``patch_size=(1, 256, 256)`` and
+    ``filter_empty_patches=True`` (the CLI exposes neither), so the volume
+    must be at least 256x256 in YX. A 2-slice volume gives a (2, 1, 1) grid
+    → 2 grid patches x 4 rotations = 8 dataset items, enough for a 2-rank
+    ``DistributedSampler`` to shard (4 per rank) with ``batch_size=2``.
+    The non-empty region (``[:, 32:224, 32:224] = 1``) makes every patch
+    valid so ``filter_empty`` keeps all 8 items. Written via ``save_zarr``
+    + ``save_label_to_zarr`` (NGFF v0.5 multiscale, the real IO path
+    ``OmeZarrLabelDataSet`` reads) — no mocking of zarr/numpy/torch
+    (AGENTS section 5).
+    """
+    from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
+    from liom_toolkit.utils.io import generate_label_color_dict_mask
+
+    arr = np.zeros((2, 256, 256), dtype=np.uint16)
+    arr[:, 32:224, 32:224] = 1000
+    zarr_path = str(tmp_path / "smoke.zarr")
+    save_zarr(arr, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(2, 256, 256))
+
+    label = np.zeros((2, 256, 256), dtype=np.uint8)
+    label[:, 32:224, 32:224] = 1
+    save_label_to_zarr(
+        label,
+        zarr_path,
+        generate_label_color_dict_mask(),
+        "training",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(2, 256, 256),
+    )
+    return zarr_path
+
+
+@pytest.mark.ai
+def test_ddp_2rank_gloo_smoke(tmp_path):
+    """2-rank CPU gloo DDP run via subprocess ``torchrun`` completes without corruption.
+
+    Spawns the real ``torchrun`` launch contract (``python -m
+    torch.distributed.run --nproc-per-node=2 --standalone``) against the
+    ``liom-train-model`` CLI with ``--ddp`` — the only mechanism that
+    exercises env-var injection, rendezvous, and ``--local-rank`` arg
+    passing (``mp.spawn``/thread-gloo are rejected because they test a
+    launch path no user runs). Asserts the run exits 0, the
+    ``final_metrics.csv`` lands in ``output_train`` (the CWD-collision
+    relocation), the manifest is a single valid JSON file (no rank-write
+    race corruption), and a single rank-0 ``checkpoint.latest.pth`` exists
+    (the ``DDPResumeManager`` rank-0-only write invariant).
+
+    This is the in-CI bar for the DDP entry shape. W&B is forced to
+    ``disabled`` mode (no network, no run dir) — the rank-0-only W&B
+    invariant is unit-tested alongside the DDP entry; the smoke verifies
+    it holds end-to-end via the exit-0 + file-invariant assertions.
+    """
+    pytest.importorskip("torch")
+
+    zarr_path = _make_tiny_labeled_zarr_for_smoke(tmp_path)
+    out_dir = tmp_path / "out"
+
+    # Pick a free port in the parent via socket.bind — xdist-safe (the
+    # pattern PyTorch's own PRs and HuggingFace's get_torch_dist_unique_port
+    # use). ``--standalone`` runs its own rendezvous store on a free
+    # port, but passing ``--master-port`` makes the rendezvous endpoint
+    # deterministic and avoids the rare race where two smokes pick the same
+    # ephemeral port.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - controlled torchrun invocation (sys.executable + known args)
+        [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--nproc-per-node=2",
+            "--standalone",
+            "--master-port",
+            str(port),
+            # --local-addr=127.0.0.1 + MASTER_ADDR=127.0.0.1 (in env) avoid the
+            # macOS gloo reverse-DNS hang: without them gloo resolves the
+            # machine hostname, which fails with gai error 8 on macOS and
+            # stalls rendezvous until the subprocess timeout. Loopback is the
+            # correct address for a single-node 2-rank CPU smoke.
+            "--local-addr",
+            "127.0.0.1",
+            "--module",
+            "liom_toolkit.scripts.liom_train_model",
+            zarr_path,
+            "training",
+            "--ddp",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "2",
+            "--output-train",
+            str(out_dir),
+            "--wandb-mode",
+            "disabled",
+        ],
+        capture_output=True,
+        check=False,
+        env={**os.environ, "WANDB_MODE": "disabled", "MASTER_ADDR": "127.0.0.1"},
+        timeout=300,
+    )
+
+    assert proc.returncode == 0, (
+        f"torchrun gloo smoke exited {proc.returncode}.\n"
+        f"--- stdout ---\n{proc.stdout.decode(errors='replace')[-4000:]}\n"
+        f"--- stderr ---\n{proc.stderr.decode(errors='replace')[-8000:]}"
+    )
+
+    # final_metrics.csv relocated to Path(output_train)/final_metrics.csv
+    # (not the process CWD) — eliminates the concurrent-run collision.
+    assert (out_dir / "final_metrics.csv").exists(), (
+        "final_metrics.csv must land in output_train (the CWD-collision relocation)"
+    )
+
+    # Single manifest, valid JSON — no rank-write race corruption (the
+    # DDPResumeManager._write_manifest rank-0 guard prevents two ranks
+    # os.replace-ing the same {pipeline}.json).
+    manifest = out_dir / "_liom_checkpoints" / "train_model.json"
+    assert manifest.exists(), "manifest must exist (DDPResumeManager rank-0 write)"
+    # Parses as valid JSON — a half-written (corrupted) manifest would raise.
+    json.loads(manifest.read_text())
+
+    # Single rank-0 .pth — DDPResumeManager.save_weights no-ops on non-rank-0
+    # so only rank 0 writes checkpoint.latest.pth (no race corruption).
+    assert (out_dir / "files" / "checkpoint.latest.pth").exists(), (
+        "checkpoint.latest.pth must exist (rank-0-only save_weights)"
     )

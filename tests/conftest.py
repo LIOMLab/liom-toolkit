@@ -6,6 +6,7 @@ They are shipped in Phase 1 so later phases can consume them without
 redefinition.
 """
 
+import os
 import sys
 
 import numpy as np
@@ -154,6 +155,27 @@ def fake_wandb():
             sys.modules.pop("wandb", None)
         else:
             sys.modules["wandb"] = saved
+
+
+@pytest.fixture(autouse=True)
+def _unset_ddp_env_vars():
+    """Unset DDP/torchrun env vars in teardown so they do not leak between tests.
+
+    ``torchrun`` injects ``RANK``/``WORLD_SIZE``/``LOCAL_RANK``/
+    ``MASTER_ADDR``/``MASTER_PORT`` into the child process environment. A
+    test that sets these (or a subprocess that leaks them back into the
+    parent's view via a shared environment) would corrupt the next test's
+    DDP entry branch — e.g. ``train_model(ddp=False)`` seeing a stale
+    ``RANK`` and silently entering the distributed path, or
+    ``train_model(ddp=True)`` skipping the missing-var raise because the
+    vars leaked from a prior subprocess. This autouse fixture unsets them
+    in teardown only (setup is a no-op — the gloo smoke sets the vars via
+    the subprocess, not the parent) so every test starts from a clean DDP
+    env. Sibling to ``_reset_pil_max_image_pixels``.
+    """
+    yield
+    for env_var in ("RANK", "WORLD_SIZE", "LOCAL_RANK", "MASTER_ADDR", "MASTER_PORT"):
+        os.environ.pop(env_var, None)
 
 
 @pytest.fixture(autouse=True)

@@ -37,8 +37,13 @@ def create_dir(path: str) -> None:
     path : str
         The path to create.
     """
-    if not Path(path).exists():
-        Path(path).mkdir(parents=True)
+    # mkdir(exist_ok=True) is atomic and race-free. The previous
+    # ``if not exists(): mkdir()`` was a TOCTOU race: under DDP both ranks
+    # saw not-exists, both called mkdir, and one raised FileExistsError.
+    # exist_ok=True collapses the check + create so concurrent callers
+    # (DDP ranks, or any parallel pipeline) no longer race on the same
+    # output directory.
+    Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def calculate_metrics(y_true: NDArray[np.number], y_pred: NDArray[np.number]) -> list[float]:
