@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.scripts._common import build_common_parser
 
@@ -24,29 +25,31 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("output_file", help="Path where the output template is saved (NIfTI/NRRD)")
     p.add_argument(
-        "zarr_files",
+        "--zarr-files",
         nargs="+",
+        required=True,
         help="Paths to the input OME-Zarr brain files",
     )
     p.add_argument(
-        "brain_names",
+        "--brain-names",
         nargs="+",
+        required=True,
         help="Brain names for saving pre-registered images",
     )
     p.add_argument(
-        "--resolution_level",
+        "--resolution-level",
         type=int,
         default=3,
         help="OME-Zarr resolution level to load (default=%(default)s)",
     )
     p.add_argument(
-        "--template_resolution",
+        "--template-resolution",
         type=int,
         default=50,
         help="Template resolution in micron (default=%(default)s)",
     )
     p.add_argument(
-        "--atlas_resolution",
+        "--atlas-resolution",
         type=int,
         default=None,
         help="Allen atlas resolution in micron (default: template_resolution)",
@@ -65,7 +68,7 @@ def main() -> None:
 
     Parses CLI arguments, configures logging via ``basicConfig`` on the root
     logger, optionally connects to a remote Dask scheduler when
-    ``--dask_scheduler`` is given, and delegates to
+    ``--dask-scheduler`` is given, and delegates to
     :func:`liom_toolkit.registration.build_template_for_resolution`.
 
     Note
@@ -87,6 +90,15 @@ def main() -> None:
         level=getattr(logging, args.log_level.upper()),
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    # File-existence check at the argparse boundary: a nonexistent input
+    # path produces a clear CLI error (exit 2) instead of a raw
+    # ants.image_read / ome-zarr traceback deep in the domain call. Runs
+    # before the ants lazy-import guard so the error surfaces regardless of
+    # whether the extra is installed.
+    for zarr_path in args.zarr_files:
+        if not Path(zarr_path).exists():
+            parser.error(f"input file does not exist: {zarr_path}")
 
     try:
         import ants  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before the domain call

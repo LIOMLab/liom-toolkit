@@ -37,13 +37,13 @@ def test_liom_build_template_help_exits_0() -> None:
     out = _build_argument_parser().format_help()
     for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-build-template --help missing {flag}"
-    for flag in ("output_file", "zarr_files", "brain_names"):
+    for flag in ("output_file", "--zarr-files", "--brain-names"):
         assert flag in out, f"liom-build-template --help missing {flag}"
     for flag in (
-        "--resolution_level",
-        "--template_resolution",
+        "--resolution-level",
+        "--template-resolution",
         "--iterations",
-        "--atlas_resolution",
+        "--atlas-resolution",
     ):
         assert flag in out, f"liom-build-template --help missing {flag}"
 
@@ -61,19 +61,24 @@ def test_liom_build_template_main_smoke(tmp_path, fake_ants, monkeypatch) -> Non
     """
     out_file = str(tmp_path / "template.nii")
     zarr1 = str(tmp_path / "brain1.zarr")
+    # Touch the zarr path so the file-existence check in main() passes.
+    with open(zarr1, "w"):
+        pass
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "liom-build-template",
             out_file,
+            "--zarr-files",
             zarr1,
+            "--brain-names",
             "brain1",
-            "--resolution_level",
+            "--resolution-level",
             "0",
-            "--template_resolution",
+            "--template-resolution",
             "25",
-            "--atlas_resolution",
+            "--atlas-resolution",
             "25",
             "--iterations",
             "1",
@@ -149,3 +154,41 @@ def test_liom_build_template_two_zarr_two_brains_no_misassignment(
     kwargs = spy.call_args.kwargs
     assert kwargs["zarr_files"] == [zarr1, zarr2]
     assert kwargs["brain_names"] == ["brain1", "brain2"]
+
+
+def test_liom_build_template_nonexistent_zarr_exits_2(monkeypatch, capsys) -> None:
+    """A nonexistent ``--zarr-files`` path exits 2 with an actionable message.
+
+    The file-existence check runs at the argparse boundary (before the ants
+    lazy-import guard) so a bad input path produces a clear CLI error
+    ``input file does not exist: <path>`` (argparse exit 2) instead of a raw
+    ``ants.image_read`` / ome-zarr traceback deep in the domain call. Uses
+    ``parser.error`` (not ``assert``) per the project's validation rule.
+    """
+    out_file = "/tmp/template_does_not_need_to_exist_for_this_test.nii"
+    missing_zarr = "/tmp/this_zarr_path_does_not_exist_12345.zarr"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-build-template",
+            out_file,
+            "--zarr-files",
+            missing_zarr,
+            "--brain-names",
+            "brain1",
+            "--iterations",
+            "1",
+        ],
+    )
+
+    import pytest
+
+    from liom_toolkit.scripts.liom_build_template import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "input file does not exist" in captured.err
+    assert missing_zarr in captured.err
