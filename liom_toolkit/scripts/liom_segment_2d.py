@@ -85,10 +85,12 @@ def main() -> None:
     # with an actionable exit-2 message instead of letting them flow into the
     # domain callee and produce a confusing deep traceback. parser.error exits
     # 2 — never use assert for validation (it is stripped under python -O).
-    if args.local_threshold_size % 2 == 0:
+    if args.local_threshold_size < 1:
         parser.error(
-            f"--local-threshold-size must be odd, got {args.local_threshold_size}"
+            f"--local-threshold-size must be a positive odd integer, got {args.local_threshold_size}"
         )
+    if args.local_threshold_size % 2 == 0:
+        parser.error(f"--local-threshold-size must be odd, got {args.local_threshold_size}")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),

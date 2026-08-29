@@ -91,6 +91,40 @@ def test_liom_segment_2d_even_threshold_size_exits_2(tmp_path: Path, monkeypatch
     assert exc.value.code == 2
 
 
+def test_liom_segment_2d_negative_threshold_size_exits_2(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A negative odd --local-threshold-size exits 2 at the argparse boundary.
+
+    The odd-check alone accepts negative odd values (e.g. -3, since -3 % 2 == 1
+    in Python), which are invalid Sauvola window sizes. The positivity check
+    fires before the odd-check so a negative value surfaces a clear exit-2
+    message instead of a deep traceback inside the domain callee.
+    """
+    img = np.zeros((64, 64), dtype=np.uint8)
+    img[16:48, 16:48] = 200
+    input_file = tmp_path / "input.tif"
+    iio.imwrite(str(input_file), img)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-segment-2d",
+            str(input_file),
+            str(tmp_path / "out"),
+            "--local-threshold-size",
+            "-3",
+        ],
+    )
+
+    from liom_toolkit.scripts.liom_segment_2d import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+
+
 def test_liom_segment_2d_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
     """A nonexistent input_file exits 2 with a clear message, not a raw imageio traceback.
 
