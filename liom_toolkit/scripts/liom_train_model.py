@@ -71,6 +71,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--wandb-mode",
         type=str,
         default="offline",
+        choices=["online", "offline", "disabled"],
         help="wandb mode: online/offline/disabled (default=%(default)s)",
     )
     return p
