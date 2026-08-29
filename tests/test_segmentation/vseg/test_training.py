@@ -157,6 +157,8 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
                 "filter_empty_patches": True,
                 "dev": "cuda",
                 "pin_memory": True,
+                "ddp": False,
+                "use_amp": False,
             },
             steps_total=epochs,
         )

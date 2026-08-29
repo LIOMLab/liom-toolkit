@@ -74,6 +74,17 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         choices=["online", "offline", "disabled"],
         help="wandb mode: online/offline/disabled (default=%(default)s)",
     )
+    p.add_argument(
+        "--ddp",
+        action="store_true",
+        help="Enable DistributedDataParallel training (launch via torchrun; "
+        "requires RANK/WORLD_SIZE/LOCAL_RANK env vars)",
+    )
+    p.add_argument(
+        "--amp",
+        action="store_true",
+        help="Enable Automatic Mixed Precision (torch.amp.GradScaler; no-op on CPU/gloo)",
+    )
     return p
 
 
@@ -145,6 +156,8 @@ def main() -> None:
         pretrained_artifact=args.pretrained_artifact,
         wandb_mode=args.wandb_mode,
         resume=args.resume,
+        ddp=args.ddp,
+        use_amp=args.amp,
     )
 
 
