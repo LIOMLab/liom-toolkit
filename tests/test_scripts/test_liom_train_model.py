@@ -25,7 +25,7 @@ def test_liom_train_model_help_exits_0() -> None:
     from liom_toolkit.scripts.liom_train_model import _build_argument_parser
 
     out = _build_argument_parser().format_help()
-    for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
+    for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-train-model --help missing {flag}"
     for flag in ("dataset_file", "node_name"):
         assert flag in out, f"liom-train-model --help missing {flag}"

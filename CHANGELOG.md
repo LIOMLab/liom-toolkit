@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0]
+
+The CLI correctness-audit release. The `liom-*` command-line surface is
+hardened before the vseg/DDP work adds an 8th CLI: every CLI flag is
+normalized to the hyphenated form, a confirmed silent mis-assignment bug in
+`liom-build-template` is fixed, and structural input validation (file
+existence, enumerated choices, odd-integer checks) lands at the argparse
+boundary so bad input produces a clear CLI error instead of a raw traceback
+or a silently wrong result.
+
+> **Semver deviation note:** this release ships **breaking** CLI changes
+> under a **minor** version, deviating from strict semver (which reserves
+> breaking changes for a major version bump). This is a deliberate choice
+> following the project's established v1.0 "clean break, no deprecation
+> shims" precedent: the vseg overhaul is already the planned v1.2 core
+> release event, and a flag rename does not warrant pre-empting the 2.0
+> major slot. The breaking changes are documented explicitly below so
+> external PyPI users see the migration path.
+
+### Changed
+
+- **Breaking:** All CLI flags normalized to hyphenated form. The
+  `dest` names argparse derives are unchanged (hyphens map to underscores),
+  so `args.dask_scheduler`, `args.n_workers`, `args.resolution_level`,
+  etc. read sites in every `main()` are unaffected — only the flag strings
+  users type on the command line change. The 16 renamed flags:
+
+  | Old flag | New flag | CLI |
+  |----------|----------|-----|
+  | `--dask_scheduler` | `--dask-scheduler` | shared (all 7 CLIs) |
+  | `--n_workers` | `--n-workers` | shared (all 7 CLIs) |
+  | `--resolution_level` | `--resolution-level` | liom-build-template |
+  | `--template_resolution` | `--template-resolution` | liom-build-template |
+  | `--atlas_resolution` | `--atlas-resolution` | liom-build-template |
+  | `--voxel_size` | `--voxel-size` | liom-compute-slice-metrics |
+  | `--fill_holes` | `--fill-holes` | liom-create-mask |
+  | `--rigid_type` | `--rigid-type` | liom-align-annotations |
+  | `--deformable_type` | `--deformable-type` | liom-align-annotations |
+  | `--output_train` | `--output-train` | liom-train-model |
+  | `--batch_size` | `--batch-size` | liom-train-model |
+  | `--learning_rate` | `--learning-rate` | liom-train-model |
+  | `--wandb_entity` | `--wandb-entity` | liom-train-model |
+  | `--wandb_project` | `--wandb-project` | liom-train-model |
+  | `--wandb_mode` | `--wandb-mode` | liom-train-model |
+  | `--pretrained_artifact` | `--pretrained-artifact` | liom-train-model |
+
+  The already-hyphenated flags (`--log-level`, `--resume`,
+  `--frangi-sigma-range`, `--frangi-black-ridges`, `--local-threshold`,
+  `--local-threshold-size`, `--scales`, `--chunks`, `--resolution`,
+  `--iterations`, `--epochs`) are unchanged. The console-script entry-point
+  names (`liom-convert-hdf5-to-zarr`, etc.) are NOT renamed — only the
+  flags inside each CLI.
+
+- **Breaking:** `liom-build-template` `zarr_files` / `brain_names`
+  converted from consecutive `nargs="+"` positional arguments to
+  repeatable `--zarr-files` / `--brain-names` options (`nargs="+"`,
+  `required=True`). The previous positional form silently mis-assigned
+  arguments when given more than one of each (e.g.
+  `out.nii b1.zarr b2.zarr brain1 brain2` resolved to
+  `zarr_files=['b1.zarr','b2.zarr','brain1']`,
+  `brain_names=['brain2']`). The `build_template_for_resolution` domain
+  signature is unchanged — `main()` still passes `zarr_files=` /
+  `brain_names=` lists through. Old vs new invocation:
+
+  ```bash
+  # old (silently mis-assigns with >1 brain)
+  liom-build-template out.nii b1.zarr b2.zarr brain1 brain2
+
+  # new (unambiguous)
+  liom-build-template out.nii --zarr-files b1.zarr b2.zarr \
+      --brain-names brain1 brain2
+  ```
+
+- `--resolution` (liom-align-annotations) now enforces
+  `choices=[10, 25, 50, 100]` (the help text already said "must be
+  10/25/50/100" but no constraint was enforced; a wrong value silently
+  produced a wrong atlas alignment).
+- `--local-threshold-size` (liom-segment-2d) now validates the value is
+  an odd integer (the help text already said "must be odd" but it was
+  unvalidated; an even value flowed into Sauvola thresholding).
+- Positional input-file paths across the CLIs that take file paths now
+  gain file-existence checks at the argparse boundary, so a nonexistent
+  path produces a clear `error: input file does not exist: <path>`
+  (argparse exit 2) instead of a raw `imageio` / `h5py` /
+  `ants.image_read` traceback.
+
+### Migration
+
+Replace every snake_case flag in your `liom-*` shell scripts and notebooks
+with its hyphenated replacement from the table above. The `dest` names
+argparse derives are unchanged, so any code reading `args.*` (e.g. notebooks
+calling `_build_argument_parser().parse_args(...)`) is unaffected. For
+`liom-build-template`, switch the positional `zarr_files brain_names` form
+to the repeatable `--zarr-files ... --brain-names ...` options shown above.
+
 ## [1.1.0] - 2026-08-29
 
 The lightweight-IO release. The core dependency set is slimmed to the

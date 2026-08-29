@@ -37,7 +37,7 @@ def test_liom_compute_slice_metrics_help_exits_0() -> None:
     )
 
     out = _build_argument_parser().format_help()
-    for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
+    for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"
     for flag in ("output_dir", "image", "--voxel_size"):
         assert flag in out, f"liom-compute-slice-metrics --help missing {flag}"

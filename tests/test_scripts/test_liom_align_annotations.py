@@ -24,7 +24,7 @@ def test_liom_align_annotations_help_exits_0() -> None:
     from liom_toolkit.scripts.liom_align_annotations import _build_argument_parser
 
     out = _build_argument_parser().format_help()
-    for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
+    for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-align-annotations --help missing {flag}"
     for flag in ("target_volume", "mask", "template", "atlas", "data_dir"):
         assert flag in out, f"liom-align-annotations --help missing {flag}"

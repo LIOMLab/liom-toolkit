@@ -1,7 +1,7 @@
 """Tests for the shared CLI parent parser (``liom_toolkit/scripts/_common.py``).
 
 Covers the cross-cutting flag contract consumed by every CLI via
-``parents=[build_common_parser()]``: ``--dask_scheduler``, ``--n_workers``,
+``parents=[build_common_parser()]``: ``--dask-scheduler``, ``--n-workers``,
 ``--log-level``, ``--resume``. Also smoke-tests the existing retrofitted CLIs'
 ``--help`` to confirm the shared flags are present.
 
@@ -22,9 +22,9 @@ def test_build_common_parser_has_flags() -> None:
     parser = build_common_parser()
     args = parser.parse_args(
         [
-            "--dask_scheduler",
+            "--dask-scheduler",
             "127.0.0.1:8786",
-            "--n_workers",
+            "--n-workers",
             "4",
             "--log-level",
             "DEBUG",
@@ -66,14 +66,14 @@ def test_resume_default_false() -> None:
 
 
 def test_n_workers_default_none() -> None:
-    """--n_workers defaults to None (local cluster decides)."""
+    """--n-workers defaults to None (local cluster decides)."""
     parser = build_common_parser()
     args = parser.parse_args([])
     assert args.n_workers is None
 
 
 def test_dask_scheduler_default_none() -> None:
-    """--dask_scheduler defaults to None (local cluster)."""
+    """--dask-scheduler defaults to None (local cluster)."""
     parser = build_common_parser()
     args = parser.parse_args([])
     assert args.dask_scheduler is None
@@ -96,7 +96,7 @@ def _help_text(module_name: str) -> str:
 def test_liom_segment_2d_help_exits_0() -> None:
     """liom-segment-2d --help contains the 4 shared flags."""
     out = _help_text("liom_segment_2d")
-    for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
+    for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-segment-2d --help missing {flag}"
 
 

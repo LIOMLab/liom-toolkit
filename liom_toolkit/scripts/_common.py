@@ -3,10 +3,14 @@
 Every LIOM Toolkit CLI consumes these via ``parents=[build_common_parser()]``
 in its own ``_build_argument_parser()``. The shared flags are:
 
-* ``--dask_scheduler`` — remote Dask scheduler address (default: local cluster)
-* ``--n_workers`` — Dask local-cluster worker count (default: scheduler decides)
+* ``--dask-scheduler`` — remote Dask scheduler address (default: local cluster)
+* ``--n-workers`` — Dask local-cluster worker count (default: scheduler decides)
 * ``--log-level`` — logging level for the CLI's ``basicConfig`` (default: INFO)
 * ``--resume`` — resume from checkpoint if available (default: False)
+
+The flag strings are hyphenated; argparse auto-derives the ``dest`` by
+replacing hyphens with underscores, so callers read ``args.dask_scheduler``
+and ``args.n_workers`` unchanged.
 """
 
 from __future__ import annotations
@@ -29,13 +33,13 @@ def build_common_parser() -> argparse.ArgumentParser:
     """
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument(
-        "--dask_scheduler",
+        "--dask-scheduler",
         type=str,
         default=None,
         help="Network address of the dask scheduler (default: local cluster)",
     )
     p.add_argument(
-        "--n_workers",
+        "--n-workers",
         type=int,
         default=None,
         help="Number of Dask local-cluster workers (default: min(cpu_count()-1, 8))",

@@ -35,7 +35,7 @@ def test_liom_build_template_help_exits_0() -> None:
     from liom_toolkit.scripts.liom_build_template import _build_argument_parser
 
     out = _build_argument_parser().format_help()
-    for flag in ("--log-level", "--resume", "--dask_scheduler", "--n_workers"):
+    for flag in ("--log-level", "--resume", "--dask-scheduler", "--n-workers"):
         assert flag in out, f"liom-build-template --help missing {flag}"
     for flag in ("output_file", "zarr_files", "brain_names"):
         assert flag in out, f"liom-build-template --help missing {flag}"
