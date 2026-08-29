@@ -2,9 +2,9 @@
 
 Exercises:
 * ``--help`` exits 0 and contains the 4 shared flags + the curated training
-  flags (dataset_file, node_name, --output_train, --epochs, --batch_size,
-  --learning_rate, --wandb_entity, --wandb_project, --pretrained_artifact,
-  --wandb_mode).
+  flags (dataset_file, node_name, --output-train, --epochs, --batch-size,
+  --learning-rate, --wandb-entity, --wandb-project, --pretrained-artifact,
+  --wandb-mode).
 * The CLI surfaces a clear ``ImportError`` mentioning ``PyTorch`` or ``wandb``
   when the ``ai`` extra is not importable (lazy-import guard pattern).
 
@@ -30,14 +30,14 @@ def test_liom_train_model_help_exits_0() -> None:
     for flag in ("dataset_file", "node_name"):
         assert flag in out, f"liom-train-model --help missing {flag}"
     for flag in (
-        "--output_train",
+        "--output-train",
         "--epochs",
-        "--batch_size",
-        "--learning_rate",
-        "--wandb_entity",
-        "--wandb_project",
-        "--pretrained_artifact",
-        "--wandb_mode",
+        "--batch-size",
+        "--learning-rate",
+        "--wandb-entity",
+        "--wandb-project",
+        "--pretrained-artifact",
+        "--wandb-mode",
     ):
         assert flag in out, f"liom-train-model --help missing {flag}"
 
@@ -70,7 +70,9 @@ def test_importerror_surfacing_train_model(tmp_path, monkeypatch) -> None:
         main()
 
 
-def test_liom_train_model_missing_dataset_exits_2(tmp_path, fake_torch, fake_wandb, monkeypatch) -> None:
+def test_liom_train_model_missing_dataset_exits_2(
+    tmp_path, fake_torch, fake_wandb, monkeypatch
+) -> None:
     """liom-train-model exits 2 with a clear message when dataset_file does not exist.
 
     A nonexistent dataset_file path must surface as ``parser.error`` (exit 2)
@@ -107,23 +109,24 @@ def test_liom_train_model_main_smoke(tmp_path, fake_torch, fake_wandb, monkeypat
     ``main()``'s call to ``train_model`` raises ``TypeError`` at the
     ``main()`` call site before the spy is invoked.
     """
-    dataset_file = str(tmp_path / "dataset.zarr")
+    dataset_file = tmp_path / "dataset.zarr"
+    dataset_file.touch()  # materialize so the D-01 file-existence check passes
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "liom-train-model",
-            dataset_file,
+            str(dataset_file),
             "node_name",
-            "--output_train",
+            "--output-train",
             str(tmp_path / "training"),
             "--epochs",
             "1",
-            "--batch_size",
+            "--batch-size",
             "1",
-            "--learning_rate",
+            "--learning-rate",
             "0.001",
-            "--wandb_mode",
+            "--wandb-mode",
             "offline",
         ],
     )
@@ -135,7 +138,7 @@ def test_liom_train_model_main_smoke(tmp_path, fake_torch, fake_wandb, monkeypat
 
     assert spy.called, "main() did not call train_model -- the domain callee was not reached"
     kwargs = spy.call_args.kwargs
-    assert kwargs["dataset_file"] == dataset_file
+    assert kwargs["dataset_file"] == str(dataset_file)
     assert kwargs["node_name"] == "node_name"
     assert kwargs["output_train"] == str(tmp_path / "training")
     assert kwargs["epochs"] == 1

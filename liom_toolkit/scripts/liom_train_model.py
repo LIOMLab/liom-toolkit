@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.scripts._common import build_common_parser
 
@@ -25,7 +26,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("dataset_file", help="Path to the OME-Zarr dataset file")
     p.add_argument("node_name", help="Name of the node in the zarr file")
     p.add_argument(
-        "--output_train",
+        "--output-train",
         type=str,
         default="training",
         help="Output directory for training artifacts (default=%(default)s)",
@@ -37,37 +38,37 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Number of training epochs (default=%(default)s)",
     )
     p.add_argument(
-        "--batch_size",
+        "--batch-size",
         type=int,
         default=35,
         help="Training batch size (default=%(default)s)",
     )
     p.add_argument(
-        "--learning_rate",
+        "--learning-rate",
         type=float,
         default=0.003673,
         help="Optimizer learning rate (default=%(default)s)",
     )
     p.add_argument(
-        "--wandb_entity",
+        "--wandb-entity",
         type=str,
         default=None,
         help="wandb entity/team (default: wandb user default)",
     )
     p.add_argument(
-        "--wandb_project",
+        "--wandb-project",
         type=str,
         default=None,
         help="wandb project name (default: wandb default project)",
     )
     p.add_argument(
-        "--pretrained_artifact",
+        "--pretrained-artifact",
         type=str,
         default=None,
         help="wandb artifact path for pretrained weights (default: train from scratch)",
     )
     p.add_argument(
-        "--wandb_mode",
+        "--wandb-mode",
         type=str,
         default="offline",
         help="wandb mode: online/offline/disabled (default=%(default)s)",
@@ -102,6 +103,14 @@ def main() -> None:
         level=getattr(logging, args.log_level.upper()),
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    # D-01: validate the dataset_file positional at the argparse boundary so a
+    # nonexistent path exits 2 with a clear message instead of a raw
+    # zarr/torch traceback from inside train_model. Runs BEFORE the heavy-dep
+    # lazy-import guard so a bad path surfaces regardless of whether the ai
+    # extra is installed. node_name is a string label, not a path — not checked.
+    if not Path(args.dataset_file).exists():
+        parser.error(f"input file does not exist: {args.dataset_file}")
 
     try:
         import torch  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before train_model
