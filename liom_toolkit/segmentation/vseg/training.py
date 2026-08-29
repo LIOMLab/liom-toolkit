@@ -7,10 +7,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
-from skimage.color import gray2rgb, label2rgb
 from tqdm.auto import tqdm
+
+# pandas + scikit-image are moved into the [seg]/[stats] extras (D-01/D-05).
+# The upfront ImportError here is the honest signal on an io-only install.
+# pandas is shared between [stats] and [antspy]; the message names both
+# relevant extras. The `from e` chain preserves the underlying error for
+# debugging (AGENTS §2). torch stays function-scope lazy (lines below) --
+# do NOT move it to module top.
+try:
+    import pandas as pd
+    from skimage.color import gray2rgb, label2rgb
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] or [stats] to use the "
+        "vessel segmentation training module."
+    ) from e
 
 from .utils import calculate_metrics, create_dir
 

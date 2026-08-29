@@ -10,9 +10,18 @@ import natsort
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
-from skimage.color import rgb2gray
-from skimage.exposure import equalize_adapthist
-from skimage.util import view_as_windows
+
+# scikit-image is moved into the [seg] extra (D-01/D-05). The upfront
+# ImportError here is the honest signal on an io-only install. The `from e`
+# chain preserves the underlying error for debugging (AGENTS §2).
+try:
+    from skimage.color import rgb2gray
+    from skimage.exposure import equalize_adapthist
+    from skimage.util import view_as_windows
+except ImportError as e:
+    raise ImportError(
+        "Please install liom-toolkit[seg] to use the vessel segmentation utilities module."
+    ) from e
 
 if TYPE_CHECKING:
     import torch
