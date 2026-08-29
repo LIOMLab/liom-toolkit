@@ -406,11 +406,18 @@ class OmeZarrDataset(Dataset):
         torch.Tensor
             The loaded patch as a float32 tensor on ``self.device``.
         """
-        # The index corresponds to the place in the grid, the rest is for the rotation
+        # The index corresponds to the place in the grid, the rest is for the
+        # rotation. The rotation index (rest) MUST be taken from the ORIGINAL
+        # idx before the floor-division: orig_idx % 4 selects which of the 4
+        # rotations this copy is, and orig_idx // 4 selects the grid patch.
+        # Computing rest AFTER the division yields (orig_idx // 4) % 4, which
+        # cycles the rotation by grid position instead of per-patch -- every
+        # grid patch's 4 copies then get the SAME rotation, silently breaking
+        # the augmentation (75% of the dataset becomes redundant identical
+        # copies). divmod captures both in one call so the two cannot drift.
         rest = 0
         if self.rotate_patches:
-            idx = idx // 4
-            rest = idx % 4
+            idx, rest = divmod(idx, 4)
 
         z1, z2, y1, y2, x1, x2 = self.get_patch_coordinates(idx)
         patch_data = data[z1:z2, y1:y2, x1:x2]
