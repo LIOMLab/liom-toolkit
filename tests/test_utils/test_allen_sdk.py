@@ -491,7 +491,7 @@ def test_download_nrrd_raises_on_404(tmp_path):
 
     dest = str(tmp_path / "out.nrrd")
     with (
-        patch("liom_toolkit.utils.allen_sdk.requests.get", return_value=mock_resp),
+        patch("requests.get", return_value=mock_resp),
         pytest.raises(_requests.HTTPError),
     ):
         _download_nrrd("http://example.com/x.nrrd", dest)
@@ -545,7 +545,7 @@ def test_download_allen_atlas_cache_hit(tmp_path):
         _json.dump(tree_payload, f)
 
     # Patch requests.get so it would raise if called (it should NOT be called)
-    with patch("liom_toolkit.utils.allen_sdk.requests.get") as get_mock:
+    with patch("requests.get") as get_mock:
         get_mock.side_effect = AssertionError("requests.get should not be called on cache hit")
         rs = construct_reference_space(str(tmp_path), resolution=25)
 
