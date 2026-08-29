@@ -7,10 +7,18 @@ metadata is wrong or if the py.typed marker is deleted / not packaged.
 Covers:
 - FOUND-01 (requires-python >=3.12, 3.12 + 3.14 classifiers)
 - FOUND-06 (py.typed marker ships in the installed package)
+- PKG-01/PKG-02 (extras partition: [io]/[seg]/[stats]/[pipeline]/[all]
+  declared with the correct dep lists; shared deps deduped across extras;
+  core slimmed to the IO set)
 """
 
+import tomllib
 from importlib.metadata import distribution, metadata
 from importlib.resources import files
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
 
 def _req_name(req: str) -> str:
@@ -148,3 +156,206 @@ class TestPyTypedMarker:
         py_typed = pkg_files / "py.typed"
         # Reading should not raise; content is irrelevant (PEP 561 allows empty).
         py_typed.read_text(encoding="utf-8")
+
+
+def _load_pyproject() -> dict:
+    """Parse pyproject.toml as structured TOML data (config-as-data)."""
+    with _PYPROJECT.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+class TestExtrasPartition:
+    """PKG-01/PKG-02: the optional-extras partition is correct.
+
+    Locks the post-slim dep partition against future regression. Core
+    [project.dependencies] must list ONLY the IO set; the moved deps
+    (scikit-image, scipy, simpleitk, opencv-python, pandas, requests,
+    pywavelets, openpyxl) must live in extras. Shared deps (scipy in
+    [seg]+[stats], pandas in [stats]+[antspy]) must appear in BOTH extras
+    so a single-extra install resolves without surprising transitive
+    pulls. The [pipeline] meta-extra and expanded [all] must reference the
+    new extras so the one-line full-pipeline install still works.
+    """
+
+    def test_seg_extra_exists(self):
+        """The [seg] extra must declare scikit-image, simpleitk,
+        opencv-python, and scipy with BOTH version-split markers.
+
+        Why: [seg] is the classical-segmentation dep set. Dropping any of
+        these, or collapsing the scipy version-split into a single line,
+        breaks the 3.14 lock leg or the io-only contract.
+        """
+        requires = distribution("liom-toolkit").requires or []
+        seg_entries = [r for r in requires if 'extra == "seg"' in r]
+        seg_names = {_req_name(r) for r in seg_entries}
+        assert "scikit-image" in seg_names, (
+            f"[seg] must declare scikit-image; got entries: {seg_entries!r}"
+        )
+        assert "simpleitk" in seg_names, (
+            f"[seg] must declare simpleitk; got entries: {seg_entries!r}"
+        )
+        assert "opencv-python" in seg_names, (
+            f"[seg] must declare opencv-python; got entries: {seg_entries!r}"
+        )
+        scipy_seg = [r for r in seg_entries if _req_name(r) == "scipy"]
+        assert len(scipy_seg) == 2, (
+            "[seg] must declare scipy with BOTH version-split markers "
+            f"(python_version < 3.14 AND >= 3.14); got {scipy_seg!r}"
+        )
+        # distribution().requires emits markers as
+        # 'python_version < "3.14" and extra == "seg"' -- check substring
+        # containment rather than exact set membership.
+        seg_blob = " ".join(scipy_seg)
+        assert 'python_version < "3.14"' in seg_blob, (
+            f"[seg] scipy missing the <3.14 marker; got {scipy_seg!r}"
+        )
+        assert 'python_version >= "3.14"' in seg_blob, (
+            f"[seg] scipy missing the >=3.14 marker; got {scipy_seg!r}"
+        )
+
+    def test_stats_extra_exists(self):
+        """The [stats] extra must declare pandas, openpyxl, and scipy with
+        BOTH version-split markers.
+
+        Why: [stats] is the morphometric-stats dep set. pandas + openpyxl
+        are required for the Excel/CSV stats output; scipy is shared with
+        [seg] (pip dedupes at install time).
+        """
+        requires = distribution("liom-toolkit").requires or []
+        stats_entries = [r for r in requires if 'extra == "stats"' in r]
+        stats_names = {_req_name(r) for r in stats_entries}
+        assert "pandas" in stats_names, (
+            f"[stats] must declare pandas; got entries: {stats_entries!r}"
+        )
+        assert "openpyxl" in stats_names, (
+            f"[stats] must declare openpyxl; got entries: {stats_entries!r}"
+        )
+        scipy_stats = [r for r in stats_entries if _req_name(r) == "scipy"]
+        assert len(scipy_stats) == 2, (
+            f"[stats] must declare scipy with BOTH version-split markers; got {scipy_stats!r}"
+        )
+
+    def test_io_extra_exists(self):
+        """The [io] extra must be declared in optional-dependencies.
+
+        Why: [io] is a no-op extra (core IS the IO set), declared for
+        discoverability so `pip install liom-toolkit[io]` is a valid
+        command. distribution().requires may not emit entries for an empty
+        extra, so this asserts against the tomllib-parsed source-of-truth.
+        """
+        cfg = _load_pyproject()
+        opt_deps = cfg["project"]["optional-dependencies"]
+        assert "io" in opt_deps, (
+            f"[io] extra must be declared; got optional-dependencies keys: {list(opt_deps)!r}"
+        )
+
+    def test_pipeline_meta_extra_exists(self):
+        """The [pipeline] meta-extra must reference
+        liom-toolkit[io,seg,stats,ai,antspy] (self-referential form).
+
+        Why: [pipeline] is the one-line full-pipeline install. Dropping it
+        or omitting any sub-extra breaks the project's core value ("other
+        labs pip install and run the full pipeline").
+        """
+        cfg = _load_pyproject()
+        pipeline = cfg["project"]["optional-dependencies"].get("pipeline", [])
+        assert any("liom-toolkit[io,seg,stats,ai,antspy]" in entry for entry in pipeline), (
+            f"[pipeline] must reference liom-toolkit[io,seg,stats,ai,antspy]; got {pipeline!r}"
+        )
+
+    def test_all_aggregate_includes_new_extras(self):
+        """The [all] aggregate must reference seg and stats (not just
+        ai+antspy).
+
+        Why: [all] is the convenience aggregate. After the core-slim it
+        must include the new [seg] and [stats] extras or `pip install
+        liom-toolkit[all]` silently regresses to the pre-slim full set
+        minus segmentation/stats deps.
+        """
+        cfg = _load_pyproject()
+        all_entries = cfg["project"]["optional-dependencies"].get("all", [])
+        all_blob = " ".join(all_entries)
+        assert "seg" in all_blob, f"[all] must reference seg; got {all_entries!r}"
+        assert "stats" in all_blob, f"[all] must reference stats; got {all_entries!r}"
+
+    def test_pandas_shared_between_stats_and_antspy(self):
+        """pandas must appear in BOTH [stats] and [antspy] requires entries.
+
+        Why: pandas is used by the stats module AND by the Allen atlas
+        download path (allen_sdk). Listing it in both extras means a
+        single-extra install of either [stats] or [antspy] resolves
+        pandas without a surprising transitive pull from the other extra
+        (PKG-02 adjacency edge).
+        """
+        requires = distribution("liom-toolkit").requires or []
+        stats_pandas = [r for r in requires if 'extra == "stats"' in r and _req_name(r) == "pandas"]
+        antspy_pandas = [
+            r for r in requires if 'extra == "antspy"' in r and _req_name(r) == "pandas"
+        ]
+        assert stats_pandas, (
+            "pandas must be declared in [stats]; got requires: "
+            f"{[r for r in requires if 'extra == "stats"' in r]!r}"
+        )
+        assert antspy_pandas, (
+            "pandas must be declared in [antspy]; got requires: "
+            f"{[r for r in requires if 'extra == "antspy"' in r]!r}"
+        )
+
+    def test_scipy_shared_between_seg_and_stats_with_markers(self):
+        """scipy must appear in BOTH [seg] and [stats] with BOTH
+        version-split markers (python_version < 3.14 AND >= 3.14).
+
+        Why: scipy is shared between the classical-segmentation and stats
+        dep sets. Each extra must carry both marker lines so a
+        single-extra install resolves the correct scipy for the running
+        Python (3.12 vs 3.14). Dropping a marker from one extra breaks
+        that extra's 3.14 lock leg (PKG-02 adjacency edge).
+        """
+        requires = distribution("liom-toolkit").requires or []
+        for extra in ("seg", "stats"):
+            scipy_entries = [
+                r for r in requires if f'extra == "{extra}"' in r and _req_name(r) == "scipy"
+            ]
+            assert len(scipy_entries) == 2, (
+                f"[{extra}] must declare scipy with BOTH version-split "
+                f"markers; got {scipy_entries!r}"
+            )
+            # distribution().requires emits markers as
+            # 'python_version < "3.14" and extra == "<extra>"' -- check
+            # substring containment rather than exact set membership.
+            extra_blob = " ".join(scipy_entries)
+            assert 'python_version < "3.14"' in extra_blob, (
+                f"[{extra}] scipy missing the <3.14 marker; got {scipy_entries!r}"
+            )
+            assert 'python_version >= "3.14"' in extra_blob, (
+                f"[{extra}] scipy missing the >=3.14 marker; got {scipy_entries!r}"
+            )
+
+    def test_core_dependencies_excludes_moved_deps(self):
+        """Core [project.dependencies] (requires entries WITHOUT an
+        `extra ==` marker) must NOT list any of the moved deps:
+        scikit-image, simpleitk, scipy, pandas, requests, opencv-python,
+        pywavelets, openpyxl.
+
+        Why: the core-slim (D-01) moved these into extras so a bare
+        `pip install liom-toolkit` installs ONLY the IO set. Re-adding
+        any of these to core silently regresses the io-only contract.
+        """
+        requires = distribution("liom-toolkit").requires or []
+        core_entries = [r for r in requires if "extra ==" not in r]
+        core_names = {_req_name(r) for r in core_entries}
+        moved = {
+            "scikit-image",
+            "simpleitk",
+            "scipy",
+            "pandas",
+            "requests",
+            "opencv-python",
+            "pywavelets",
+            "openpyxl",
+        }
+        leaked = core_names & moved
+        assert not leaked, (
+            f"Core dependencies must not list moved deps, but found: "
+            f"{leaked!r}. Core entries: {core_entries!r}"
+        )
