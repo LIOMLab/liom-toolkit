@@ -121,3 +121,77 @@ def test_liom_align_annotations_main_smoke(tmp_path, fake_ants, monkeypatch) -> 
     assert kwargs["mask"] is fake_image
     assert kwargs["template"] is fake_image
     assert kwargs["atlas"] is fake_image
+
+
+def test_liom_align_annotations_resolution_choices_reject_invalid() -> None:
+    """``--resolution`` rejects values outside [10, 25, 50, 100] with exit 2.
+
+    Regression test for the silent wrong-atlas-alignment footgun: an invalid
+    ``--resolution`` value (e.g. 30) previously flowed into
+    ``align_annotations_to_volume`` and silently produced a wrong atlas
+    alignment (the help text said "must be 10/25/50/100" but no constraint
+    was enforced). The ``choices=[10, 25, 50, 100]`` constraint at the
+    argparse boundary exits 2 before the domain call. Drives the parser
+    in-process (no subprocess); argparse raises ``SystemExit(2)`` on a
+    bad choice.
+    """
+    import pytest
+
+    from liom_toolkit.scripts.liom_align_annotations import _build_argument_parser
+
+    with pytest.raises(SystemExit) as excinfo:
+        _build_argument_parser().parse_args(
+            ["tv.nii", "mask.nii", "tmpl.nii", "atlas.nii", "data_dir", "--resolution", "30"]
+        )
+    assert excinfo.value.code == 2
+
+
+def test_liom_align_annotations_missing_input_exits_2(
+    tmp_path, fake_ants, monkeypatch, capsys
+) -> None:
+    """A nonexistent ``target_volume`` path exits 2 with an actionable message.
+
+    The file-existence check runs at the argparse boundary (before the ants
+    lazy-import guard) so a bad input path produces a clear CLI error
+    (``input file does not exist: <path>``, argparse exit 2) instead of a
+    raw ``ants.image_read`` traceback deep in the domain call. Uses
+    ``parser.error`` (not ``assert``) per the project's validation rule
+    (AGENTS section 2). The other positionals are materialized in
+    ``tmp_path`` so only ``target_volume`` is missing -- the check loops in
+    positional order and surfaces the first missing path.
+    """
+    # Materialize the other positionals so only target_volume is missing.
+    mask = tmp_path / "mask.nii"
+    tmpl = tmp_path / "tmpl.nii"
+    atlas = tmp_path / "atlas.nii"
+    data_dir = tmp_path / "data"
+    for p in (mask, tmpl, atlas):
+        p.touch()
+    data_dir.mkdir()
+    missing_target = str(tmp_path / "nope_target.nii")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-align-annotations",
+            missing_target,
+            str(mask),
+            str(tmpl),
+            str(atlas),
+            str(data_dir),
+            "--resolution",
+            "25",
+        ],
+    )
+
+    import pytest
+
+    from liom_toolkit.scripts.liom_align_annotations import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert missing_target in captured.err
