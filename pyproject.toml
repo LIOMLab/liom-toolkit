@@ -596,3 +596,24 @@ antspyx = [
   { index = "antspyx-cp314", marker = "python_version >= '3.14'" },
 ]
 
+[tool.uv]
+# Override torch's exact pin of nvidia-cudnn-cu13==9.20.0.48 (transitive via
+# torch 2.13+cu130) to floor it at >=9.23. The 9.20 wheel is incomplete — it
+# omits libcudnn_engines_tensor_ir.so.9, so libcudnn_graph.so.9 dlopens it by
+# bare soname and grabs a system cuDNN 9.x of a different patch, mixing
+# versions and crashing with CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH on the
+# first op that needs the tensor_ir engine (pytorch#188892). cuDNN >=9.23
+# ships the full sublibrary set, making the bundled wheel self-consistent so
+# the dlopen never falls through to a system install — users with any system
+# cuDNN 9.x are then unaffected. An override (not a constraint) is required
+# because torch pins with ==, which a constraint cannot widen; the floor
+# (not ==) lets uv keep resolving to the newest compatible release rather
+# than forcing one version. Linux-only: the cuDNN runtime libs are Linux
+# x86_64/aarch64 only, so Mac, Windows, and the CPU-only CI legs are
+# unaffected. The other bundled NVIDIA wheels (cublas/cusparse/cusolver/
+# cufft/curand/nccl/nvshmem) were audited — none dlopen a same-family sublib
+# that isn't shipped, so no other override is needed.
+override-dependencies = [
+    'nvidia-cudnn-cu13>=9.23; sys_platform == "linux"',
+]
+

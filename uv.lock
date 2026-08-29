@@ -13,6 +13,9 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'", specifier = ">=9.23" }]
+
 [[package]]
 name = "accessible-pygments"
 version = "0.0.5"
@@ -2634,14 +2637,14 @@ wheels = [
 
 [[package]]
 name = "nvidia-cudnn-cu13"
-version = "9.20.0.48"
+version = "9.25.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cublas" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/c5/83384d846b2fd17c44bd499b36c75a45ed4f095fbbb2252294e89cea5c5c/nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:e31454ae00094b0c55319d9d15b6fa2fc50a9e1c0f5c8c80fb75258234e731e1", size = 444574296, upload-time = "2026-03-09T19:28:27.751Z" },
-    { url = "https://files.pythonhosted.org/packages/6e/5e/edb9c0ae051602c3ccaffe424256463636d639e27d7f302dde9975ef9e7a/nvidia_cudnn_cu13-9.20.0.48-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:0c45dd8eeb50b603f07995b1b300c62ffe6a1980482b82b3bcf94a4ca9d49304", size = 366173588, upload-time = "2026-03-09T19:29:34.474Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/de/5038a69d0f35f75b28d00d7de9ea219969096b11812bbb3097604059b9a6/nvidia_cudnn_cu13-9.25.1.1-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:6ed974d46b1b5fd123c0d9ff031c857142aa94257c6df41c40f6b5fd11a01d50", size = 601067473, upload-time = "2026-08-28T23:40:40.5Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/df/15839f2ac0074db8a3b77dccfa91fad2e90c480ad5143c25a7733c50870e/nvidia_cudnn_cu13-9.25.1.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:195199e8c7f8bca0c366ea675dd2441a406646cf95a98bcda66c999d57dd1f26", size = 503870572, upload-time = "2026-08-28T23:44:04.765Z" },
 ]
 
 [[package]]
