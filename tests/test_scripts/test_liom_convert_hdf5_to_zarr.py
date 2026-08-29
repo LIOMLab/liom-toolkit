@@ -96,7 +96,9 @@ def test_liom_convert_hdf5_to_zarr_main_smoke(tmp_path: Path, monkeypatch) -> No
     )
 
 
-def test_liom_convert_hdf5_to_zarr_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
+def test_liom_convert_hdf5_to_zarr_missing_input_exits_2(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     """A nonexistent input_file path exits 2 with a clear CLI error.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches
@@ -125,3 +127,6 @@ def test_liom_convert_hdf5_to_zarr_missing_input_exits_2(tmp_path: Path, monkeyp
         "main() should exit 2 via parser.error on a nonexistent input_file, "
         f"got exit code {exc.value.code}"
     )
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert str(tmp_path / "nope.h5") in captured.err

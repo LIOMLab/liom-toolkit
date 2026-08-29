@@ -101,7 +101,9 @@ def test_liom_compute_slice_metrics_main_smoke(tmp_path: Path, monkeypatch) -> N
     )
 
 
-def test_liom_compute_slice_metrics_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
+def test_liom_compute_slice_metrics_missing_input_exits_2(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     """A nonexistent mask_file path exits 2 with a clear CLI error.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches
@@ -136,3 +138,6 @@ def test_liom_compute_slice_metrics_missing_input_exits_2(tmp_path: Path, monkey
         "main() should exit 2 via parser.error on a nonexistent mask_file, "
         f"got exit code {exc.value.code}"
     )
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert str(tmp_path / "nope.tif") in captured.err

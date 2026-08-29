@@ -77,7 +77,9 @@ def test_liom_create_mask_main_smoke(tmp_path: Path, monkeypatch) -> None:
     )
 
 
-def test_liom_create_mask_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
+def test_liom_create_mask_missing_input_exits_2(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     """A nonexistent input_file exits 2 with a clear message, not a raw zarr traceback.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches
@@ -106,6 +108,9 @@ def test_liom_create_mask_missing_input_exits_2(tmp_path: Path, monkeypatch) -> 
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert str(tmp_path / "nope.zarr") in captured.err
 
 
 def test_liom_create_mask_help_exits_0() -> None:

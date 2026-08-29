@@ -71,7 +71,7 @@ def test_importerror_surfacing_train_model(tmp_path, monkeypatch) -> None:
 
 
 def test_liom_train_model_missing_dataset_exits_2(
-    tmp_path, fake_torch, fake_wandb, monkeypatch
+    tmp_path, fake_torch, fake_wandb, monkeypatch, capsys
 ) -> None:
     """liom-train-model exits 2 with a clear message when dataset_file does not exist.
 
@@ -95,6 +95,9 @@ def test_liom_train_model_missing_dataset_exits_2(
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert missing in captured.err
 
 
 def test_liom_train_model_main_smoke(tmp_path, fake_torch, fake_wandb, monkeypatch) -> None:

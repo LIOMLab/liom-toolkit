@@ -125,7 +125,9 @@ def test_liom_segment_2d_negative_threshold_size_exits_2(
     assert exc.value.code == 2
 
 
-def test_liom_segment_2d_missing_input_exits_2(tmp_path: Path, monkeypatch) -> None:
+def test_liom_segment_2d_missing_input_exits_2(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     """A nonexistent input_file exits 2 with a clear message, not a raw imageio traceback.
 
     Without a file-existence check at the argparse boundary, ``main()`` reaches
@@ -149,3 +151,6 @@ def test_liom_segment_2d_missing_input_exits_2(tmp_path: Path, monkeypatch) -> N
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "does not exist" in captured.err
+    assert str(tmp_path / "nope.tif") in captured.err
