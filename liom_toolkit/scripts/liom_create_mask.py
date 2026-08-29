@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from liom_toolkit.scripts._common import build_common_parser
 from liom_toolkit.utils import create_and_write_mask
@@ -39,7 +40,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Chunk size for the Zarr dataset (default=%(default)s)",
     )
     p.add_argument(
-        "--fill_holes", action="store_true", help="Fill holes in the mask (default: False)"
+        "--fill-holes", action="store_true", help="Fill holes in the mask (default: False)"
     )
     return p
 
@@ -61,6 +62,14 @@ def main() -> None:
     """
     parser = _build_argument_parser()
     args = parser.parse_args()
+
+    # Boundary validator (D-01): surface a nonexistent input_file at the
+    # argparse boundary with an actionable exit-2 message instead of letting
+    # it flow into create_and_write_mask and produce a confusing zarr
+    # traceback. parser.error exits 2 — never use assert for validation (it
+    # is stripped under python -O).
+    if not Path(args.input_file).exists():
+        parser.error(f"input file does not exist: {args.input_file}")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
