@@ -195,6 +195,44 @@ def test_process_map_tqdm_injects_spawn_defaults():
     assert list(result) == [0, 2, 4, 6]
 
 
+def test_process_map_tqdm_mp_context_basecontext_override(monkeypatch):
+    """``process_map_tqdm`` respects a ``BaseContext`` passed via
+    ``mp_context`` (mirrors ``get_process_pool``'s contract).
+
+    Previously the function silently ignored a ``BaseContext`` and always
+    resolved to spawn. Now the passed context is used for BOTH the executor
+    ``mp_context`` and the ``_lock`` (the lock MUST come from the same
+    context as the executor, otherwise a spawn-context executor with a
+    fork-context lock raises ``RuntimeError``).
+
+    The ``process_map`` call is intercepted so the test does not actually
+    fork workers; we assert the ``mp_context`` and ``_lock`` kwargs are
+    sourced from the user-supplied context.
+    """
+    import liom_toolkit.utils.concurrency as concurrency_mod
+
+    fork_ctx = multiprocessing.get_context("fork")
+    captured: dict[str, object] = {}
+
+    def fake_process_map(fn, *iterables, **kwargs):
+        captured.update(kwargs)
+        return [fn(x) for x in iterables[0]]
+
+    monkeypatch.setattr(concurrency_mod, "process_map", fake_process_map)
+
+    result = process_map_tqdm(
+        _double,
+        range(4),
+        max_workers=2,
+        mp_context=fork_ctx,
+    )
+    assert list(result) == [0, 2, 4, 6]
+    assert captured["mp_context"] is fork_ctx, "BaseContext was not forwarded as mp_context"
+    # The _lock must come from the same context as the executor.
+    assert captured["_lock"] is not None
+    assert captured.get("max_workers") == 2
+
+
 # ---------------------------------------------------------------------------
 # Module-level helper for process_map_tqdm (must be picklable under spawn)
 # ---------------------------------------------------------------------------

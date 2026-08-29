@@ -194,10 +194,10 @@ def process_map_tqdm(
     """Wrap ``tqdm.contrib.concurrent.process_map`` with the layer's cap + spawn lock.
 
     Equivalent to ``process_map(fn, *iterables, max_workers=cap,
-    mp_context=spawn_ctx, _lock=spawn_ctx.Lock(), **kwargs)``. The
-    spawn-context ``_lock`` is load-bearing (D-11): tqdm's ``ensure_lock``
-    would otherwise create a fork-context SemLock, and passing that to a
-    spawn-context ``ProcessPoolExecutor`` raises ``RuntimeError``.
+    mp_context=ctx, _lock=ctx.Lock(), **kwargs)``. The ``_lock`` is
+    load-bearing (D-11): tqdm's ``ensure_lock`` would otherwise create a
+    fork-context SemLock, and passing that to a spawn-context
+    ``ProcessPoolExecutor`` raises ``RuntimeError``.
 
     Forwards ``**kwargs`` (``desc``, ``unit``, ``total``, ``position``,
     ``leave``, ``chunksize``) to tqdm (D-03a). ``chunksize`` has NO layer
@@ -216,9 +216,9 @@ def process_map_tqdm(
         ``_default_process_cap()``; an explicit value wins (D-02a).
     mp_context : str or StartContext, optional
         Start context. Defaults to ``"spawn"`` (D-11). The ``_lock`` is
-        always sourced from the spawn context regardless of this argument —
-        a fork-context lock passed to a spawn-context executor raises
-        ``RuntimeError`` (RESEARCH Pitfall 1).
+        sourced from the SAME context as ``mp_context`` — the lock and
+        executor context must match (a fork-context lock passed to a
+        spawn-context executor raises ``RuntimeError``).
     **kwargs
         Forwarded verbatim to ``tqdm.contrib.concurrent.process_map``.
 
@@ -227,12 +227,12 @@ def process_map_tqdm(
     list
         Results in input order (``process_map`` preserves order).
     """
-    spawn_ctx = multiprocessing.get_context(mp_context if isinstance(mp_context, str) else "spawn")
+    ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
     return process_map(
         fn,
         *iterables,
         max_workers=max_workers or _default_process_cap(),
-        mp_context=spawn_ctx,
-        _lock=spawn_ctx.Lock(),
+        mp_context=ctx,
+        _lock=ctx.Lock(),
         **kwargs,
     )
