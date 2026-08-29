@@ -107,7 +107,7 @@ class DecoderBlock(nn.Module):
             The upsampled and convolved output tensor.
         """
         x = self.up(inputs)
-        x = torch.cat([x, skip], axis=1)
+        x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
 
