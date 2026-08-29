@@ -100,6 +100,19 @@ def main() -> None:
         if not Path(zarr_path).exists():
             parser.error(f"input file does not exist: {zarr_path}")
 
+    # Parity check: --zarr-files and --brain-names are both repeatable
+    # nargs="+" options, so argparse cannot enforce that they have the same
+    # length. A mismatch would either raise a confusing IndexError deep in
+    # the registration loop (more zarr files than brain names) or silently
+    # drop the extra brain name (more brain names than zarr files). Surface
+    # it at the CLI boundary with an actionable exit-2 message instead.
+    if len(args.zarr_files) != len(args.brain_names):
+        parser.error(
+            f"--zarr-files and --brain-names must have the same number of values, "
+            f"got {len(args.zarr_files)} zarr file(s) and "
+            f"{len(args.brain_names)} brain name(s)"
+        )
+
     try:
         import ants  # ruff: ignore[unused-import] — guard surfaces a clear ImportError before the domain call
     except ImportError as e:

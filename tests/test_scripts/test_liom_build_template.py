@@ -156,7 +156,7 @@ def test_liom_build_template_two_zarr_two_brains_no_misassignment(
     assert kwargs["brain_names"] == ["brain1", "brain2"]
 
 
-def test_liom_build_template_nonexistent_zarr_exits_2(monkeypatch, capsys) -> None:
+def test_liom_build_template_nonexistent_zarr_exits_2(tmp_path, monkeypatch, capsys) -> None:
     """A nonexistent ``--zarr-files`` path exits 2 with an actionable message.
 
     The file-existence check runs at the argparse boundary (before the ants
@@ -165,8 +165,8 @@ def test_liom_build_template_nonexistent_zarr_exits_2(monkeypatch, capsys) -> No
     ``ants.image_read`` / ome-zarr traceback deep in the domain call. Uses
     ``parser.error`` (not ``assert``) per the project's validation rule.
     """
-    out_file = "/tmp/template_does_not_need_to_exist_for_this_test.nii"
-    missing_zarr = "/tmp/this_zarr_path_does_not_exist_12345.zarr"
+    out_file = str(tmp_path / "template.nii")
+    missing_zarr = str(tmp_path / "this_zarr_path_does_not_exist.zarr")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -192,3 +192,51 @@ def test_liom_build_template_nonexistent_zarr_exits_2(monkeypatch, capsys) -> No
     captured = capsys.readouterr()
     assert "input file does not exist" in captured.err
     assert missing_zarr in captured.err
+
+
+def test_liom_build_template_mismatched_lengths_exits_2(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Mismatched --zarr-files / --brain-names lengths exit 2 at the CLI boundary.
+
+    Both options are ``nargs="+"`` so argparse cannot enforce equal length.
+    Without the parity check, 2 zarr files + 3 brain names silently drops the
+    extra name, and 3 zarr files + 2 brain names raises a confusing
+    ``IndexError`` deep in the registration loop. The check fires after the
+    file-existence loop, so the zarr paths must exist on disk first.
+    """
+    out_file = str(tmp_path / "template.nii")
+    zarr1 = str(tmp_path / "brain1.zarr")
+    zarr2 = str(tmp_path / "brain2.zarr")
+    # Touch the zarr paths so the file-existence check passes first; the
+    # parity check then fires on the 2-vs-3 length mismatch.
+    for p in (zarr1, zarr2):
+        with open(p, "w"):
+            pass
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-build-template",
+            out_file,
+            "--zarr-files",
+            zarr1,
+            zarr2,
+            "--brain-names",
+            "brain1",
+            "brain2",
+            "brain3",
+            "--iterations",
+            "1",
+        ],
+    )
+
+    import pytest
+
+    from liom_toolkit.scripts.liom_build_template import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "same number of values" in captured.err
