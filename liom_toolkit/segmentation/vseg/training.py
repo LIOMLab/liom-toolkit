@@ -802,9 +802,12 @@ def train_model(
 
     # Wrap with DDP after the model is on the device. The isinstance guard
     # prevents double-wrapping so Phase 15 can reuse the identical entry
-    # path without an API undo. device_ids=None is mandatory on CPU/gloo.
+    # path without an API undo. On CUDA the explicit device_ids=[local_rank]
+    # is the documented PyTorch DDP best practice; on CPU/gloo device_ids
+    # MUST be None (the gloo backend has no device placement).
     if ddp and not isinstance(model, DistributedDataParallel):
-        model = DistributedDataParallel(model, device_ids=None)
+        device_ids = [int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None
+        model = DistributedDataParallel(model, device_ids=device_ids)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5)
