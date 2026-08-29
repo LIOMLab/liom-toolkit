@@ -250,17 +250,32 @@ class TestExtrasPartition:
         )
 
     def test_pipeline_meta_extra_exists(self):
-        """The [pipeline] meta-extra must reference
-        liom-toolkit[io,seg,stats,ai,antspy] (self-referential form).
+        """The [pipeline] meta-extra must reference the core sub-extras
+        (io, seg, stats, ai, antspy) in self-referential form.
 
         Why: [pipeline] is the one-line full-pipeline install. Dropping it
-        or omitting any sub-extra breaks the project's core value ("other
-        labs pip install and run the full pipeline").
+        or omitting any core sub-extra breaks the project's core value
+        ("other labs pip install and run the full pipeline"). The check
+        parses the bracketed extra list rather than asserting an exact
+        substring so that appending further extras (e.g. ``dask-cluster``)
+        does not silently break the test — the core sub-extras must still
+        all be present.
         """
         cfg = _load_pyproject()
         pipeline = cfg["project"]["optional-dependencies"].get("pipeline", [])
-        assert any("liom-toolkit[io,seg,stats,ai,antspy]" in entry for entry in pipeline), (
-            f"[pipeline] must reference liom-toolkit[io,seg,stats,ai,antspy]; got {pipeline!r}"
+        # Parse the bracketed extra list out of each liom-toolkit[...] entry.
+        import re
+
+        required = {"io", "seg", "stats", "ai", "antspy"}
+        found: set[str] = set()
+        for entry in pipeline:
+            m = re.search(r"liom-toolkit\[([^\]]*)\]", entry)
+            if m:
+                found.update(x.strip() for x in m.group(1).split(","))
+        missing = required - found
+        assert not missing, (
+            f"[pipeline] must reference {sorted(required)}; missing {sorted(missing)}; "
+            f"got {pipeline!r}"
         )
 
     def test_all_aggregate_includes_new_extras(self):
