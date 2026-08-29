@@ -205,13 +205,30 @@ def test_segmentation_raises_honest_importerror_under_masking(io_only_sentinels)
     # Purge any already-imported liom_toolkit submodules so the masked
     # imports re-fire through the sentinel finder. Without this, a previously
     # imported (and cached) liom_toolkit.segmentation would short-circuit
-    # the test to a false green.
+    # the test to a false green. Save and restore every purged entry so
+    # later tests on the same xdist worker see the cached modules (a bare
+    # pop without restore would force re-import of liom_toolkit.conversion,
+    # which transitively pulls scipy via ome_zarr.dask_utils -- breaking
+    # test_io_only_imports_under_sentinel_masking when it runs next).
+    purged = {}
     for name in list(sys.modules):
         if name == "liom_toolkit" or name.startswith("liom_toolkit."):
-            sys.modules.pop(name, None)
+            purged[name] = sys.modules.pop(name)
 
-    with pytest.raises(ImportError) as excinfo:
-        import liom_toolkit.segmentation  # ruff: ignore[unused-import]
+    try:
+        with pytest.raises(ImportError) as excinfo:
+            import liom_toolkit.segmentation  # ruff: ignore[unused-import]
+    finally:
+        # Restore the original cached modules. Any modules imported during
+        # the failed `import liom_toolkit.segmentation` above that were NOT
+        # in the original cache are dropped so they do not leak a partially
+        # initialized segmentation into subsequent tests.
+        for name, module in purged.items():
+            sys.modules[name] = module
+        # Drop anything the failed import created that was not pre-cached.
+        for name in list(sys.modules):
+            if (name == "liom_toolkit" or name.startswith("liom_toolkit.")) and name not in purged:
+                sys.modules.pop(name, None)
 
     message = str(excinfo.value)
     assert "liom-toolkit[seg]" in message or "liom-toolkit[ai]" in message, (
