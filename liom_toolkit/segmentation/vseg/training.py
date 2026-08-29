@@ -405,6 +405,7 @@ def train_model(
     resume: bool = False,
     ddp: bool = False,
     use_amp: bool = False,
+    patch_size: tuple[int, int, int] = (1, 256, 256),
 ) -> None:
     """Train the vessel segmentation model.
 
@@ -486,6 +487,14 @@ def train_model(
         code path serves both modes. Default ``False`` preserves
         reproducibility for existing notebook callers (a default-on AMP
         change would silently shift every notebook user's val_loss curve).
+    patch_size : tuple[int, int, int]
+        The (Z, Y, X) patch size the dataset slices the volume into.
+        Default ``(1, 256, 256)`` preserves the historical behavior. A
+        smaller patch size (e.g. ``(1, 64, 64)``) trains at a finer
+        effective resolution and is used by the DDP integration tests to
+        keep the smoke dataset tiny (a smaller volume trains faster and
+        uses less memory). Included in the resume params-hash so a
+        patch-size change between runs invalidates the checkpoint.
 
     Raises
     ------
@@ -601,7 +610,7 @@ def train_model(
         node_name,
         device=dev,
         pre_process=False,
-        patch_size=(1, 256, 256),
+        patch_size=patch_size,
         filter_empty=filter_empty_patches,
         normalise_label=False,
     )
@@ -635,8 +644,12 @@ def train_model(
     # tensors can be pinned``. Pinning is an async CPU→GPU staging optimization;
     # when the data is already on the target GPU it is wrong, not just redundant.
     # Gate it on the dataset device being CPU so both the DDP and non-DDP CUDA
-    # paths are correct (the CPU gloo smoke keeps pin_memory=True).
-    pin_memory = pin_memory and dev.type == "cpu"
+    # paths are correct (the CPU gloo smoke keeps pin_memory=True). The original
+    # ``pin_memory`` (what the caller requested) is preserved for the resume
+    # params-hash below — the gating is a device-dependent correctness
+    # adjustment, not a config change, and ``dev`` already captures the device
+    # in the hash.
+    pin_memory_effective = pin_memory and dev.type == "cpu"
 
     # Create data loaders. Under DDP, wrap both loaders with
     # DistributedSampler (D-02b: set_epoch called per-epoch on the train
@@ -652,14 +665,14 @@ def train_model(
             batch_size=batch_size,
             sampler=train_sampler,
             num_workers=0,
-            pin_memory=pin_memory,
+            pin_memory=pin_memory_effective,
         )
         validation_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
             sampler=val_sampler,
             num_workers=0,
-            pin_memory=pin_memory,
+            pin_memory=pin_memory_effective,
         )
     else:
         train_sampler = None
@@ -668,14 +681,14 @@ def train_model(
             batch_size=batch_size,
             shuffle=False,
             num_workers=0,
-            pin_memory=pin_memory,
+            pin_memory=pin_memory_effective,
         )
         validation_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
             shuffle=False,
             num_workers=0,
-            pin_memory=pin_memory,
+            pin_memory=pin_memory_effective,
         )
 
     # Setup check point dir
@@ -727,6 +740,7 @@ def train_model(
             "pin_memory": pin_memory,
             "ddp": ddp,
             "use_amp": use_amp,
+            "patch_size": patch_size,
         },
         steps_total=epochs,
     )

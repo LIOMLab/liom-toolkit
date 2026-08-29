@@ -85,6 +85,13 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable Automatic Mixed Precision (torch.amp.GradScaler; no-op on CPU/gloo)",
     )
+    p.add_argument(
+        "--patch-size",
+        type=str,
+        default="1,256,256",
+        help="Patch size as Z,Y,X (e.g. 1,256,256). Smaller patches train at a "
+        "finer effective resolution and use less memory (default=%(default)s)",
+    )
     return p
 
 
@@ -144,6 +151,17 @@ def main() -> None:
 
     from liom_toolkit.segmentation.vseg.training import train_model
 
+    # Parse "Z,Y,X" → (Z, Y, X) tuple. argparse's type= runs before this,
+    # but the comma-string → tuple conversion is a single clear step here so
+    # a malformed value (e.g. "1,256") surfaces with the offending input.
+    try:
+        parts = [int(s) for s in args.patch_size.split(",")]
+    except ValueError as e:
+        parser.error(f"--patch-size must be Z,Y,X integers, got {args.patch_size!r} ({e})")
+    if len(parts) != 3 or any(p < 1 for p in parts):
+        parser.error(f"--patch-size must be three positive integers, got {args.patch_size!r}")
+    patch_size = (parts[0], parts[1], parts[2])
+
     train_model(
         dataset_file=args.dataset_file,
         node_name=args.node_name,
@@ -158,6 +176,7 @@ def main() -> None:
         resume=args.resume,
         ddp=args.ddp,
         use_amp=args.amp,
+        patch_size=patch_size,
     )
 
 

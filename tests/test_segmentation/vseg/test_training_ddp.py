@@ -171,36 +171,41 @@ def test_evaluate_sum_count_all_reduce(monkeypatch):
 
 
 def _make_tiny_labeled_zarr_for_smoke(tmp_path) -> str:
-    """Build a (2, 256, 256) uint16 image zarr + matching uint8 label for the gloo smoke.
+    """Build a (2, 64, 64) uint16 image zarr + matching uint8 label for the gloo smoke.
 
-    ``train_model`` hardcodes ``patch_size=(1, 256, 256)`` and
-    ``filter_empty_patches=True`` (the CLI exposes neither), so the volume
-    must be at least 256x256 in YX. A 2-slice volume gives a (2, 1, 1) grid
-    → 2 grid patches x 4 rotations = 8 dataset items, enough for a 2-rank
-    ``DistributedSampler`` to shard (4 per rank) with ``batch_size=2``.
-    The non-empty region (``[:, 32:224, 32:224] = 1``) makes every patch
-    valid so ``filter_empty`` keeps all 8 items. Written via ``save_zarr``
-    + ``save_label_to_zarr`` (NGFF v0.5 multiscale, the real IO path
+    ``train_model`` accepts a ``patch_size`` (Z, Y, X) tuple; the smoke
+    passes ``(1, 32, 32)`` so the volume only needs to be 64x64 in YX (a
+    2x2 grid per slice). A 2-slice volume gives a (2, 2, 2) grid → 8 grid
+    patches x 4 rotations = 32 dataset items, enough for a 2-rank
+    ``DistributedSampler`` to shard (16 per rank) with ``batch_size=2``.
+    The non-empty region (``[:, 16:48, 16:48] = 1``) makes every patch
+    valid so ``filter_empty`` keeps all items. Written via ``save_zarr`` +
+    ``save_label_to_zarr`` (NGFF v0.5 multiscale, the real IO path
     ``OmeZarrLabelDataSet`` reads) — no mocking of zarr/numpy/torch
-    (AGENTS section 5).
+    (AGENTS section 5). The 32x32 patch is the smallest the U-Net
+    accepts — it downsamples 32→16→8→4→2→1, and BatchNorm needs >1 value
+    per channel at every spatial size (a 16x16 patch would collapse to
+    1x1 too early and trip BatchNorm's "Expected more than 1 value per
+    channel" check). The tiny patch + volume keep the smoke fast and
+    light (the 256x256 default made the smoke hog the CPU for ~44s).
     """
     from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
     from liom_toolkit.utils.io import generate_label_color_dict_mask
 
-    arr = np.zeros((2, 256, 256), dtype=np.uint16)
-    arr[:, 32:224, 32:224] = 1000
+    arr = np.zeros((2, 64, 64), dtype=np.uint16)
+    arr[:, 16:48, 16:48] = 1000
     zarr_path = str(tmp_path / "smoke.zarr")
-    save_zarr(arr, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(2, 256, 256))
+    save_zarr(arr, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(2, 64, 64))
 
-    label = np.zeros((2, 256, 256), dtype=np.uint8)
-    label[:, 32:224, 32:224] = 1
+    label = np.zeros((2, 64, 64), dtype=np.uint8)
+    label[:, 16:48, 16:48] = 1
     save_label_to_zarr(
         label,
         zarr_path,
         generate_label_color_dict_mask(),
         "training",
         scales=(6.5, 6.5, 6.5),
-        chunks=(2, 256, 256),
+        chunks=(2, 64, 64),
     )
     return zarr_path
 
@@ -266,6 +271,8 @@ def test_ddp_2rank_gloo_smoke(tmp_path):
             "1",
             "--batch-size",
             "2",
+            "--patch-size",
+            "1,32,32",
             "--output-train",
             str(out_dir),
             "--wandb-mode",

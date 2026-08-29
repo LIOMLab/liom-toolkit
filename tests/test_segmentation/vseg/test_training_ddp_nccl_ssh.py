@@ -166,14 +166,14 @@ def test_ddp_nccl_ssh_run():
         from liom_toolkit.conversion.conversion import save_zarr, save_label_to_zarr
         from liom_toolkit.utils.io import generate_label_color_dict_mask
         ds = os.environ["LIOM_NCCL_DS"]
-        arr = np.zeros((2, 256, 256), dtype=np.uint16)
-        arr[:, 32:224, 32:224] = 1000
-        save_zarr(arr, ds, scales=(6.5, 6.5, 6.5), chunks=(2, 256, 256))
-        label = np.zeros((2, 256, 256), dtype=np.uint8)
-        label[:, 32:224, 32:224] = 1
+        arr = np.zeros((2, 64, 64), dtype=np.uint16)
+        arr[:, 16:48, 16:48] = 1000
+        save_zarr(arr, ds, scales=(6.5, 6.5, 6.5), chunks=(2, 64, 64))
+        label = np.zeros((2, 64, 64), dtype=np.uint8)
+        label[:, 16:48, 16:48] = 1
         save_label_to_zarr(
             label, ds, generate_label_color_dict_mask(), "training",
-            scales=(6.5, 6.5, 6.5), chunks=(2, 256, 256),
+            scales=(6.5, 6.5, 6.5), chunks=(2, 64, 64),
         )
         PY
         OUT=$(mktemp -d)/out
@@ -182,6 +182,7 @@ def test_ddp_nccl_ssh_run():
             --standalone \\
             --module liom_toolkit.scripts.liom_train_model \\
             "$DS" training --ddp --amp --epochs 1 --batch-size 2 \\
+            --patch-size 1,32,32 \\
             --output-train "$OUT" --wandb-mode disabled
         test -f "$OUT/final_metrics.csv"
         test -f "$OUT/_liom_checkpoints/train_model.json"

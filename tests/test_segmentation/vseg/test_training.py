@@ -159,6 +159,7 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
                 "pin_memory": True,
                 "ddp": False,
                 "use_amp": False,
+                "patch_size": (1, 256, 256),
             },
             steps_total=epochs,
         )
