@@ -140,11 +140,7 @@ def get_process_pool(
         A configured stdlib process pool. The caller is responsible for
         shutting it down (``with`` block or ``shutdown()``).
     """
-    ctx = (
-        multiprocessing.get_context(mp_context)
-        if isinstance(mp_context, str)
-        else mp_context
-    )
+    ctx = multiprocessing.get_context(mp_context) if isinstance(mp_context, str) else mp_context
     return ProcessPoolExecutor(
         max_workers=max_workers or _default_process_cap(),
         mp_context=ctx,
@@ -231,9 +227,7 @@ def process_map_tqdm(
     list
         Results in input order (``process_map`` preserves order).
     """
-    spawn_ctx = multiprocessing.get_context(
-        mp_context if isinstance(mp_context, str) else "spawn"
-    )
+    spawn_ctx = multiprocessing.get_context(mp_context if isinstance(mp_context, str) else "spawn")
     return process_map(
         fn,
         *iterables,

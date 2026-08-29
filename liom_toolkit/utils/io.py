@@ -15,7 +15,6 @@ from numpy.typing import NDArray
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
-from tqdm.auto import tqdm
 
 from .utils import convert_to_png_for_saving
 
@@ -641,22 +640,25 @@ def extract_zarr_to_image(
             photometric="minisblack",
         )
     elif format == "png":
-        # Parallel per-slice PNG writes via a thread pool. Each slice z gets
-        # a unique filename {z}.png -- no shared file, no clobber. The
-        # GIL-releasing C PNG encode means threads progress concurrently; a
-        # single tqdm bar over the map results preserves the progress UI.
-        from concurrent.futures import ThreadPoolExecutor
+        # Parallel per-slice PNG writes via the managed concurrency layer.
+        # Each slice z gets a unique filename {z}.png -- no shared file, no
+        # clobber. The GIL-releasing C PNG encode means threads progress
+        # concurrently; thread_map_tqdm injects the layer's thread cap
+        # (min(32, cpu+4)) and renders the progress bar over the map results.
+        # Imported at function scope to match the zarr_writer import precedent
+        # at the top of this function (avoids a top-level cross-module import).
+        from .concurrency import thread_map_tqdm
 
         def _write_slice_png(z: int) -> None:
             image = convert_to_png_for_saving(volume[z, :, :])
             iio.imwrite(f"{target_dir}/{z!s}.png", image)
 
-        with ThreadPoolExecutor() as executor:
-            list(
-                tqdm(
-                    executor.map(_write_slice_png, range(volume.shape[0])),
-                    total=volume.shape[0],
-                )
+        list(
+            thread_map_tqdm(
+                _write_slice_png,
+                range(volume.shape[0]),
+                total=volume.shape[0],
             )
+        )
     else:
         raise ValueError(f"Unsupported format: {format!r}. Use 'tiff' or 'png'.")
