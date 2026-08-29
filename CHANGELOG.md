@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-29
+
+The lightweight-IO release. The core dependency set is slimmed to the
+OME-Zarr saver/loader + HDF5/NIfTI/NRRD readers so a bare
+`pip install liom-toolkit` is genuinely lightweight, and the heavy
+segmentation / stats / atlas deps are split into optional install extras.
+The full conversion→registration→segmentation→stats pipeline is preserved
+via the new `[pipeline]` meta-extra.
+
+### Added
+
+- New optional `[io]` install extra: `pip install liom-toolkit[io]` pulls
+  only the OME-Zarr saver/loader + HDF5/NIfTI/NRRD readers (the lightweight
+  IO set: dask, distributed, bokeh, zarr, ome-zarr, h5py, nibabel, pynrrd,
+  imageio, tifffile, natsort, tqdm). Core is now slimmed to this set, so
+  `[io]` is a no-op extra documented for discoverability.
+- New `[seg]` extra (classical segmentation deps: scikit-image, SimpleITK,
+  scipy, opencv-python).
+- New `[stats]` extra (morphometric stats deps: pandas, openpyxl, scipy).
+- New `[pipeline]` meta-extra: `pip install liom-toolkit[pipeline]` pulls
+  the full conversion→registration→segmentation→stats dep set in one line
+  (io + seg + stats + ai + antspy).
+
+### Changed
+
+- **Breaking:** Core `[project.dependencies]` slimmed to the IO set
+  (dask, distributed, bokeh, zarr, ome-zarr, h5py, nibabel, pynrrd,
+  imageio, tifffile, natsort, tqdm). A bare `pip install liom-toolkit`
+  now installs ONLY the IO set. To restore the prior full-pipeline
+  behavior, add `[pipeline]` (or `[seg]`/`[stats]`/`[antspy]` as needed):
+  `pip install liom-toolkit[pipeline]`.
+- `pandas` and `requests` (used by `utils/allen_sdk.py` for Allen atlas
+  download + structure tree) moved into the `[antspy]` extra; `pandas`
+  is also in `[stats]`.
+- `utils/allen_sdk.py` now lazy-imports `pandas` and `requests` inside the
+  functions that use them, so `liom_toolkit.utils` imports cleanly on an
+  IO-only install.
+- `liom_toolkit.segmentation` now raises `ImportError` with a user-facing
+  message ("Please install liom-toolkit[seg]...") instead of a bare
+  `ModuleNotFoundError` when the segmentation deps are absent.
+
+### Migration
+
+If you relied on a bare `pip install liom-toolkit` for segmentation,
+stats, or atlas work, switch to `pip install liom-toolkit[pipeline]`
+(or the specific extra: `[seg]`, `[stats]`, `[antspy]`). The bare install
+now provides only the IO/conversion surface.
+
 ## [1.0.0] - 2026-08-28
 
 The first stable release. This is a **clean break** from the pre-1.0
