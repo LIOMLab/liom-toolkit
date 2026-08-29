@@ -575,349 +575,359 @@ def train_model(
         DistributedDataParallel = None
         DistributedSampler = None
 
-    # Setup training parameters and wandb run
-    hyperparameter_defaults = {
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "epochs": epochs,
-    }
-
-    # Init wandb. entity=wandb_entity (None -> wandb uses the user's default
-    # entity; project=wandb_project (None -> wandb default project). No
-    # hardcoded lab config. Under DDP, only rank 0 inits a wandb run (the
-    # rank-0-only W&B invariant — D-01); other ranks use a disabled run so
-    # wandb.log/watch/finish calls are safe no-ops on non-rank-0.
-    if ddp and rank != 0:
-        run = wandb.init(
-            project=wandb_project,
-            entity=wandb_entity,
-            mode="disabled",
-            config=hyperparameter_defaults,
-        )
-    else:
-        run = wandb.init(
-            project=wandb_project,
-            entity=wandb_entity,
-            mode=wandb_mode,
-            config=hyperparameter_defaults,
-        )
-
-    config = wandb.config
-
-    # Load the dataset
-    full_dataset = OmeZarrLabelDataSet(
-        dataset_file,
-        node_name,
-        device=dev,
-        pre_process=False,
-        patch_size=patch_size,
-        filter_empty=filter_empty_patches,
-        normalise_label=False,
-    )
-    train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
-
-    if filter_empty_patches:
-        # Map the split indices through valid_indices to get the actual
-        # dataset indices. random_split returns Subset objects whose
-        # .indices are integers in 0..len(valid_indices)-1 (i.e. indices
-        # INTO the filtered dataset, since full_dataset.__len__ returns
-        # len(valid_indices) when filter_empty is set). The previous code
-        # checked whether a filtered-dataset index was a VALUE in
-        # valid_indices (which contains original dataset indices) -- a
-        # namespace mismatch that succeeded only by numerical coincidence
-        # and produced a tiny, non-random training subset. Map each split
-        # index through valid_indices to recover the true dataset index.
-        train_valid_indices = [
-            int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices
-        ]
-        test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
-
-        # Create new subsets for dataloaders
-        train_dataset = Subset(full_dataset, train_valid_indices)
-        test_dataset = Subset(full_dataset, test_valid_indices)
-
-    # Pin memory only when the dataset yields CPU tensors. ``OmeZarrLabelDataSet``
-    # creates tensors directly on ``dev`` (its ``__getitem__`` does
-    # ``torch.tensor(..., device=self.device)``), so when ``dev`` is CUDA the
-    # DataLoader's pin-memory worker receives already-CUDA tensors and raises
-    # ``RuntimeError: cannot pin 'torch.cuda.FloatTensor' only dense CPU
-    # tensors can be pinned``. Pinning is an async CPU→GPU staging optimization;
-    # when the data is already on the target GPU it is wrong, not just redundant.
-    # Gate it on the dataset device being CPU so both the DDP and non-DDP CUDA
-    # paths are correct (the CPU gloo smoke keeps pin_memory=True). The original
-    # ``pin_memory`` (what the caller requested) is preserved for the resume
-    # params-hash below — the gating is a device-dependent correctness
-    # adjustment, not a config change, and ``dev`` already captures the device
-    # in the hash.
-    pin_memory_effective = pin_memory and dev.type == "cpu"
-
-    # Create data loaders. Under DDP, wrap both loaders with
-    # DistributedSampler (D-02b: set_epoch called per-epoch on the train
-    # sampler so each epoch sees a different shuffle across ranks). The val
-    # loader also uses DistributedSampler (all-rank eval, D-02) — the
-    # sum+count all-reduce in evaluate() handles len(val_set) % world_size
-    # != 0.
-    if ddp:
-        train_sampler = DistributedSampler(train_dataset, shuffle=True)
-        val_sampler = DistributedSampler(test_dataset, shuffle=False)
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            sampler=train_sampler,
-            num_workers=0,
-            pin_memory=pin_memory_effective,
-        )
-        validation_loader = DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            sampler=val_sampler,
-            num_workers=0,
-            pin_memory=pin_memory_effective,
-        )
-    else:
-        train_sampler = None
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=pin_memory_effective,
-        )
-        validation_loader = DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=pin_memory_effective,
-        )
-
-    # Setup check point dir
-    best_epoch = -1
-    create_dir(f"{output_train}")
-    create_dir(f"{output_train}/files")
-    checkpoint_path = f"{output_train}/files/checkpoint"
-    create_dir(f"{output_train}/patch_seg")
-
-    # Resume bookkeeping: the manifest records last_completed_epoch
-    # (complementary to the per-epoch checkpoint.*.pth weights artifact).
-    # The manifest is the bookkeeper; the .pth is the weights.
-    #
-    # NOTE: steps_total=epochs is passed for manifest completeness, but
-    # train_model does NOT call start_step/finish_step per epoch — it uses
-    # set_last_completed_epoch + the complete sentinel instead. The
-    # completed_steps set in the manifest is therefore always empty for
-    # this pipeline; last_completed_epoch is the authoritative epoch index.
-    # Future maintainers should not expect completed_steps to track epoch
-    # completion here.
-    from liom_toolkit.utils.checkpoint import DDPResumeManager, ResumeManager
-
-    # Under DDP, use DDPResumeManager (rank-0-only writes + post-restore
-    # barrier + model.module unwrap). Single-process callers get the base
-    # ResumeManager unchanged (D-03 — the base class stays
-    # single-process-agnostic).
-    resume_mgr_cls = DDPResumeManager if ddp else ResumeManager
-    resume_mgr = resume_mgr_cls(
-        output_dir=Path(output_train),
-        pipeline="train_model",
-        params={
-            "dataset_file": dataset_file,
-            "node_name": node_name,
-            "epochs": epochs,
-            "learning_rate": learning_rate,
+    try:
+        # Setup training parameters and wandb run
+        hyperparameter_defaults = {
             "batch_size": batch_size,
-            # Include training-affecting parameters so a config change
-            # between runs invalidates the checkpoint (params-hash
-            # mismatch). pretrained_artifact determines the initial
-            # weights (from-scratch vs. fine-tuning); filter_empty_patches
-            # changes which patches are used; dev (CPU vs. GPU) affects
-            # floating-point reproducibility; pin_memory changes data
-            # loading behavior. Without these, resume with a different
-            # training config would silently continue from a checkpoint
-            # that was initialized differently — a stale-checkpoint bug.
-            "pretrained_artifact": pretrained_artifact,
-            "filter_empty_patches": filter_empty_patches,
-            "dev": str(dev) if dev is not None else None,
-            "pin_memory": pin_memory,
-            "ddp": ddp,
-            "use_amp": use_amp,
-            "patch_size": patch_size,
-        },
-        steps_total=epochs,
-    )
-    if resume and resume_mgr.is_complete():
-        logger.info("train_model: checkpoint complete, nothing to do.")
-        if rank == 0:
-            run.finish()
-        return
+            "learning_rate": learning_rate,
+            "epochs": epochs,
+        }
 
-    # Initialise the model. pretrained_artifact threads through to VsegModel;
-    # None trains from scratch (no silent fallback to a hardcoded lab artifact).
-    model = VsegModel(
-        pretrained=pretrained_artifact is not None,
-        pretrained_artifact=pretrained_artifact,
-    )
-
-    # Resume: load the per-epoch checkpoint.{last_completed_epoch}.pth weights
-    # and continue from epoch N+1. 1.0.0 limitation: the optimizer / scheduler
-    # / RNG state is re-initialized (full-state .pth augmentation is deferred
-    # to 1.1 — resume is not bit-deterministic across optimizer/RNG state
-    # until 1.1). This is a known, documented limitation, not a silent
-    # wrong-data fallback. Under DDP, DDPResumeManager.restore_weights loads
-    # on rank 0 then barriers so all ranks sync before training.
-    start_epoch = 0
-    if resume:
-        last_epoch = resume_mgr.get_last_completed_epoch()
-        if last_epoch is not None:
-            ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
-            if Path(ckpt_file).exists():
-                # weights_only=True restricts deserialization to tensor
-                # storage (no arbitrary pickle code execution). PyTorch 2.6+
-                # defaults to this, but the ai extra does not pin a torch
-                # version, so a user on torch < 2.6 would otherwise load with
-                # weights_only=False (pickle.load under the hood) — a
-                # malicious or swapped .pth would execute arbitrary code.
-                # Match the model.py load path (weights_only=True).
-                if ddp:
-                    # DDPResumeManager handles rank-0 load + post-restore
-                    # barrier (single barrier after rank-0 save; the next
-                    # backward AllReduce is the subsequent sync point).
-                    resume_mgr.restore_weights(model, ckpt_file)
-                else:
-                    model.load_state_dict(torch.load(ckpt_file, weights_only=True))
-                start_epoch = last_epoch + 1
-                logger.info(
-                    "train_model: resuming from epoch %d (loaded %s).",
-                    start_epoch,
-                    ckpt_file,
-                )
-            else:
-                logger.warning(
-                    "train_model: manifest says last_completed_epoch=%d but "
-                    "%s is missing — starting from epoch 0.",
-                    last_epoch,
-                    ckpt_file,
-                )
-
-    model = model.to(dev)
-
-    # Wrap with DDP after the model is on the device. The isinstance guard
-    # prevents double-wrapping so Phase 15 can reuse the identical entry
-    # path without an API undo. On CUDA the explicit device_ids=[local_rank]
-    # is the documented PyTorch DDP best practice; on CPU/gloo device_ids
-    # MUST be None (the gloo backend has no device placement).
-    if ddp and not isinstance(model, DistributedDataParallel):
-        device_ids = [int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None
-        model = DistributedDataParallel(model, device_ids=device_ids)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5)
-    loss_fn = DiceBCELoss()
-
-    # Track model with Wandb — rank-0 only (D-01 W&B invariant).
-    if rank == 0:
-        wandb.watch(model, criterion=loss_fn, log="all", log_freq=25, log_graph=False)
-
-    """ Training the model """
-    train_losses = []
-    val_losses = []
-
-    best_valid_loss = float("inf")
-
-    epoch_range = range(start_epoch, config.epochs)
-    for epoch in (pbar := tqdm(epoch_range, desc="Epochs", leave=False, position=0)):
-        # D-02b: set_epoch per-epoch so each epoch sees a different shuffle
-        # across ranks. No-op when train_sampler is None (single-process).
-        if train_sampler is not None:
-            train_sampler.set_epoch(epoch)
-        train_loss, train_y, train_y_pred, x_train = train(
-            model, train_loader, optimizer, loss_fn, dev, use_amp=use_amp
-        )
-
-        val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(
-            model, validation_loader, loss_fn, dev
-        )
-
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        scheduler.step(val_loss)
-
-        """ Saving model """
-        if val_loss < best_valid_loss:
-            best_epoch = epoch
-            # DDPResumeManager.save_weights unwraps model.module for DDP and
-            # is rank-0-only; base ResumeManager path uses torch.save
-            # directly (single-process unchanged).
-            if ddp:
-                resume_mgr.save_weights(model, f"{checkpoint_path}.latest.pth")
-            else:
-                torch.save(model.state_dict(), f"{checkpoint_path}.latest.pth")
-            best_valid_loss = val_loss
-
-        if epoch % 10 == 0:
-            if ddp:
-                resume_mgr.save_weights(model, f"{checkpoint_path}.epoch_{epoch}.pth")
-            else:
-                torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
-
-        # Record the epoch as complete (complementary to the per-epoch .pth).
-        # A crash after epoch N leaves last_completed_epoch=N; resume
-        # continues from N+1. DDPResumeManager no-ops on non-rank-0.
-        resume_mgr.set_last_completed_epoch(epoch)
-
-        pbar.set_postfix(loss=f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        train_images = create_images(x_train, train_y, train_y_pred)
-        val_images = create_images(x_val, val_y, val_y_pred)
-        # wandb.log rank-0 only (D-01). On non-rank-0 the run is disabled so
-        # this is a safe no-op, but the explicit guard makes the invariant
-        # auditable.
-        if rank == 0:
-            wandb.log(
-                {
-                    "Training Loss": train_loss,
-                    "Validation Loss": val_loss,
-                    "Accuracy": accuracy,
-                    "Jaccard": jaccard,
-                    "F1 score": f1_score,
-                    "Recall": recall,
-                    "Images": {
-                        "Training": [wandb.Image(x, mode="RGB") for x in train_images],
-                        "Validation": [wandb.Image(x, mode="RGB") for x in val_images],
-                    },
-                }
+        # Init wandb. entity=wandb_entity (None -> wandb uses the user's default
+        # entity; project=wandb_project (None -> wandb default project). No
+        # hardcoded lab config. Under DDP, only rank 0 inits a wandb run (the
+        # rank-0-only W&B invariant — D-01); other ranks use a disabled run so
+        # wandb.log/watch/finish calls are safe no-ops on non-rank-0.
+        if ddp and rank != 0:
+            run = wandb.init(
+                project=wandb_project,
+                entity=wandb_entity,
+                mode="disabled",
+                config=hyperparameter_defaults,
+            )
+        else:
+            run = wandb.init(
+                project=wandb_project,
+                entity=wandb_entity,
+                mode=wandb_mode,
+                config=hyperparameter_defaults,
             )
 
-    # Atomic complete sentinel — written LAST, after all epochs done. A crash
-    # on the final epoch does NOT leave complete=True (write_manifest is
-    # atomic: temp + Path.replace). DDPResumeManager no-ops on non-rank-0.
-    resume_mgr.mark_complete()
+        config = wandb.config
 
-    logger.info("Finished Training: Best Epoch = %s", best_epoch)
-    # W&B artifact + finish: rank-0 only (D-01).
-    if rank == 0:
-        artifact = wandb.Artifact("model", type="model")
-        artifact.add_file(f"{checkpoint_path}.latest.pth")
-        run.log_artifact(artifact)
+        # Load the dataset
+        full_dataset = OmeZarrLabelDataSet(
+            dataset_file,
+            node_name,
+            device=dev,
+            pre_process=False,
+            patch_size=patch_size,
+            filter_empty=filter_empty_patches,
+            normalise_label=False,
+        )
+        train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
 
-        # For sweeps — save a model.pt copy into the W&B run dir. In
-        # ``disabled`` mode (and on filesystems where wandb defers dir
-        # creation) ``wandb.run.dir`` may not exist yet; create it before
-        # the save so the sweeps artifact lands regardless of mode. The
-        # mkdir is idempotent (exist_ok=True) so online/offline modes that
-        # already created the dir are unaffected.
-        sweep_dir = Path(wandb.run.dir)
-        sweep_dir.mkdir(parents=True, exist_ok=True)
+        if filter_empty_patches:
+            # Map the split indices through valid_indices to get the actual
+            # dataset indices. random_split returns Subset objects whose
+            # .indices are integers in 0..len(valid_indices)-1 (i.e. indices
+            # INTO the filtered dataset, since full_dataset.__len__ returns
+            # len(valid_indices) when filter_empty is set). The previous code
+            # checked whether a filtered-dataset index was a VALUE in
+            # valid_indices (which contains original dataset indices) -- a
+            # namespace mismatch that succeeded only by numerical coincidence
+            # and produced a tiny, non-random training subset. Map each split
+            # index through valid_indices to recover the true dataset index.
+            train_valid_indices = [
+                int(full_dataset.valid_indices[idx]) for idx in train_dataset.indices
+            ]
+            test_valid_indices = [int(full_dataset.valid_indices[idx]) for idx in test_dataset.indices]
+
+            # Create new subsets for dataloaders
+            train_dataset = Subset(full_dataset, train_valid_indices)
+            test_dataset = Subset(full_dataset, test_valid_indices)
+
+        # Pin memory only when the dataset yields CPU tensors. ``OmeZarrLabelDataSet``
+        # creates tensors directly on ``dev`` (its ``__getitem__`` does
+        # ``torch.tensor(..., device=self.device)``), so when ``dev`` is CUDA the
+        # DataLoader's pin-memory worker receives already-CUDA tensors and raises
+        # ``RuntimeError: cannot pin 'torch.cuda.FloatTensor' only dense CPU
+        # tensors can be pinned``. Pinning is an async CPU→GPU staging optimization;
+        # when the data is already on the target GPU it is wrong, not just redundant.
+        # Gate it on the dataset device being CPU so both the DDP and non-DDP CUDA
+        # paths are correct (the CPU gloo smoke keeps pin_memory=True). The original
+        # ``pin_memory`` (what the caller requested) is preserved for the resume
+        # params-hash below — the gating is a device-dependent correctness
+        # adjustment, not a config change, and ``dev`` already captures the device
+        # in the hash.
+        pin_memory_effective = pin_memory and dev.type == "cpu"
+
+        # Create data loaders. Under DDP, wrap both loaders with
+        # DistributedSampler (D-02b: set_epoch called per-epoch on the train
+        # sampler so each epoch sees a different shuffle across ranks). The val
+        # loader also uses DistributedSampler (all-rank eval, D-02) — the
+        # sum+count all-reduce in evaluate() handles len(val_set) % world_size
+        # != 0.
         if ddp:
-            resume_mgr.save_weights(model, str(sweep_dir / "model.pt"))
+            train_sampler = DistributedSampler(train_dataset, shuffle=True)
+            val_sampler = DistributedSampler(test_dataset, shuffle=False)
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                sampler=train_sampler,
+                num_workers=0,
+                pin_memory=pin_memory_effective,
+            )
+            validation_loader = DataLoader(
+                test_dataset,
+                batch_size=batch_size,
+                sampler=val_sampler,
+                num_workers=0,
+                pin_memory=pin_memory_effective,
+            )
         else:
-            torch.save(model.state_dict(), str(sweep_dir / "model.pt"))
-        run.finish()
+            train_sampler = None
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=pin_memory_effective,
+            )
+            validation_loader = DataLoader(
+                test_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=pin_memory_effective,
+            )
 
-    # final_metrics.csv relocated to Path(output_train)/final_metrics.csv
-    # (D-03b — eliminates the concurrent-run CWD collision). Rank-0 only
-    # under DDP (only rank 0 has the complete train_losses/val_losses; the
-    # all-reduce in evaluate() gives every rank the same val_loss but the
-    # train_loss accumulation is per-rank — write on rank 0 to avoid the
-    # collision the relocation was meant to fix).
-    if rank == 0:
-        final_loss = pd.DataFrame(data=[train_losses, val_losses]).T
-        final_loss.to_csv(Path(output_train) / "final_metrics.csv", encoding="utf-8", index=False)
+        # Setup check point dir
+        best_epoch = -1
+        create_dir(f"{output_train}")
+        create_dir(f"{output_train}/files")
+        checkpoint_path = f"{output_train}/files/checkpoint"
+        create_dir(f"{output_train}/patch_seg")
+
+        # Resume bookkeeping: the manifest records last_completed_epoch
+        # (complementary to the per-epoch checkpoint.*.pth weights artifact).
+        # The manifest is the bookkeeper; the .pth is the weights.
+        #
+        # NOTE: steps_total=epochs is passed for manifest completeness, but
+        # train_model does NOT call start_step/finish_step per epoch — it uses
+        # set_last_completed_epoch + the complete sentinel instead. The
+        # completed_steps set in the manifest is therefore always empty for
+        # this pipeline; last_completed_epoch is the authoritative epoch index.
+        # Future maintainers should not expect completed_steps to track epoch
+        # completion here.
+        from liom_toolkit.utils.checkpoint import DDPResumeManager, ResumeManager
+
+        # Under DDP, use DDPResumeManager (rank-0-only writes + post-restore
+        # barrier + model.module unwrap). Single-process callers get the base
+        # ResumeManager unchanged (D-03 — the base class stays
+        # single-process-agnostic).
+        resume_mgr_cls = DDPResumeManager if ddp else ResumeManager
+        resume_mgr = resume_mgr_cls(
+            output_dir=Path(output_train),
+            pipeline="train_model",
+            params={
+                "dataset_file": dataset_file,
+                "node_name": node_name,
+                "epochs": epochs,
+                "learning_rate": learning_rate,
+                "batch_size": batch_size,
+                # Include training-affecting parameters so a config change
+                # between runs invalidates the checkpoint (params-hash
+                # mismatch). pretrained_artifact determines the initial
+                # weights (from-scratch vs. fine-tuning); filter_empty_patches
+                # changes which patches are used; dev (CPU vs. GPU) affects
+                # floating-point reproducibility; pin_memory changes data
+                # loading behavior. Without these, resume with a different
+                # training config would silently continue from a checkpoint
+                # that was initialized differently — a stale-checkpoint bug.
+                "pretrained_artifact": pretrained_artifact,
+                "filter_empty_patches": filter_empty_patches,
+                "dev": str(dev) if dev is not None else None,
+                "pin_memory": pin_memory,
+                "ddp": ddp,
+                "use_amp": use_amp,
+                "patch_size": patch_size,
+            },
+            steps_total=epochs,
+        )
+        if resume and resume_mgr.is_complete():
+            logger.info("train_model: checkpoint complete, nothing to do.")
+            if rank == 0:
+                run.finish()
+            return
+
+        # Initialise the model. pretrained_artifact threads through to VsegModel;
+        # None trains from scratch (no silent fallback to a hardcoded lab artifact).
+        model = VsegModel(
+            pretrained=pretrained_artifact is not None,
+            pretrained_artifact=pretrained_artifact,
+        )
+
+        # Resume: load the per-epoch checkpoint.{last_completed_epoch}.pth weights
+        # and continue from epoch N+1. 1.0.0 limitation: the optimizer / scheduler
+        # / RNG state is re-initialized (full-state .pth augmentation is deferred
+        # to 1.1 — resume is not bit-deterministic across optimizer/RNG state
+        # until 1.1). This is a known, documented limitation, not a silent
+        # wrong-data fallback. Under DDP, DDPResumeManager.restore_weights loads
+        # on rank 0 then barriers so all ranks sync before training.
+        start_epoch = 0
+        if resume:
+            last_epoch = resume_mgr.get_last_completed_epoch()
+            if last_epoch is not None:
+                ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
+                if Path(ckpt_file).exists():
+                    # weights_only=True restricts deserialization to tensor
+                    # storage (no arbitrary pickle code execution). PyTorch 2.6+
+                    # defaults to this, but the ai extra does not pin a torch
+                    # version, so a user on torch < 2.6 would otherwise load with
+                    # weights_only=False (pickle.load under the hood) — a
+                    # malicious or swapped .pth would execute arbitrary code.
+                    # Match the model.py load path (weights_only=True).
+                    if ddp:
+                        # DDPResumeManager handles rank-0 load + post-restore
+                        # barrier (single barrier after rank-0 save; the next
+                        # backward AllReduce is the subsequent sync point).
+                        resume_mgr.restore_weights(model, ckpt_file)
+                    else:
+                        model.load_state_dict(torch.load(ckpt_file, weights_only=True))
+                    start_epoch = last_epoch + 1
+                    logger.info(
+                        "train_model: resuming from epoch %d (loaded %s).",
+                        start_epoch,
+                        ckpt_file,
+                    )
+                else:
+                    logger.warning(
+                        "train_model: manifest says last_completed_epoch=%d but "
+                        "%s is missing — starting from epoch 0.",
+                        last_epoch,
+                        ckpt_file,
+                    )
+
+        model = model.to(dev)
+
+        # Wrap with DDP after the model is on the device. The isinstance guard
+        # prevents double-wrapping so Phase 15 can reuse the identical entry
+        # path without an API undo. On CUDA the explicit device_ids=[local_rank]
+        # is the documented PyTorch DDP best practice; on CPU/gloo device_ids
+        # MUST be None (the gloo backend has no device placement).
+        if ddp and not isinstance(model, DistributedDataParallel):
+            device_ids = [int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None
+            model = DistributedDataParallel(model, device_ids=device_ids)
+
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5)
+        loss_fn = DiceBCELoss()
+
+        # Track model with Wandb — rank-0 only (D-01 W&B invariant).
+        if rank == 0:
+            wandb.watch(model, criterion=loss_fn, log="all", log_freq=25, log_graph=False)
+
+        """ Training the model """
+        train_losses = []
+        val_losses = []
+
+        best_valid_loss = float("inf")
+
+        epoch_range = range(start_epoch, config.epochs)
+        for epoch in (pbar := tqdm(epoch_range, desc="Epochs", leave=False, position=0)):
+            # D-02b: set_epoch per-epoch so each epoch sees a different shuffle
+            # across ranks. No-op when train_sampler is None (single-process).
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
+            train_loss, train_y, train_y_pred, x_train = train(
+                model, train_loader, optimizer, loss_fn, dev, use_amp=use_amp
+            )
+
+            val_loss, val_y, val_y_pred, x_val, f1_score, accuracy, jaccard, recall = evaluate(
+                model, validation_loader, loss_fn, dev
+            )
+
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+            scheduler.step(val_loss)
+
+            """ Saving model """
+            if val_loss < best_valid_loss:
+                best_epoch = epoch
+                # DDPResumeManager.save_weights unwraps model.module for DDP and
+                # is rank-0-only; base ResumeManager path uses torch.save
+                # directly (single-process unchanged).
+                if ddp:
+                    resume_mgr.save_weights(model, f"{checkpoint_path}.latest.pth")
+                else:
+                    torch.save(model.state_dict(), f"{checkpoint_path}.latest.pth")
+                best_valid_loss = val_loss
+
+            if epoch % 10 == 0:
+                if ddp:
+                    resume_mgr.save_weights(model, f"{checkpoint_path}.epoch_{epoch}.pth")
+                else:
+                    torch.save(model.state_dict(), f"{checkpoint_path}.epoch_{epoch}.pth")
+
+            # Record the epoch as complete (complementary to the per-epoch .pth).
+            # A crash after epoch N leaves last_completed_epoch=N; resume
+            # continues from N+1. DDPResumeManager no-ops on non-rank-0.
+            resume_mgr.set_last_completed_epoch(epoch)
+
+            pbar.set_postfix(loss=f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            train_images = create_images(x_train, train_y, train_y_pred)
+            val_images = create_images(x_val, val_y, val_y_pred)
+            # wandb.log rank-0 only (D-01). On non-rank-0 the run is disabled so
+            # this is a safe no-op, but the explicit guard makes the invariant
+            # auditable.
+            if rank == 0:
+                wandb.log(
+                    {
+                        "Training Loss": train_loss,
+                        "Validation Loss": val_loss,
+                        "Accuracy": accuracy,
+                        "Jaccard": jaccard,
+                        "F1 score": f1_score,
+                        "Recall": recall,
+                        "Images": {
+                            "Training": [wandb.Image(x, mode="RGB") for x in train_images],
+                            "Validation": [wandb.Image(x, mode="RGB") for x in val_images],
+                        },
+                    }
+                )
+
+        # Atomic complete sentinel — written LAST, after all epochs done. A crash
+        # on the final epoch does NOT leave complete=True (write_manifest is
+        # atomic: temp + Path.replace). DDPResumeManager no-ops on non-rank-0.
+        resume_mgr.mark_complete()
+
+        logger.info("Finished Training: Best Epoch = %s", best_epoch)
+        # W&B artifact + finish: rank-0 only (D-01).
+        if rank == 0:
+            artifact = wandb.Artifact("model", type="model")
+            artifact.add_file(f"{checkpoint_path}.latest.pth")
+            run.log_artifact(artifact)
+
+            # For sweeps — save a model.pt copy into the W&B run dir. In
+            # ``disabled`` mode (and on filesystems where wandb defers dir
+            # creation) ``wandb.run.dir`` may not exist yet; create it before
+            # the save so the sweeps artifact lands regardless of mode. The
+            # mkdir is idempotent (exist_ok=True) so online/offline modes that
+            # already created the dir are unaffected.
+            sweep_dir = Path(wandb.run.dir)
+            sweep_dir.mkdir(parents=True, exist_ok=True)
+            if ddp:
+                resume_mgr.save_weights(model, str(sweep_dir / "model.pt"))
+            else:
+                torch.save(model.state_dict(), str(sweep_dir / "model.pt"))
+            run.finish()
+
+        # final_metrics.csv relocated to Path(output_train)/final_metrics.csv
+        # (D-03b — eliminates the concurrent-run CWD collision). Rank-0 only
+        # under DDP (only rank 0 has the complete train_losses/val_losses; the
+        # all-reduce in evaluate() gives every rank the same val_loss but the
+        # train_loss accumulation is per-rank — write on rank 0 to avoid the
+        # collision the relocation was meant to fix).
+        if rank == 0:
+            final_loss = pd.DataFrame(data=[train_losses, val_losses]).T
+            final_loss.to_csv(Path(output_train) / "final_metrics.csv", encoding="utf-8", index=False)
+    finally:
+        # Clean shutdown of the DDP process group. Under torchrun the
+        # process exits and the runtime cleans up, but calling
+        # destroy_process_group() is the documented pattern and matters
+        # if train_model is called from a notebook or long-lived process.
+        # Guarded so it only runs when DDP was actually initialized (dist
+        # is the function-scope lazy import binding, None when ddp=False).
+        if ddp and dist is not None:
+            dist.destroy_process_group()
