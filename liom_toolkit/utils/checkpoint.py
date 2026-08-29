@@ -51,6 +51,7 @@ import tempfile
 from typing import Any
 
 __all__ = [
+    "DDPResumeManager",
     "ResumeManager",
     "compute_params_hash",
     "is_step_done",
@@ -452,3 +453,131 @@ class ResumeManager:
         if self._last_completed_epoch is not None:
             data["last_completed_epoch"] = self._last_completed_epoch
         write_manifest(self.manifest_path, data)
+
+
+class DDPResumeManager(ResumeManager):
+    """DDP-aware resume bookkeeper: rank-0-only writes + post-restore barrier.
+
+    Subclass of :class:`ResumeManager` that centralizes the rank-0 write
+    invariant for distributed training. The base class stays
+    single-process-agnostic (its "single-process, no lock" docstring stays
+    honest) — this subclass owns the rank guard and the post-restore
+    barrier so the manifest/``.done``/``.pth`` write race (two ranks
+    ``os.replace``-ing the same file = last-writer-wins semantic
+    corruption) is prevented in one auditable place.
+
+    ``torch.distributed`` is lazy-imported INSIDE each method so this
+    module imports cleanly without the ``ai`` extra installed (AGENTS §8).
+    When ``torch.distributed`` is not available or not initialized, the
+    methods delegate to the base single-process behavior — the subclass is
+    a safe drop-in for single-process callers too.
+
+    Notes
+    -----
+    The post-restore barrier is a SINGLE ``dist.barrier()`` after the
+    weight load (the next backward AllReduce is the subsequent sync point
+    — no second barrier, per the official DDP tutorial). Full-state
+    ``.pth`` augmentation (optimizer / scheduler / RNG state) is deferred
+    to v2; ``restore_weights`` loads weights only (``weights_only=True``).
+    """
+
+    def _is_rank0(self) -> bool:
+        """Return True when this rank should perform shared writes.
+
+        Single-process (dist not available / not initialized) → True
+        (delegate to base behavior). DDP rank 0 → True. DDP non-rank-0 →
+        False.
+
+        Returns
+        -------
+        bool
+            True if this rank is the writer rank (rank 0 or single-process).
+        """
+        try:
+            import torch.distributed as dist
+        except ImportError:
+            return True
+        if not (dist.is_available() and dist.is_initialized()):
+            return True
+        return dist.get_rank() == 0
+
+    def _write_manifest(self) -> None:
+        """Write the manifest only on rank 0 (no-op on other ranks).
+
+        When ``torch.distributed`` is not available or not initialized,
+        delegates to the base single-process write (single-process callers
+        unchanged).
+        """
+        if self._is_rank0():
+            super()._write_manifest()
+        # Non-rank-0: no-op. The manifest race (two ranks os.replace-ing
+        # the same {pipeline}.json) is prevented — only rank 0 writes.
+
+    def restore_weights(self, model: Any, ckpt_file: str, *, device: Any = None) -> None:
+        """Restore model weights from ``ckpt_file`` and barrier-sync all ranks.
+
+        Rank 0 (or single-process) loads the checkpoint with
+        ``weights_only=True`` (no arbitrary pickle code execution —
+        matches the ``model.py`` load path) and calls
+        ``model.load_state_dict(...)``. When ``torch.distributed`` is
+        initialized, calls ``dist.barrier()`` exactly ONCE after the load
+        so all ranks sync before training (the next backward AllReduce is
+        the subsequent sync point — no second barrier).
+
+        Parameters
+        ----------
+        model : torch.nn.Module
+            The model to load weights into.
+        ckpt_file : str
+            Path to the ``.pth`` weights file.
+        device : torch.device or None
+            Optional device mapping passed to ``torch.load``.
+
+        Notes
+        -----
+        Weights-only limitation: full optimizer / scheduler / RNG state
+        is deferred to v2 (FULLSTATE-01). Resume continues with a
+        re-initialized optimizer state — a known, documented limitation,
+        not a silent wrong-data fallback.
+        """
+        import torch
+
+        if self._is_rank0():
+            state = torch.load(ckpt_file, weights_only=True, map_location=device)
+            model.load_state_dict(state)
+        try:
+            import torch.distributed as dist
+        except ImportError:
+            return
+        if dist.is_available() and dist.is_initialized():
+            # Single barrier after rank-0 load; the next backward AllReduce
+            # is the subsequent sync point (no second barrier).
+            dist.barrier()
+
+    def save_weights(self, model: Any, path: str) -> None:
+        """Save model weights to ``path`` on rank 0 only.
+
+        When ``model`` is a ``DistributedDataParallel`` wrapper, saves
+        ``model.module.state_dict()`` so the ``.pth`` is loadable by both
+        ``predict_one`` (non-DDP) and a future DDP resume. When ``model``
+        is a plain ``Module``, saves ``model.state_dict()`` unchanged.
+
+        No-op on non-rank-0 when DDP is initialized (rank-0 invariant).
+        Single-process (dist not initialized) → unconditional save.
+        """
+        import torch
+
+        if not self._is_rank0():
+            return
+        # Lazy-import the DDP class inside the method (AGENTS §8) so the
+        # module imports without torch. isinstance against the real class
+        # (not a mock) — when torch is absent this branch is unreachable
+        # because the torch import above already raised.
+        from torch.nn.parallel import DistributedDataParallel
+
+        state = (
+            model.module.state_dict()
+            if isinstance(model, DistributedDataParallel)
+            else model.state_dict()
+        )
+        torch.save(state, path)

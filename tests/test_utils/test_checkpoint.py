@@ -27,6 +27,7 @@ from unittest.mock import patch
 import pytest
 
 from liom_toolkit.utils.checkpoint import (
+    DDPResumeManager,
     ResumeManager,
     compute_params_hash,
     is_step_done,
@@ -361,3 +362,197 @@ def test_resume_manager_rejects_negative_step(tmp_path):
     )
     with pytest.raises(ValueError):
         mgr.start_step(-1)
+
+
+# ---------------------------------------------------------------------------
+# DDPResumeManager — rank-0 write guard, post-restore barrier, DDP unwrap
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_dist(monkeypatch, *, rank, world_size=2, initialized=True, available=True):
+    """Inject a MagicMock as ``torch.distributed`` in ``sys.modules``.
+
+    The DDPResumeManager methods lazy-import ``torch.distributed`` inside the
+    method body. ``import torch.distributed as dist`` binds ``dist`` to the
+    ``distributed`` attribute on the already-imported ``torch`` package (not
+    the ``sys.modules`` entry), so we patch BOTH the ``sys.modules`` entry
+    AND the ``torch.distributed`` attribute. monkeypatch restores both on
+    teardown.
+    """
+    from unittest.mock import MagicMock
+
+    import torch
+
+    fake_dist = MagicMock(name="torch.distributed")
+    fake_dist.is_available.return_value = available
+    fake_dist.is_initialized.return_value = initialized
+    fake_dist.get_rank.return_value = rank
+    fake_dist.get_world_size.return_value = world_size
+    fake_dist.barrier = MagicMock()
+    fake_dist.ReduceOp = MagicMock(name="ReduceOp")
+    monkeypatch.setitem(__import__("sys").modules, "torch.distributed", fake_dist)
+    monkeypatch.setattr(torch, "distributed", fake_dist)
+    return fake_dist
+
+
+class _FakeDDP:
+    """Minimal stand-in for ``torch.nn.parallel.DistributedDataParallel``.
+
+    Exposes ``.module`` so ``DDPResumeManager.save_weights`` unwraps to the
+    inner module's ``state_dict``. The inner module is a real
+    ``torch.nn.Module`` so ``state_dict()`` returns a real dict (we do NOT
+    mock torch itself for the state_dict round-trip per AGENTS §5).
+    """
+
+    def __init__(self, module):
+        self.module = module
+
+
+def test_ddp_rank0_writes_manifest(tmp_path, monkeypatch):
+    """DDPResumeManager on rank 0 writes the manifest to disk (file exists)."""
+    pytest.importorskip("torch")
+
+    _install_fake_dist(monkeypatch, rank=0)
+    out = tmp_path / "out"
+    out.mkdir()
+    mgr = DDPResumeManager(
+        output_dir=out,
+        pipeline="train_model",
+        params={"lr": 0.001},
+        steps_total=3,
+    )
+    mgr.set_last_completed_epoch(1)
+    manifest = out / "_liom_checkpoints" / "train_model.json"
+    assert manifest.exists(), "rank 0 must write the manifest"
+
+
+def test_ddp_non_rank0_does_not_write_manifest(tmp_path, monkeypatch):
+    """DDPResumeManager on non-rank-0 does NOT write the manifest (file absent).
+
+    Both ``set_last_completed_epoch`` and ``mark_complete`` no-op on
+    non-rank-0 — the rank-0 invariant is centralized in the subclass
+    ``_write_manifest`` override.
+    """
+    pytest.importorskip("torch")
+    _install_fake_dist(monkeypatch, rank=1)
+    out = tmp_path / "out"
+    out.mkdir()
+    mgr = DDPResumeManager(
+        output_dir=out,
+        pipeline="train_model",
+        params={"lr": 0.001},
+        steps_total=3,
+    )
+    mgr.set_last_completed_epoch(1)
+    mgr.mark_complete()
+    manifest = out / "_liom_checkpoints" / "train_model.json"
+    assert not manifest.exists(), "non-rank-0 must NOT write the manifest"
+
+
+def test_ddp_restore_weights_barrier_once(tmp_path, monkeypatch):
+    """DDPResumeManager.restore_weights calls dist.barrier() exactly once."""
+    pytest.importorskip("torch")
+    import torch
+    from torch import nn
+
+    fake_dist = _install_fake_dist(monkeypatch, rank=0)
+    out = tmp_path / "out"
+    out.mkdir()
+    mgr = DDPResumeManager(
+        output_dir=out,
+        pipeline="train_model",
+        params={"lr": 0.001},
+        steps_total=3,
+    )
+    # Write a real .pth to load (weights_only=True round-trip).
+    model = nn.Linear(2, 2)
+    ckpt = tmp_path / "ckpt.pth"
+    torch.save(model.state_dict(), ckpt)
+    target = nn.Linear(2, 2)
+    mgr.restore_weights(target, str(ckpt))
+    assert fake_dist.barrier.call_count == 1, (
+        f"restore_weights must call dist.barrier exactly once, got {fake_dist.barrier.call_count}"
+    )
+
+
+def test_ddp_save_weights_unwraps_ddp(tmp_path, monkeypatch):
+    """DDPResumeManager.save_weights saves model.module.state_dict() for DDP models."""
+    pytest.importorskip("torch")
+    import torch
+    from torch import nn
+
+    _install_fake_dist(monkeypatch, rank=0)
+    # Patch the DDP class reference so isinstance(model, DDP) matches our
+    # _FakeDDP stand-in. save_weights lazy-imports
+    # ``from torch.nn.parallel import DistributedDataParallel as DDP`` inside
+    # the method, so patching the attribute on the real submodule steers the
+    # isinstance check.
+    monkeypatch.setattr("torch.nn.parallel.DistributedDataParallel", _FakeDDP)
+    out = tmp_path / "out"
+    out.mkdir()
+    mgr = DDPResumeManager(
+        output_dir=out,
+        pipeline="train_model",
+        params={"lr": 0.001},
+        steps_total=3,
+    )
+    inner = nn.Linear(2, 2)
+    ddp_model = _FakeDDP(inner)
+    dest = tmp_path / "weights.pth"
+    mgr.save_weights(ddp_model, str(dest))
+    assert dest.exists(), "save_weights must write the .pth on rank 0"
+    # The saved state_dict is the INNER module's, not the DDP wrapper's.
+    loaded = torch.load(dest, weights_only=True)
+    assert set(loaded.keys()) == set(inner.state_dict().keys()), (
+        "save_weights must save model.module.state_dict() for DDP-wrapped models"
+    )
+
+
+def test_ddp_save_weights_non_ddp_unchanged(tmp_path, monkeypatch):
+    """DDPResumeManager.save_weights saves model.state_dict() for non-DDP models."""
+    pytest.importorskip("torch")
+    import torch
+    from torch import nn
+
+    _install_fake_dist(monkeypatch, rank=0)
+    out = tmp_path / "out"
+    out.mkdir()
+    mgr = DDPResumeManager(
+        output_dir=out,
+        pipeline="train_model",
+        params={"lr": 0.001},
+        steps_total=3,
+    )
+    model = nn.Linear(2, 2)
+    dest = tmp_path / "weights.pth"
+    mgr.save_weights(model, str(dest))
+    assert dest.exists()
+    loaded = torch.load(dest, weights_only=True)
+    assert set(loaded.keys()) == set(model.state_dict().keys())
+
+
+def test_base_resume_manager_no_torch_at_module_top():
+    """ResumeManager (base) imports cleanly without torch installed.
+
+    The base class stays single-process-agnostic — torch.distributed is
+    imported INSIDE the DDPResumeManager methods, never at module top.
+    Importing checkpoint.py must not require torch.
+    """
+    import importlib
+    import sys
+
+    # Save and remove any torch modules to prove the import works without them.
+    saved_torch = sys.modules.pop("torch", None)
+    saved_dist = sys.modules.pop("torch.distributed", None)
+    try:
+        # Re-import checkpoint fresh to prove no module-top torch import.
+        if "liom_toolkit.utils.checkpoint" in sys.modules:
+            del sys.modules["liom_toolkit.utils.checkpoint"]
+        mod = importlib.import_module("liom_toolkit.utils.checkpoint")
+        assert hasattr(mod, "ResumeManager")
+        assert hasattr(mod, "DDPResumeManager")
+    finally:
+        if saved_torch is not None:
+            sys.modules["torch"] = saved_torch
+        if saved_dist is not None:
+            sys.modules["torch.distributed"] = saved_dist
