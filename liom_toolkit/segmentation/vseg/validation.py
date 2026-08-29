@@ -70,7 +70,16 @@ def validate_model(model: VsegModel, img_list: list[str], save_path: str, device
         The path to save the results (diff images + metrics CSV).
     device : str
         The device to use for prediction.
+
+    Raises
+    ------
+    ValueError
+        If ``img_list`` is empty -- there is nothing to validate, and the
+        per-metric means would otherwise divide by zero (ZeroDivisionError)
+        with a message that does not identify the cause.
     """
+    if not img_list:
+        raise ValueError("validate_model: img_list is empty -- no images to validate.")
     f1: list[float] = []
     recall: list[float] = []
     accuracy: list[float] = []
