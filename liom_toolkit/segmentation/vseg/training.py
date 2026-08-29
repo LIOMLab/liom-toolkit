@@ -89,10 +89,26 @@ def train(
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
-    # Initialize epoch loss to 0. Pre-bind the loop variables to None so an
-    # empty loader does not raise UnboundLocalError at the return statement
-    # (the for-loop body never assigns them when the loader yields nothing).
-    epoch_loss = 0.0
+    # Detect DDP: when torch.distributed is initialized and world_size > 1,
+    # the per-shard mean is wrong (train shards differ in size when
+    # len(train_set) % world_size != 0). Use sum+count all-reduce to compute
+    # the true global mean, mirroring evaluate(). The reduce is skipped when
+    # world_size==1 (single-process path unchanged).
+    try:
+        import torch.distributed as dist
+
+        ddp_active = dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
+    except ImportError:
+        dist = None
+        ddp_active = False
+
+    # Accumulate (sum, count) for the loss. Pre-bind the loop variables to
+    # None so an empty loader does not raise UnboundLocalError at the return
+    # statement (the for-loop body never assigns them when the loader yields
+    # nothing); the empty-loader guard below raises a clear ValueError
+    # instead of returning None tensors.
+    loss_sum = 0.0
+    loss_count = 0
     y = None
     y_pred = None
     x = None
@@ -128,21 +144,37 @@ def train(
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         scaler.step(optimizer)
         scaler.update()
-        epoch_loss += loss.item()
+        loss_sum += loss.item()
+        loss_count += 1
 
-    # Normalize cumulative loss for number of examples. An empty loader
-    # (len(loader) == 0) means no batches were seen -- the loop never
-    # assigned y/y_pred/x, so returning them as None would crash callers
-    # downstream (create_images calls x.cpu() on None -> confusing
+    # Under DDP, all-reduce the (sum, count) pair to get the global sum and
+    # global count, then divide for the global mean. This is the
+    # correctness boundary: the per-shard mean is wrong when train shards
+    # differ in size (len(train_set) % world_size != 0). Single-process
+    # (ddp_active=False) skips the reduce -- the local sum / local count
+    # gives the per-batch mean (unchanged behavior). The tensors MUST live
+    # on ``device`` (NCCL is CUDA-only; gloo handles CPU) -- see the
+    # matching comment in evaluate().
+    if ddp_active:
+        loss_pair = torch.tensor(
+            [loss_sum, float(loss_count)], dtype=torch.float64, device=device
+        )
+        dist.all_reduce(loss_pair, op=dist.ReduceOp.SUM)
+        loss_sum = float(loss_pair[0].item())
+        loss_count = int(loss_pair[1].item())
+
+    # An empty loader (loss_count == 0) means no batches were seen -- the
+    # loop never assigned y/y_pred/x, so returning them as None would crash
+    # callers downstream (create_images calls x.cpu() on None -> confusing
     # AttributeError). Raise an explicit ValueError naming the cause so
     # the user sees the real problem (empty dataset / over-aggressive
     # filter_empty) instead of a NoneType crash several frames later.
-    if len(loader) == 0:
+    if loss_count == 0:
         raise ValueError(
             "train: loader yielded no batches -- cannot train on an empty "
             "dataset. Check the dataset size and filter_empty settings."
         )
-    epoch_loss = epoch_loss / len(loader)
+    epoch_loss = loss_sum / loss_count
     return epoch_loss, y, y_pred, x
 
 
