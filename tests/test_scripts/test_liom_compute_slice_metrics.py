@@ -28,6 +28,7 @@ from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
+import pytest
 
 
 def test_liom_compute_slice_metrics_help_exits_0() -> None:
@@ -97,4 +98,43 @@ def test_liom_compute_slice_metrics_main_smoke(tmp_path: Path, monkeypatch) -> N
     assert os.path.isfile(str(out_dir / "regions.png")), (
         "main() did not write regions.png -- the real compute_slice_metrics "
         "domain callee was not reached"
+    )
+
+
+def test_liom_compute_slice_metrics_missing_input_exits_2(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A nonexistent mask_file path exits 2 with a clear CLI error.
+
+    Without a file-existence check at the argparse boundary, ``main()`` reaches
+    ``imageio.imread`` and raises ``FileNotFoundError`` (a raw third-party
+    traceback) instead of the argparse-style exit code 2. This regression test
+    pins the D-01 file-existence mitigation: the check loops over the 4 input
+    positionals and surfaces the first missing one via ``parser.error`` before
+    any image is loaded.
+    """
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-compute-slice-metrics",
+            str(tmp_path / "out"),
+            "label",
+            str(tmp_path / "nope.tif"),
+            str(tmp_path / "nope_vessel.tif"),
+            str(tmp_path / "nope_region.tif"),
+            str(tmp_path / "nope_exclude.tif"),
+            "--voxel_size",
+            "0.65",
+        ],
+    )
+
+    from liom_toolkit.scripts.liom_compute_slice_metrics import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2, (
+        "main() should exit 2 via parser.error on a nonexistent mask_file, "
+        f"got exit code {exc.value.code}"
     )
