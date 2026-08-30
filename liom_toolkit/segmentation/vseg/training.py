@@ -605,7 +605,8 @@ def train_model(
         # selection is the robust path: gloo on CPU, nccl on CUDA. torchrun
         # still injects RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT.
         backend = "nccl" if torch.cuda.is_available() else "gloo"
-        dist.init_process_group(backend=backend)
+        if not dist.is_initialized():
+            dist.init_process_group(backend=backend)
         if torch.cuda.is_available():
             torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         rank = dist.get_rank()

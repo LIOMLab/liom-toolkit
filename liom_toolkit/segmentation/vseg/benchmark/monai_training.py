@@ -323,7 +323,8 @@ def train_monai_model(
         DistributedSampler = DSamp
 
         backend = "nccl" if torch.cuda.is_available() else "gloo"
-        dist.init_process_group(backend=backend)
+        if not dist.is_initialized():
+            dist.init_process_group(backend=backend)
         if torch.cuda.is_available():
             torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
             device = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
