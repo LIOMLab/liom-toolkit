@@ -110,7 +110,14 @@ def run_benchmark(
     eval_cfg = eval_config or {}
     voxel_size_um = eval_cfg.get("voxel_size_um", 6.5)
     capillary_radius_um = eval_cfg.get("capillary_radius_um", 5.0)
-    boundary_patch_size = eval_cfg.get("boundary_patch_size", (256, 256))
+    # Default the boundary patch size from the split_config patch_size spatial
+    # dims, not a hardcoded 256. A hardcoded (256, 256) default silently
+    # produces ny=0/nx=0 (and a misleading "vessel-free slice — metric
+    # undefined" row) whenever the caller passes smaller slices or a smaller
+    # patch_size — masking the boundary metric, one of the six ship-gate rows.
+    boundary_patch_size = eval_cfg.get(
+        "boundary_patch_size", (patch_size[1], patch_size[2])
+    )
 
     # (metric_name, callable) pairs — the ship-gate matrix + reported_dice.
     scalar_metrics: list[tuple[str, Callable[..., float]]] = [
