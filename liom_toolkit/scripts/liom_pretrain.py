@@ -110,6 +110,30 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Batch size per pretraining step (default: %(default)s)",
     )
     p.add_argument(
+        "--steps-per-epoch",
+        type=int,
+        default=100,
+        help="Gradient steps per epoch (each step samples a fresh batch of "
+        "random patches -- avoids materializing the whole corpus; "
+        "default: %(default)s)",
+    )
+    p.add_argument(
+        "--patch-size",
+        type=int,
+        nargs=2,
+        default=(256, 256),
+        metavar=("PH", "PW"),
+        help="Random patch size cropped from each slice before batching "
+        "(the network is fully-convolutional so the state_dict keys are "
+        "patch-size-independent; default: %(default)s -- fits a 49GB A6000)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for patch sampling (reproducibility; default: %(default)s)",
+    )
+    p.add_argument(
         "--learning-rate",
         type=float,
         default=1e-3,
@@ -191,20 +215,42 @@ def main() -> None:
         volume_paths=args.volume_paths,
         plane_mix=tuple(args.plane_mix),
     )
-    # Build a list of batched tensors from the corpus (one batch per step).
-    # A real loader would shuffle + batch; for the reproducible CLI we
-    # materialize the corpus into batches deterministically.
-    batches = []
-    n = len(corpus)
-    for start in range(0, n, args.batch_size):
-        end = min(start + args.batch_size, n)
-        batch = torch.stack([corpus[i][0] for i in range(start, end)]).to(device)
-        batches.append(batch)
-    if not batches:
+    n_corpus = len(corpus)
+    if n_corpus == 0:
         parser.error(
             f"corpus is empty -- no slices sampled from {args.volume_paths} "
             "(check the volume paths and the plane-mix config)"
         )
+
+    # Sample random patches on-the-fly: each step draws a fresh batch of
+    # random slice indices, extracts the full (C, H, W) z-scored slice, then
+    # crops a random (PH, PW) patch. This avoids materializing the whole
+    # corpus into memory (the real corpus is ~9700 2048x2048 slices -- far
+    # too large to hold as a tensor list) and keeps the GPU fed with
+    # patch-sized inputs (a full 2048x2048 slice would OOM a 49GB A6000 on a
+    # 59M-param 9-stage U-Net). The network is fully-convolutional so the
+    # state_dict keys are patch-size-independent -- the checkpoint loads into
+    # the production network regardless of the patch size used here.
+    patch_h, patch_w = args.patch_size
+    g = torch.Generator().manual_seed(args.seed)
+
+    def _sample_batch() -> torch.Tensor:
+        idxs = torch.randint(0, n_corpus, (args.batch_size,), generator=g).tolist()
+        slices = [corpus[i] for i in idxs]  # each (C, H, W) z-scored ndarray
+        crops = []
+        for sl in slices:
+            c, h, w = sl.shape
+            if h < patch_h or w < patch_w:
+                raise ValueError(
+                    f"slice shape {(c, h, w)} smaller than patch size "
+                    f"{(patch_h, patch_w)} -- reduce --patch-size"
+                )
+            top = int(torch.randint(0, h - patch_h + 1, (1,), generator=g).item())
+            left = int(torch.randint(0, w - patch_w + 1, (1,), generator=g).item())
+            crops.append(sl[:, top : top + patch_h, left : left + patch_w])
+        return torch.stack([torch.as_tensor(crop) for crop in crops]).to(device)
+
+    batches = [_sample_batch() for _ in range(args.steps_per_epoch)]
 
     def _mask_transform(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return vessel_aware_block_mask(

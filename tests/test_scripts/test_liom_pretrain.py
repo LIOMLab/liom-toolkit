@@ -44,6 +44,9 @@ def test_liom_pretrain_help_contains_shared_and_curated_flags() -> None:
         "--frangi-sigmas",
         "--epochs",
         "--batch-size",
+        "--steps-per-epoch",
+        "--patch-size",
+        "--seed",
         "--ddp",
         "--amp",
     ):
@@ -83,6 +86,9 @@ def test_liom_pretrain_parse_args_volume_paths_and_output() -> None:
     assert list(args.frangi_sigmas) == [1, 2, 3]
     assert args.epochs == 50
     assert args.batch_size == 8
+    assert args.steps_per_epoch == 100
+    assert tuple(args.patch_size) == (256, 256)
+    assert args.seed == 42
     assert args.ddp is False
     assert args.amp is False
 
