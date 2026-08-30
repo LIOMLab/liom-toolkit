@@ -243,6 +243,8 @@ def nnunet_train(
     *,
     configuration: str = "2d",
     fold: int = 0,
+    trainer: str = "nnUNetTrainer50Epochs",
+    num_gpus: int = 1,
     nnunet_venv_python: str | None = None,
 ) -> None:
     """Invoke ``nnUNetv2_train`` in the separate nnU-Net venv.
@@ -260,6 +262,14 @@ def nnunet_train(
     fold : int
         The fold to train (``-f`` arg). Default 0. Use ``"all"`` via
         :func:`nnunet_predict` to predict with all folds' models.
+    trainer : str
+        The nnU-Net trainer class name (``-tr`` arg). Default
+        ``"nnUNetTrainer50Epochs"`` — a custom trainer with 50 epochs
+        instead of nnU-Net's default 1000, so the benchmark comparison
+        against the 50-epoch MONAI contenders is fair.
+    num_gpus : int
+        Number of GPUs for nnU-Net's built-in DDP (``-num_gpus`` arg).
+        Default 1. Set to 2 for dual-GPU training.
     nnunet_venv_python : str | None
         Path to the Python interpreter in the separate nnU-Net venv.
 
@@ -274,11 +284,17 @@ def nnunet_train(
     train_script = _nnunet_console_script(py, "nnUNetv2_train")
     # nnUNetv2_train uses POSITIONAL args: dataset_name_or_id configuration fold
     # (not -d/-c/-f flags like predict and plan_and_preprocess do).
+    # -tr selects the trainer class (custom 50-epoch trainer for fair
+    # comparison), -num_gpus enables nnU-Net's built-in DDP.
     cmd = [
         train_script,
         str(dataset_id),
         configuration,
         str(fold),
+        "-tr",
+        trainer,
+        "-num_gpus",
+        str(num_gpus),
     ]
     proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
         cmd, capture_output=True, check=False, env=env

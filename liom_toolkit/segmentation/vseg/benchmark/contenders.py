@@ -170,7 +170,7 @@ class Improved2DContender:
             dev=dev,
             output_train=output_dir,
             wandb_mode="disabled",
-            epochs=1,
+            epochs=50,
             batch_size=1,
             patch_size=patch_size,
             ddp=ddp,
@@ -648,6 +648,7 @@ class NnUnetContender:
         device: str = "cpu",
         dataset_id: int = 999,
         nnunet_venv_python: str | None = None,
+        num_gpus: int = 1,
     ) -> None:
         """Initialise the contender.
 
@@ -664,6 +665,9 @@ class NnUnetContender:
             lab-independent default. A lab that installs nnU-Net elsewhere
             must pass its own venv-python path (AGENTS §1: no hardcoded lab
             config). ``None`` raises :class:`ValueError`.
+        num_gpus : int
+            Number of GPUs for nnU-Net's built-in DDP training
+            (``-num_gpus`` CLI flag). Default 1.
 
         Raises
         ------
@@ -681,6 +685,7 @@ class NnUnetContender:
         self.device = device
         self.dataset_id = dataset_id
         self.nnunet_venv_python = nnunet_venv_python
+        self.num_gpus = num_gpus
 
     def train_and_predict(
         self,
@@ -776,11 +781,12 @@ class NnUnetContender:
             nnunet_venv_python=self.nnunet_venv_python,
         )
 
-        # 3. Train (2d config, fold 0).
+        # 3. Train (2d config, fold 0, 50-epoch trainer for fair comparison).
         nnunet_train(
             dataset_id=self.dataset_id,
             configuration="2d",
             fold=0,
+            num_gpus=self.num_gpus,
             nnunet_venv_python=self.nnunet_venv_python,
         )
 
