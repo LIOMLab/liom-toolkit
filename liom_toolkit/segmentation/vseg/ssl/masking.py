@@ -467,22 +467,47 @@ def vessel_aware_block_mask(
     # Decide which batch elements will be masked (prob gate) up front.
     will_mask = [not (prob < 1.0 and float(rng.random()) > prob) for _ in range(b)]
 
-    # Compute the Frangi probability maps. On CUDA use the batched GPU Frangi
-    # (_frangi2d_gpu) -- a single CPU Frangi call on a 512x512 patch with 3
-    # sigmas is ~7-21s, so an 8-sample batch took ~60-160s on CPU (even with
-    # a thread pool the GIL contention limited the speedup). The GPU path
-    # computes all batch elements in one ~10ms pass. On CPU fall back to the
-    # parallelized skimage path (the tracer tests use small CPU tensors).
+    # Compute the Frangi probability maps and build the block masks. On CUDA
+    # the entire path is batched on GPU: Frangi via _frangi2d_gpu, hole-center
+    # sampling via torch.multinomial, and block expansion via max_pool2d (a
+    # single 1 at each center is expanded to a bh x bw block by a max-pool
+    # with kernel (bh, bw), stride 1, padding (bh//2, bw//2)). No per-sample
+    # CPU loop, no .cpu() transfer -- the dominant cost was the CPU
+    # hole-sampling + block-building loop (~3.6s/batch); the fully-GPU path
+    # is ~10ms/batch. On CPU fall back to the parallelized skimage path (the
+    # tracer tests use small CPU tensors).
     use_gpu = batch.is_cuda
     if use_gpu:
-        # GPU path: compute all prob maps in one batched pass. Only the
-        # will_mask elements need a map, but the batched GPU call is cheap
-        # enough to compute all and discard the skipped ones.
         channel0 = batch[:, 0]  # (B, H, W) -- the 555nm vessel channel
         prob_maps_gpu = vesselness_probability_map_gpu(channel0, sigmas=frangi_sigmas)
-        prob_maps: list[NDArray[np.floating] | None] = [
-            prob_maps_gpu[bi].cpu().numpy() if will_mask[bi] else None for bi in range(b)
-        ]
+        # Zero out the prob maps for prob-gate-skipped elements so
+        # multinomial draws from them are never selected (the mask stays
+        # all-False for those elements). Using a uniform map + a separate
+        # will_mask gate on the final mask is cleaner than per-row conditional
+        # multinomial.
+        flat = prob_maps_gpu.view(b, spatial_pixels)
+        # Sample n_holes centers per batch element, without replacement,
+        # weighted by the Frangi prob map. On a uniform prob map (background-
+        # only slice) this degrades to uniform-random placement -- the same
+        # contract as the CPU MONAI fallback, with no special-casing needed.
+        centers = torch.multinomial(flat, n_holes, replacement=False)  # (B, n_holes)
+        # Scatter a 1 at each center into a (B, H, W) canvas.
+        canvas = torch.zeros(b, spatial_pixels, device=batch.device, dtype=batch.dtype)
+        canvas.scatter_(1, centers, 1.0)
+        canvas = canvas.view(b, 1, h, w)
+        # Expand each center to a bh x bw block via max-pool. kernel=(bh,bw),
+        # stride=1, padding=(bh//2, bw//2) turns each isolated 1 into a
+        # bh x bw block centered on it (clipped at the borders by the pad).
+        block = torch.nn.functional.max_pool2d(
+            canvas, kernel_size=(bh, bw), stride=1, padding=(bh // 2, bw // 2)
+        )
+        block = block.view(b, h, w) > 0
+        # Apply the prob gate: zero the mask for skipped elements.
+        will_mask_t = torch.tensor(will_mask, device=batch.device).view(b, 1, 1)
+        block = block & will_mask_t
+        # Broadcast the 2D block mask across the channel dim (the same block
+        # on HxW applied identically across channels -- D-03b).
+        mask = block[:, None].expand(b, c, h, w).contiguous()
     else:
         from concurrent.futures import ThreadPoolExecutor
 
@@ -495,47 +520,48 @@ def vessel_aware_block_mask(
         with ThreadPoolExecutor(max_workers=min(b, 8)) as pool:
             prob_maps = list(pool.map(_compute_prob_map, range(b)))
 
-    # Per-batch, per-channel-group hole placement: the Frangi map is computed
-    # on a representative channel (channel 0 -- the 555nm vessel channel by
-    # convention) and the SAME block mask is applied across all channels
-    # (channel-preserving block masking, D-03b -- the same 2D block on HxW
-    # applied identically across channels, mirroring RandCoarseDropoutd with
-    # spatial_size=(-1, H, W)).
-    for bi in range(b):
-        prob_map = prob_maps[bi]
-        if prob_map is None:
-            continue  # prob gate skipped this element
-        # Detect the uniform fallback (background-only slice): a flat prob
-        # map means no Frangi response, so hole placement degrades to
-        # uniform-random. On this path compose with MONAI RandCoarseDropoutd
-        # for the fill step (its random placement is equivalent to the
-        # uniform fallback, and this honors the [benchmark] dep contract --
-        # MONAI is composed for the fill on background-only slices). On the
-        # vessel-biased path, sample centers from the Frangi map and build
-        # the block mask directly (MONAI's API does not accept custom hole
-        # centers, so the Frangi-biased placement is implemented here).
-        is_uniform = float(prob_map.max() - prob_map.min()) < 1e-12
-        if is_uniform:
-            monai_transform = RandCoarseDropoutd(
-                keys=["image"],
-                holes=n_holes,
-                spatial_size=(-1, bh, bw),
-                max_holes=n_holes,
-                max_spatial_size=(-1, bh, bw),
-                fill_value=fill_value,
-                prob=1.0,
-            )
-            elem = batch[bi : bi + 1]
-            out = monai_transform({"image": elem})["image"]
-            elem_mask = out == fill_value
-            mask[bi] = elem_mask[0]
-        else:
-            centers = _sample_hole_centers(prob_map, n_holes, rng)
-            block_mask_2d = _build_block_mask((h, w), centers, block_size)
-            # Broadcast the 2D block mask across the channel dim (the same
-            # block on HxW applied identically across channels -- D-03b).
-            block_mask_4d = torch.from_numpy(block_mask_2d).to(batch.device).bool()
-            mask[bi] = block_mask_4d[None].expand(c, h, w)
+        # Per-batch, per-channel-group hole placement: the Frangi map is
+        # computed on a representative channel (channel 0 -- the 555nm vessel
+        # channel by convention) and the SAME block mask is applied across
+        # all channels (channel-preserving block masking, D-03b -- the same
+        # 2D block on HxW applied identically across channels, mirroring
+        # RandCoarseDropoutd with spatial_size=(-1, H, W)).
+        for bi in range(b):
+            prob_map = prob_maps[bi]
+            if prob_map is None:
+                continue  # prob gate skipped this element
+            # Detect the uniform fallback (background-only slice): a flat
+            # prob map means no Frangi response, so hole placement degrades
+            # to uniform-random. On this path compose with MONAI
+            # RandCoarseDropoutd for the fill step (its random placement is
+            # equivalent to the uniform fallback, and this honors the
+            # [benchmark] dep contract -- MONAI is composed for the fill on
+            # background-only slices). On the vessel-biased path, sample
+            # centers from the Frangi map and build the block mask directly
+            # (MONAI's API does not accept custom hole centers, so the
+            # Frangi-biased placement is implemented here).
+            is_uniform = float(prob_map.max() - prob_map.min()) < 1e-12
+            if is_uniform:
+                monai_transform = RandCoarseDropoutd(
+                    keys=["image"],
+                    holes=n_holes,
+                    spatial_size=(-1, bh, bw),
+                    max_holes=n_holes,
+                    max_spatial_size=(-1, bh, bw),
+                    fill_value=fill_value,
+                    prob=1.0,
+                )
+                elem = batch[bi : bi + 1]
+                out = monai_transform({"image": elem})["image"]
+                elem_mask = out == fill_value
+                mask[bi] = elem_mask[0]
+            else:
+                centers = _sample_hole_centers(prob_map, n_holes, rng)
+                block_mask_2d = _build_block_mask((h, w), centers, block_size)
+                # Broadcast the 2D block mask across the channel dim (the
+                # same block on HxW applied identically across channels).
+                block_mask_4d = torch.from_numpy(block_mask_2d).to(batch.device).bool()
+                mask[bi] = block_mask_4d[None].expand(c, h, w)
 
     # Zero-fill the masked regions for the network input (the network sees
     # zeros in the holes, not the sentinel). Unmasked regions are unchanged.
