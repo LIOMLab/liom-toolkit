@@ -38,9 +38,9 @@ def test_load_pretrained_checkpoint_loads_same_architecture_no_assertion_error(
     pytest.importorskip("torch")
     pytest.importorskip("nnunetv2")
     import torch
-    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     from liom_toolkit.segmentation.vseg.ssl.pretrain import build_pretrain_network
+    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     net_a = build_pretrain_network(
         tiny_2d_resenc_plans,
@@ -98,9 +98,9 @@ def test_load_pretrained_checkpoint_raises_runtime_error_on_key_mismatch(
     pytest.importorskip("torch")
     pytest.importorskip("nnunetv2")
     import torch
-    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     from liom_toolkit.segmentation.vseg.ssl.pretrain import build_pretrain_network
+    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     net = build_pretrain_network(
         tiny_2d_resenc_plans,
@@ -167,9 +167,9 @@ def test_load_pretrained_checkpoint_raises_value_error_on_nonexistent_path(
     pytest.importorskip("torch")
     pytest.importorskip("nnunetv2")
     import torch
-    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     from liom_toolkit.segmentation.vseg.ssl.pretrain import build_pretrain_network
+    from liom_toolkit.segmentation.vseg.ssl.warmstart import load_pretrained_checkpoint
 
     net = build_pretrain_network(
         tiny_2d_resenc_plans,
@@ -215,15 +215,26 @@ def test_warmstart_does_not_import_nnunet_bridge():
 
     The subprocess ``nnunet_bridge.py`` is slated for deletion; the
     warm-start path uses the in-process ``nnunetv2.run.run_training`` API
-    directly. Config-as-data test for the no-bridge-import invariant.
+    directly. Config-as-data test for the no-bridge-import invariant --
+    checks import statements, not the bare substring (the module docstring
+    references the bridge by name to explain why it is NOT used).
     """
     pytest.importorskip("torch")
+    import re
     from pathlib import Path
 
     import liom_toolkit.segmentation.vseg.ssl.warmstart as warmstart_mod
 
     src = Path(warmstart_mod.__file__).read_text()
-    assert "nnunet_bridge" not in src, (
+    # Match import / from-import lines that reference nnunet_bridge (a
+    # docstring mention is fine; an actual import is the violation).
+    import_lines = [
+        line
+        for line in src.splitlines()
+        if re.match(r"^\s*(import |from )", line) and "nnunet_bridge" in line
+    ]
+    assert not import_lines, (
         "warmstart.py must NOT import nnunet_bridge (the subprocess bridge is "
-        "superseded -- use in-process nnunetv2.run.run_training directly)"
+        "superseded -- use in-process nnunetv2.run.run_training directly); "
+        f"found import lines: {import_lines}"
     )
