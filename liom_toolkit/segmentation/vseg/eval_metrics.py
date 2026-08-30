@@ -25,6 +25,8 @@ stripped under ``python -O``).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import binary_dilation, distance_transform_edt, label
@@ -356,7 +358,11 @@ def spurious_thin_vessel_rate(
         return 0.0
 
     gt_skeleton = skeletonize(gt)
-    dilation_radius = max(1, int(capillary_radius_vox) + 1)
+    # math.ceil (not int() truncation) so a sub-voxel radius like 1.5 rounds
+    # up to 2 rather than truncating to 1 — truncation could under-cover wide
+    # vessel edges and falsely count correctly-predicted edge voxels as
+    # spurious thin vessels.
+    dilation_radius = max(1, math.ceil(capillary_radius_vox) + 1)
     gt_skeleton_neighbourhood = binary_dilation(gt_skeleton, iterations=dilation_radius)
 
     labelled, n_components = label(thin_mask)
