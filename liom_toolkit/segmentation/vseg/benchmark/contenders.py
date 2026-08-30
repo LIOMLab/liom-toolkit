@@ -587,69 +587,33 @@ class NnUnetContender:
     ) -> list[NDArray[np.bool_]]:
         """Convert train slices to nnU-Net format, predict, read back boolean masks.
 
+        Not yet wired: this method previously converted the train slices to
+        nnU-Net raw format and called ``nnunet_predict`` directly, but
+        ``nnUNetv2_predict`` requires a **trained model** in
+        ``nnUNet_results/Dataset{id}_{name}/``, which requires running
+        ``nnUNetv2_plan_and_preprocess`` + ``nnUNetv2_train`` first. The
+        contender never invoked training or preprocessing, so in production
+        (not the mocked test) the subprocess would exit non-zero with "no
+        trained model found". The method name ``train_and_predict`` is
+        misleading — it only converted + predicted. Raise rather than emit a
+        predict-only path masquerading as train+predict.
+
         Returns
         -------
         list[NDArray[np.bool_]]
             One boolean mask per test slice, in ``test_slices`` order.
+
+        Raises
+        ------
+        NotImplementedError
+            Always — the nnU-Net training + preprocessing bridge is not yet
+            wired.
         """
-        import imageio.v3 as iio
-
-        from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
-        from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
-
-        # Convert the train slices to nnU-Net v2 raw format. The train_slices
-        # are image paths; matching labels are inferred via the <name>_mask.png
-        # convention (the converter CLI's discovery logic). For the benchmark
-        # wiring, the caller is responsible for providing paired image/label
-        # lists; here we pair them by the _mask.png convention.
-        raw_dir = str(Path(output_dir) / f"Dataset{self.dataset_id:03d}_LIOM6p5")
-        label_paths = [
-            str(Path(p).with_name(f"{Path(p).stem}_mask{Path(p).suffix}")) for p in train_slices
-        ]
-        prepare_nnunet_2d(
-            image_paths=train_slices,
-            label_paths=label_paths,
-            output_dir=raw_dir,
-            dataset_id=self.dataset_id,
+        raise NotImplementedError(
+            "NnUnetContender.train_and_predict is not fully wired — nnU-Net "
+            "training (nnUNetv2_plan_and_preprocess + nnUNetv2_train) and "
+            "preprocessing subprocess calls are required before nnunet_predict"
         )
-
-        # nnU-Net predicts on a folder of images. Write the test slices into
-        # an imagesTs folder (nnU-Net convention) so nnU-Net can predict on
-        # them. The test slices are already PNG files on disk.
-        test_images_dir = Path(output_dir) / "imagesTs"
-        test_images_dir.mkdir(parents=True, exist_ok=True)
-        test_case_paths: list[str] = []
-        for i, slice_path in enumerate(test_slices):
-            case_name = f"case_{i:04d}_0000.png"
-            dst = test_images_dir / case_name
-            iio.imwrite(dst, iio.imread(slice_path))
-            test_case_paths.append(str(dst))
-
-        predict_out = str(Path(output_dir) / "nnunet_predictions")
-        nnunet_predict(
-            input_folder=str(test_images_dir),
-            output_folder=predict_out,
-            dataset_id=self.dataset_id,
-            configuration="2d",
-            fold="all",
-            nnunet_venv_python=self.nnunet_venv_python,
-        )
-
-        # Read predictions back. nnU-Net writes <casename>.png (0/255 uint8).
-        masks: list[NDArray[np.bool_]] = []
-        for i in range(len(test_slices)):
-            pred_path = Path(predict_out) / f"case_{i:04d}.png"
-            if pred_path.is_file():
-                pred = iio.imread(pred_path)
-                masks.append(np.asarray(pred, dtype=bool))
-            else:
-                # No prediction file — return an empty mask of the same shape
-                # as the test slice (the eval-metric matrix raises ValueError
-                # on empty masks → recorded as "vessel-free slice — metric
-                # undefined" in the result row, never a NaN).
-                ref = iio.imread(test_slices[i])
-                masks.append(np.zeros_like(ref, dtype=bool))
-        return masks
 
     def predict_on_slices(
         self,
