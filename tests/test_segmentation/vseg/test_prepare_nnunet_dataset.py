@@ -153,39 +153,40 @@ def test_prepare_nnunet_2d_raises_on_length_mismatch(tmp_path) -> None:
     from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
 
     src = tmp_path / "src"
-    image_paths, _label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
     # Pass only one label for two images.
     with pytest.raises(ValueError, match="length mismatch"):
         prepare_nnunet_2d(
             image_paths=image_paths,
-            label_paths=[_label_paths[0]],
+            label_paths=[label_paths[0]],
             output_dir=str(tmp_path / "out"),
             dataset_id=999,
         )
 
 
-def test_prepare_nnunet_cli_creates_output(tmp_path) -> None:
+def test_prepare_nnunet_cli_creates_output(tmp_path, monkeypatch) -> None:
     """The liom-prepare-nnunet-dataset CLI creates the nnU-Net raw dataset.
 
-    Calls ``main(["<input>", "<output>", "--dataset-id", "101"])`` via the
-    parser and asserts the output directory with imagesTr/labelsTr/dataset.json
-    is created. The CLI takes a single input directory of PNG slices (with
-    matching ``*_mask.png`` labels) and writes the nnU-Net raw layout.
+    Sets ``sys.argv`` to ``["liom-prepare-nnunet-dataset", "<input>",
+    "<output>", "--dataset-id", "101"]`` and calls ``main()``, then asserts
+    the output directory with imagesTr/labelsTr/dataset.json is created. The
+    CLI takes a single input directory of PNG slices (with matching
+    ``*_mask.png`` labels) and writes the nnU-Net raw layout.
     """
+    import sys
+
     from liom_toolkit.scripts.prepare_nnunet_dataset import main
 
     src = tmp_path / "src"
     _write_synthetic_slices(src, n=2)
     out_dir = tmp_path / "Dataset101_LIOM6p5"
 
-    main(
-        [
-            str(src),
-            str(out_dir),
-            "--dataset-id",
-            "101",
-        ]
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["liom-prepare-nnunet-dataset", str(src), str(out_dir), "--dataset-id", "101"],
     )
+    main()
 
     assert (out_dir / "imagesTr").is_dir()
     assert (out_dir / "labelsTr").is_dir()
@@ -194,18 +195,25 @@ def test_prepare_nnunet_cli_creates_output(tmp_path) -> None:
     assert dataset_json["numTraining"] == 2
 
 
-def test_prepare_nnunet_cli_errors_on_nonexistent_input(tmp_path, capsys) -> None:
+def test_prepare_nnunet_cli_errors_on_nonexistent_input(tmp_path, monkeypatch, capsys) -> None:
     """The CLI exits 2 with a clear message when the input path does not exist.
 
     Uses ``parser.error`` (the established boundary-validation pattern in
     ``liom_train_model.py``) so a bad path surfaces as exit 2 with the
     offending value, not a raw traceback from inside the converter.
     """
+    import sys
+
     from liom_toolkit.scripts.prepare_nnunet_dataset import main
 
     nonexistent = str(tmp_path / "ghost_dir")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["liom-prepare-nnunet-dataset", nonexistent, str(tmp_path / "out"), "--dataset-id", "999"],
+    )
     with pytest.raises(SystemExit) as exc_info:
-        main([nonexistent, str(tmp_path / "out"), "--dataset-id", "999"])
+        main()
     assert exc_info.value.code == 2
     captured = capsys.readouterr()
     assert nonexistent in captured.err or nonexistent in captured.out
