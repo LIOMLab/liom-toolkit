@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import warnings
 from pathlib import Path
@@ -275,9 +276,20 @@ def finalise_zarr_to_zip(zarr_dir: str, remove_dir: bool = True) -> str:
     if not Path(zarr_dir).exists():
         raise FileNotFoundError(f"zarr directory not found: {zarr_dir}")
     zip_path = zarr_dir + ".zip"
-    if Path(zip_path).exists():
-        Path(zip_path).unlink()
-    _dir_to_zip_store(zarr_dir, zip_path)
+    # Write the new zip to a temp sibling path, then atomically replace the
+    # original. ``os.replace`` is atomic on the same filesystem, so the
+    # original zip (if any) is only removed once the new zip is fully
+    # written -- a failure mid-pack leaves the original intact instead of
+    # deleting the source data before the repack succeeds.
+    tmp_zip = f"{zip_path}.tmp"
+    if Path(tmp_zip).exists():
+        Path(tmp_zip).unlink()
+    try:
+        _dir_to_zip_store(zarr_dir, tmp_zip)
+        os.replace(tmp_zip, zip_path)
+    finally:
+        if Path(tmp_zip).exists():
+            Path(tmp_zip).unlink(missing_ok=True)
     if remove_dir:
         shutil.rmtree(zarr_dir)
     return zip_path
@@ -946,12 +958,22 @@ def save_label_to_zarr(
         )
 
     # For the zip format, repack the working directory back into the zip
-    # (overwriting the old image-only zip) and remove the working directory.
+    # and remove the working directory. The new zip is written to a temp
+    # sibling path and atomically ``os.replace``d over the original so a
+    # failure mid-pack never deletes the user's original image zip before
+    # the replacement is in place. The working directory is removed in a
+    # ``finally`` so a pack failure does not leak it on disk.
     if cleanup_dir is not None:
-        if Path(zarr_file).exists():
-            Path(zarr_file).unlink()
-        _dir_to_zip_store(cleanup_dir, zarr_file)
-        shutil.rmtree(cleanup_dir)
+        tmp_zip = f"{zarr_file}.tmp"
+        if Path(tmp_zip).exists():
+            Path(tmp_zip).unlink()
+        try:
+            _dir_to_zip_store(cleanup_dir, tmp_zip)
+            os.replace(tmp_zip, zarr_file)
+        finally:
+            if Path(tmp_zip).exists():
+                Path(tmp_zip).unlink(missing_ok=True)
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 def generate_label_color_dict_mask() -> list[dict[str, Any]]:
