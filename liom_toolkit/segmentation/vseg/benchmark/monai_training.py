@@ -82,10 +82,13 @@ class _MonaiPngDataset(Dataset):
     """PNG (image, mask) dataset for MONAI training.
 
     Reads each image slice and its ``<stem>_mask.png`` label, normalises
-    the image to ``[0, 1]`` float32, binarises the mask at 0.5, and applies
-    a random crop to ``patch_size`` for training augmentation. Both tensors
-    are channel-first ``(1, H, W)`` — the layout the MONAI ``UNet`` /
-    ``SwinUNETR`` forward expects.
+    the image to ``[0, 1]`` float32, binarises the mask at 0.5, and extracts
+    all non-overlapping ``patch_size`` grid patches from each slice. This
+    matches the Improved2D contender's grid patching so both contenders see
+    the same number of patches per epoch (fair architecture comparison).
+
+    Both tensors are channel-first ``(1, H, W)`` — the layout the MONAI
+    ``UNet`` / ``SwinUNETR`` forward expects.
 
     The mask is binarised to ``{0.0, 1.0}`` float32 (NOT 0/255 uint8) so
     the composite loss (``DiceFocalLoss(sigmoid=True)`` +
@@ -108,27 +111,45 @@ class _MonaiPngDataset(Dataset):
         # before training starts (not mid-epoch in a worker process).
         self.mask_paths = [_mask_path_for(p) for p in self.slice_paths]
 
+        # Pre-load all slices into memory and extract grid patches so
+        # __getitem__ is a fast in-memory slice (no PNG I/O per batch).
+        # This matches Improved2D's grid patching: each slice is divided
+        # into non-overlapping patch_size crops. Empty patches (no vessel
+        # pixels) are filtered out to match Improved2D's filter_empty=True.
+        ph, pw = patch_size
+        self._patches: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for img_path, mask_path in zip(self.slice_paths, self.mask_paths):
+            import imageio.v3 as iio
+
+            img = np.asarray(iio.imread(img_path), dtype=np.float32)
+            if img.max() > 1.0:
+                img = img / 255.0
+            mask = np.asarray(iio.imread(mask_path), dtype=np.float32)
+            if mask.max() > 1.0:
+                mask = mask / 255.0
+            mask = (mask > 0.5).astype(np.float32)
+
+            h, w = img.shape
+            for y in range(0, h - ph + 1, ph):
+                for x in range(0, w - pw + 1, pw):
+                    img_patch = img[y : y + ph, x : x + pw]
+                    mask_patch = mask[y : y + ph, x : x + pw]
+                    # Skip empty patches (no vessel pixels) — matches
+                    # Improved2D's filter_empty=True behavior.
+                    if mask_patch.sum() == 0:
+                        continue
+                    self._patches.append(
+                        (
+                            torch.from_numpy(img_patch).unsqueeze(0),
+                            torch.from_numpy(mask_patch).unsqueeze(0),
+                        )
+                    )
+
     def __len__(self) -> int:
-        return len(self.slice_paths)
+        return len(self._patches)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        import imageio.v3 as iio
-
-        img = np.asarray(iio.imread(self.slice_paths[idx]), dtype=np.float32)
-        if img.max() > 1.0:
-            img = img / 255.0
-        mask = np.asarray(iio.imread(self.mask_paths[idx]), dtype=np.float32)
-        if mask.max() > 1.0:
-            mask = mask / 255.0
-        mask = (mask > 0.5).astype(np.float32)
-
-        # (H, W) → (1, H, W) — channel-first for MONAI.
-        img_t = torch.from_numpy(img).unsqueeze(0)
-        mask_t = torch.from_numpy(mask).unsqueeze(0)
-
-        if self.crop:
-            img_t, mask_t = _random_crop(img_t, mask_t, self.patch_size)
-        return img_t, mask_t
+        return self._patches[idx]
 
 
 def _random_crop(

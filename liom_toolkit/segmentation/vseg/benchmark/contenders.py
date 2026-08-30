@@ -171,7 +171,7 @@ class Improved2DContender:
             output_train=output_dir,
             wandb_mode="disabled",
             epochs=50,
-            batch_size=1,
+            batch_size=4,
             patch_size=patch_size,
             ddp=ddp,
         )
