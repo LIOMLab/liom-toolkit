@@ -18,10 +18,8 @@ via ``pytest.importorskip`` at the first line of each test body and the
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 
@@ -29,7 +27,7 @@ import pytest
 def test_build_pretrain_network_returns_resenc_module_with_expected_keys(
     tiny_2d_resenc_plans, tiny_2d_resenc_dataset_json
 ):
-    """build_pretrain_network returns a 2D ResidualEncoderUNet whose state_dict keys match the warm-start layout.
+    """build_pretrain_network returns a 2D ResEnc UNet with warm-start-matching keys.
 
     The D-01a key-match guarantee: the pretraining network is built via the
     SAME ``get_network_from_plans`` call the warm-start uses, so its
@@ -74,7 +72,7 @@ def test_build_pretrain_network_returns_resenc_module_with_expected_keys(
 def test_masked_inpainting_pretrain_runs_and_saves_checkpoint(
     tiny_2d_resenc_plans, tiny_2d_resenc_dataset_json, tmp_path
 ):
-    """The masked-inpainting loop runs N steps on a tiny synthetic volume and saves a loadable checkpoint.
+    """The masked-inpainting loop runs N steps on a tiny volume and saves a loadable checkpoint.
 
     Runs a 2-step pretraining loop on a tiny synthetic (2, 16, 16) volume on
     CPU, asserts the checkpoint file is saved at the parameterized output
@@ -220,9 +218,7 @@ def test_pretrain_module_has_no_assert_validation_statements():
 
     src = Path(pretrain_mod.__file__).read_text()
     # Strip comment lines so a commented-out `# assert ...` does not trip the check.
-    code_lines = [
-        line for line in src.splitlines() if not line.strip().startswith("#")
-    ]
+    code_lines = [line for line in src.splitlines() if not line.strip().startswith("#")]
     code = "\n".join(code_lines)
     assert " assert " not in code, (
         "pretrain.py must not use `assert` for validation (AGENTS section 2 -- "

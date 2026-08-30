@@ -106,9 +106,7 @@ def tiny_2d_resenc_plans() -> dict:
     plan with NO AssertionError.
     """
     return {
-        "arch_class_name": (
-            "dynamic_network_architectures.architectures.unet.ResidualEncoderUNet"
-        ),
+        "arch_class_name": ("dynamic_network_architectures.architectures.unet.ResidualEncoderUNet"),
         "arch_kwargs": {
             "n_stages": 3,
             "features_per_stage": (4, 8, 16),
