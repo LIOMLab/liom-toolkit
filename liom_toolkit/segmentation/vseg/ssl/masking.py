@@ -498,9 +498,13 @@ def vessel_aware_block_mask(
         # Expand each center to a bh x bw block via max-pool. kernel=(bh,bw),
         # stride=1, padding=(bh//2, bw//2) turns each isolated 1 into a
         # bh x bw block centered on it (clipped at the borders by the pad).
+        # For even kernel sizes the symmetric pad produces an (H+1, W+1)
+        # output, so crop to (H, W) -- a 1-px shift in block placement is
+        # irrelevant (the blocks are random anyway).
         block = torch.nn.functional.max_pool2d(
             canvas, kernel_size=(bh, bw), stride=1, padding=(bh // 2, bw // 2)
         )
+        block = block[:, :, :h, :w]
         block = block.view(b, h, w) > 0
         # Apply the prob gate: zero the mask for skipped elements.
         will_mask_t = torch.tensor(will_mask, device=batch.device).view(b, 1, 1)
