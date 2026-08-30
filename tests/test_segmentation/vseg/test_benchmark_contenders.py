@@ -217,3 +217,65 @@ def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 # Tracer slice — run_benchmark scores Improved2D end-to-end (Task 2)
 # ---------------------------------------------------------------------------
+
+
+def test_run_benchmark_tracer_slice(tmp_path) -> None:
+    """run_benchmark scores Improved2DContender end-to-end on synthetic data.
+
+    The thinnest slice that proves the harness works: the ship-gate metric
+    matrix from the eval-metrics module computes over the contender's
+    binarized predictions. Mocks train_model + predict_one + VsegModel
+    (orchestration), NOT the eval-metric compute (numpy/scipy/skimage).
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import Improved2DContender
+    from liom_toolkit.segmentation.vseg.benchmark.run import run_benchmark
+
+    gt = np.zeros((64, 64), dtype=bool)
+    gt[28:36, 16:48] = True  # a horizontal vessel
+    pred_uint8 = gt.astype(np.uint8) * 255  # perfect prediction
+
+    fake_model = MagicMock()
+    fake_model.eval.return_value = fake_model
+    fake_model.to.return_value = fake_model
+    fake_model.state_dict.return_value = {}
+
+    with (
+        patch("liom_toolkit.segmentation.vseg.model.VsegModel", return_value=fake_model),
+        patch("liom_toolkit.segmentation.vseg.training.train_model"),
+        patch("liom_toolkit.segmentation.vseg.prediction.predict_one", return_value=pred_uint8),
+        patch("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch),
+        patch.object(Path, "exists", return_value=False),
+    ):
+        results = run_benchmark(
+            contenders=[Improved2DContender(device="cpu")],
+            split_config={
+                "train_slices": ["train.zarr"],
+                "test_slices": ["test_0.png", "test_1.png"],
+                "gt_masks": [gt, gt],
+                "patch_size": (1, 64, 64),
+                "ddp": False,
+            },
+            eval_config=None,
+            output_dir=str(tmp_path / "bench_out"),
+        )
+
+    assert "improved_2d" in results, "result table must be keyed by contender name"
+    row = results["improved_2d"]
+    expected_keys = {
+        "centerline_recall",
+        "caliber_stratified_recall",
+        "boundary_artifact_regression",
+        "spurious_thin_vessel_rate",
+        "fpr_on_empty",
+        "cl_dice_metric",
+        "reported_dice",
+    }
+    assert expected_keys.issubset(row.keys()), (
+        f"result row must contain all 6 gate metrics + reported_dice; got {set(row.keys())}"
+    )
+    # centerline_recall on a perfect prediction is 1.0.
+    assert row["centerline_recall"] == pytest.approx(1.0, abs=1e-6)
+    assert row["reported_dice"] == pytest.approx(1.0, abs=1e-6)
