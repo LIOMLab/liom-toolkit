@@ -253,16 +253,20 @@ def boundary_artifact_regression(
     """
     predicted = _as_bool(predicted)
     gt = _as_bool(gt)
+    # Shape mismatch is the more fundamental error — check it before the
+    # empty-input check so a caller with mismatched shapes gets the shape
+    # error (the actual bug) rather than a misleading "empty input" message
+    # pointing at emptiness.
+    if predicted.shape != gt.shape:
+        raise ValueError(
+            "boundary_artifact_regression: predicted and GT shape mismatch "
+            f"({predicted.shape} vs {gt.shape})"
+        )
     if not predicted.any() and not gt.any():
         raise ValueError(
             "boundary_artifact_regression: empty input "
             f"(predicted.sum()={int(predicted.sum())}, "
             f"gt.sum()={int(gt.sum())}) - no quality to measure"
-        )
-    if predicted.shape != gt.shape:
-        raise ValueError(
-            "boundary_artifact_regression: predicted and GT shape mismatch "
-            f"({predicted.shape} vs {gt.shape})"
         )
     ph, pw = patch_size
     h, w = predicted.shape[:2]
