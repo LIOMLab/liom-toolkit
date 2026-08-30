@@ -525,7 +525,7 @@ def reported_dice(predicted: NDArray[np.bool_], gt: NDArray[np.bool_]) -> float:
     metric = DiceMetric(include_background=True, reduction="mean", ignore_empty=False)
     result = metric(pred_t, gt_t)
     val = float(result.item())
-    if val != val:  # NaN check (val != val is True only for NaN)
+    if math.isnan(val):  # NaN guard — no silent NaN escape into the result table
         raise ValueError(
             f"reported_dice: MONAI DiceMetric returned NaN "
             f"(predicted.sum()={int(predicted.sum())}, gt.sum()={int(gt.sum())})"

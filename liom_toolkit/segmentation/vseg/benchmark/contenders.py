@@ -148,6 +148,14 @@ class Improved2DContender:
         -------
         list[NDArray[np.bool_]]
             One boolean mask per test slice, in ``test_slices`` order.
+
+        Raises
+        ------
+        RuntimeError
+            If the checkpoint is not found at
+            ``output_dir/files/checkpoint.latest.pth`` after ``train_model``
+            (training likely failed — no silent proceed with an untrained
+            model).
         """
         from liom_toolkit.segmentation.vseg.model import VsegModel
         from liom_toolkit.segmentation.vseg.prediction import predict_one
@@ -584,6 +592,12 @@ class NnUnetContender:
             lab-independent default. A lab that installs nnU-Net elsewhere
             must pass its own venv-python path (AGENTS §1: no hardcoded lab
             config). ``None`` raises :class:`ValueError`.
+
+        Raises
+        ------
+        ValueError
+            If ``nnunet_venv_python`` is ``None`` (no lab-independent
+            default exists).
         """
         if nnunet_venv_python is None:
             raise ValueError(
