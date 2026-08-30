@@ -279,3 +279,155 @@ def test_run_benchmark_tracer_slice(tmp_path) -> None:
     # centerline_recall on a perfect prediction is 1.0.
     assert row["centerline_recall"] == pytest.approx(1.0, abs=1e-6)
     assert row["reported_dice"] == pytest.approx(1.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# nnU-Net subprocess bridge (NO torch required — pure subprocess + path check)
+# ---------------------------------------------------------------------------
+
+
+def test_nnunet_bridge_validates_input_path(tmp_path) -> None:
+    """nnunet_predict raises ValueError when input_folder does not exist.
+
+    The bridge validates the input folder before invoking the subprocess so a
+    typo'd path surfaces as a clear ValueError (with the offending path) rather
+    than a cryptic nnU-Net CLI traceback.
+    """
+    from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
+
+    nonexistent = str(tmp_path / "does_not_exist")
+    with pytest.raises(ValueError, match="input_folder does not exist"):
+        nnunet_predict(
+            input_folder=nonexistent,
+            output_folder=str(tmp_path / "out"),
+            dataset_id=999,
+        )
+
+
+def test_nnunet_bridge_raises_on_nonzero_exit(tmp_path, monkeypatch) -> None:
+    """nnunet_predict raises RuntimeError when the subprocess exits non-zero.
+
+    No silent pass on a failed nnU-Net run (AGENTS §2): the returncode and the
+    tail of stderr are surfaced in the RuntimeError message so the failure is
+    actionable. The subprocess is mocked so no real nnU-Net invocation happens.
+    """
+    from subprocess import CompletedProcess
+
+    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
+
+    input_folder = tmp_path / "imgs"
+    input_folder.mkdir()
+    fake_proc = CompletedProcess(
+        args=["python", "-m", "nnunetv2", "nnUNetv2_predict"],
+        returncode=1,
+        stdout=b"",
+        stderr=b"some nnunet error detail",
+    )
+    monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+
+    with pytest.raises(RuntimeError, match="nnUNetv2_predict exited 1"):
+        nnunet_bridge.nnunet_predict(
+            input_folder=str(input_folder),
+            output_folder=str(tmp_path / "out"),
+            dataset_id=999,
+        )
+
+
+def test_nnunet_bridge_raises_on_missing_env_vars(tmp_path, monkeypatch) -> None:
+    """nnunet_predict raises RuntimeError when nnUNet_* env vars are unset.
+
+    The nnU-Net CLI requires nnUNet_raw/preprocessed/results to locate its
+    datasets and plans. Missing any of them is a misconfiguration, not a
+    recoverable state — the bridge raises RuntimeError naming the requirement
+    instead of silently passing an empty env to the subprocess.
+    """
+    from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
+
+    input_folder = tmp_path / "imgs"
+    input_folder.mkdir()
+    monkeypatch.delenv("nnUNet_raw", raising=False)
+    monkeypatch.delenv("nnUNet_preprocessed", raising=False)
+    monkeypatch.delenv("nnUNet_results", raising=False)
+
+    with pytest.raises(RuntimeError, match="nnUNet_raw/preprocessed/results"):
+        nnunet_predict(
+            input_folder=str(input_folder),
+            output_folder=str(tmp_path / "out"),
+            dataset_id=999,
+        )
+
+
+def test_nnunet_bridge_does_not_import_nnunetv2(tmp_path, monkeypatch) -> None:
+    """nnunet_predict never imports nnunetv2 (torch-clobbering isolation).
+
+    nnU-Net v2 pins its own torch/CUDA build that conflicts with the
+    liom-toolkit [ai] extra's torch. The bridge runs nnU-Net as a subprocess
+    in a separate venv so the liom-toolkit process never imports nnunetv2.
+    Verified by checking sys.modules does not contain "nnunetv2" after the
+    (mocked) call.
+    """
+    import sys
+    from subprocess import CompletedProcess
+
+    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
+
+    sys.modules.pop("nnunetv2", None)
+    input_folder = tmp_path / "imgs"
+    input_folder.mkdir()
+    fake_proc = CompletedProcess(
+        args=["python", "-m", "nnunetv2", "nnUNetv2_predict"],
+        returncode=0,
+        stdout=b"",
+        stderr=b"",
+    )
+    monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+
+    nnunet_bridge.nnunet_predict(
+        input_folder=str(input_folder),
+        output_folder=str(tmp_path / "out"),
+        dataset_id=999,
+    )
+    assert "nnunetv2" not in sys.modules, (
+        "nnunet_bridge must NEVER import nnunetv2 (torch-clobbering isolation)"
+    )
+
+
+def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
+    """nnunet_predict invokes subprocess.run with a list argv and no shell=True.
+
+    The subprocess-injection mitigation: a list argv (no shell=True) means
+    user-supplied paths cannot break out of the argv into a separate shell
+    command. Captured via the call args passed to the mocked subprocess.run.
+    """
+    from subprocess import CompletedProcess
+
+    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
+
+    input_folder = tmp_path / "imgs"
+    input_folder.mkdir()
+    captured: dict = {}
+    fake_proc = CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+
+    def _capture(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return fake_proc
+
+    monkeypatch.setattr(nnunet_bridge.subprocess, "run", _capture)
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+
+    nnunet_bridge.nnunet_predict(
+        input_folder=str(input_folder),
+        output_folder=str(tmp_path / "out"),
+        dataset_id=999,
+    )
+    assert isinstance(captured["cmd"], list), "argv must be a list (no shell=True)"
+    assert captured["kwargs"].get("shell") is not True, "shell=True is forbidden"
