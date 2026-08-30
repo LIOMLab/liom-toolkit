@@ -72,6 +72,7 @@ def build_pretrain_network(
     device: torch.device | str = "cpu",
     deep_supervision: bool = False,
     allow_init: bool = True,
+    output_channels: int | None = None,
 ) -> nn.Module:
     """Build the nnU-Net 2D ResEnc network via ``get_network_from_plans``.
 
@@ -174,13 +175,31 @@ def build_pretrain_network(
             f"dataset_json must contain 'channel_names' (input channel spec), "
             f"got keys {sorted(dataset_json.keys())}"
         )
+    input_channels = len(channel_names)
+    # numClasses: the network's output channel count. For the masked-inpainting
+    # reconstruction objective the output channels MUST equal the input
+    # channels (the network reconstructs the masked image, not a segmentation
+    # map) -- the pretraining loop enforces this and raises on a mismatch.
+    # ``output_channels`` lets a caller override the derived value; otherwise
+    # derive from ``numClasses`` (nnU-Net v1 plans) or from ``labels`` (nnU-Net
+    # v2 dataset.json, which has no numClasses key -- the count is
+    # len(labels), one output channel per label class). For pretraining the
+    # caller passes output_channels == input_channels so the reconstruction
+    # objective is well-formed.
     num_classes = dataset_json.get("numClasses")
     if num_classes is None:
-        raise ValueError(
-            f"dataset_json must contain 'numClasses' (output channel count), "
-            f"got keys {sorted(dataset_json.keys())}"
-        )
-    input_channels = len(channel_names)
+        labels = dataset_json.get("labels")
+        if labels is None:
+            raise ValueError(
+                f"dataset_json must contain 'numClasses' or 'labels' (output "
+                f"channel count), got keys {sorted(dataset_json.keys())}"
+            )
+        num_classes = len(labels)
+    # An explicit output_channels override wins (the masked-inpainting
+    # reconstruction objective needs output_channels == input_channels, not
+    # the segmentation class count -- the pretraining loop enforces this).
+    if output_channels is not None:
+        num_classes = output_channels
 
     network = get_network_from_plans(
         arch_class_name=arch_class_name,

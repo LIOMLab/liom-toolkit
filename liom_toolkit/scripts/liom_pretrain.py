@@ -204,11 +204,19 @@ def main() -> None:
         dataset_json = json.load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Build the network with output_channels == input_channels so the
+    # masked-inpainting reconstruction objective is well-formed (the network
+    # reconstructs the masked image, not a segmentation map). The encoder +
+    # decoder weights transfer to the production segmentation network
+    # unchanged; only the seg_layers (the final classifier head) differ, and
+    # load_pretrained_weights skips shape-mismatched keys.
+    n_input_channels = len(dataset_json["channel_names"])
     network = build_pretrain_network(
         plans,
         dataset_json,
         configuration="2d",
         device=device,
+        output_channels=n_input_channels,
     )
 
     corpus = SSLCorpus(
