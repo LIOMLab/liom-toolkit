@@ -65,7 +65,12 @@ class _ZipNode(Node):
     without running ``Node.__init__``'s ``ZarrLocation``-based matching.
     """
 
-    def __init__(self, data: list[da.Array], metadata: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        data: list[da.Array],
+        metadata: dict[str, Any],
+        store: ZipStore | None = None,
+    ) -> None:
         # Bypass Node.__init__ (which requires a ZarrLocation + runs spec
         # matching). Set only the attributes the toolkit reads.
         # ``data`` is declared ``list[da.Array]``; dask's stubs type
@@ -82,6 +87,14 @@ class _ZipNode(Node):
         self.seen: list[Any] = []
         # No ZarrLocation backs a zip node; the toolkit never reads .zarr.
         self.zarr: Any = None
+        # Keep the backing ZipStore alive for the nodes' lifetime. The
+        # ``.data`` arrays are lazy dask arrays backed by zarr arrays that
+        # reference this store; materialising them later (``np.asarray``)
+        # reads through it. Holding the store here (rather than closing it
+        # in ``_load_zarr_from_zip``'s ``finally``) makes the nodes'
+        # lifetime track the store's so a later zarr version that does not
+        # tolerate post-close reads stays safe.
+        self._store: ZipStore | None = store
 
 
 def _is_zip_zarr(zarr_file: str) -> bool:
@@ -422,7 +435,9 @@ def _upgrade_label_groups_v04_to_v05(root: zarr.Group) -> bool:
     return upgraded
 
 
-def _build_multiscale_node(group: zarr.Group, multiscale: dict[str, Any]) -> _ZipNode:
+def _build_multiscale_node(
+    group: zarr.Group, multiscale: dict[str, Any], store: ZipStore | None = None
+) -> _ZipNode:
     """Build a ``_ZipNode`` from one ``ome.multiscales`` entry.
 
     ``multiscale`` is a dict with ``axes``, ``datasets`` (each carrying a
@@ -442,7 +457,7 @@ def _build_multiscale_node(group: zarr.Group, multiscale: dict[str, Any]) -> _Zi
         "name": multiscale.get("name", "image"),
         "coordinateTransformations": [ds["coordinateTransformations"] for ds in datasets],
     }
-    return _ZipNode(data=data, metadata=metadata)
+    return _ZipNode(data=data, metadata=metadata, store=store)
 
 
 def _parse_label_names(raw: list[Any]) -> list[str]:
@@ -494,7 +509,9 @@ def _discover_label_names(labels_group: zarr.Group) -> list[str]:
     return [k for k, v in labels_group.members() if isinstance(v, zarr.Group)]
 
 
-def _build_label_node(root: zarr.Group, label_name: str) -> _ZipNode:
+def _build_label_node(
+    root: zarr.Group, label_name: str, store: ZipStore | None = None
+) -> _ZipNode:
     """Build a ``_ZipNode`` for one OME-Zarr label under ``labels/<name>``.
 
     Reproduces the metadata shape ``ome_zarr``'s ``Label`` spec emits:
@@ -540,7 +557,7 @@ def _build_label_node(root: zarr.Group, label_name: str) -> _ZipNode:
         "color": color,
         "metadata": {"image": {}, "path": label_name},
     }
-    return _ZipNode(data=data, metadata=metadata)
+    return _ZipNode(data=data, metadata=metadata, store=store)
 
 
 def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
@@ -565,6 +582,13 @@ def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
         ``multiscales`` metadata.
     """
     store = ZipStore(zarr_file, mode="r")
+    # The store is kept alive on the built nodes via ``_ZipNode._store`` so
+    # the lazy dask arrays can materialise later (the arrays read through
+    # this store). On a build failure (no nodes returned to hold the store)
+    # the ``finally`` closes it; on success ``built`` is set and the store
+    # lives with the nodes. A flag avoids a broad ``except`` (AGENTS.md §2:
+    # no bare/broad except) while still closing on the error path.
+    built = False
     try:
         root = zarr.open_group(store=store, mode="r")
         ome = _group_ome_attrs(root)
@@ -575,7 +599,7 @@ def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
                 f"'multiscales' key (NGFF v0.5) nor a root-level 'multiscales' "
                 f"key (NGFF v0.4). Is this an OME-Zarr file?"
             )
-        nodes: list[Node] = [_build_multiscale_node(root, ms) for ms in ome["multiscales"]]
+        nodes: list[Node] = [_build_multiscale_node(root, ms, store) for ms in ome["multiscales"]]
         # Labels live under a top-level ``labels`` group; its ``ome.labels``
         # attribute lists the label names. Each label group carries its own
         # ``ome.multiscales`` + ``ome.image-label``. Discovery must handle
@@ -585,12 +609,14 @@ def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
         if "labels" in root:
             labels_group = _group_subgroup(root, "labels")
             nodes.extend(
-                _build_label_node(root, label_name)
+                _build_label_node(root, label_name, store)
                 for label_name in _discover_label_names(labels_group)
             )
+        built = True
         return nodes
     finally:
-        store.close()
+        if not built:
+            store.close()
 
 
 def load_zarr(zarr_file: str) -> list[Node]:
