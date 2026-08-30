@@ -71,6 +71,7 @@ ai = [
     "einops>=0.8.2",
     "wandb>=0.29.0",
     "scikit-learn>=1.9.0",
+    "monai>=1.6.0",
 ]
 antspy = [
     # antspyx 0.6.4 (built from ANTsX/ANTsPy main) removed the scipy<1.16 cap
@@ -445,6 +446,7 @@ ignore = [
     "S108",   # hardcoded temp file paths in tests are acceptable
     "S403",   # pickle import in tests is acceptable
     "S301",   # pickle use in tests is acceptable
+    "S404",   # subprocess import in tests is acceptable (mocked)
     "N806",   # uppercase variable names common in test math
     "N803",   # uppercase argument names common in test math
     "RUF069", # float-equality comparison common in numeric tests

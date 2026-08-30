@@ -148,25 +148,25 @@ def test_skeletal_contender_names() -> None:
 
 
 def test_skeletal_contenders_raise_not_implemented() -> None:
-    """The 3 skeletal contenders raise NotImplementedError from both methods.
+    """The 3 wired contenders satisfy the Protocol and have the expected names.
 
-    Their wiring lands in a later plan after the MONAI dependency is added;
-    the classes exist and satisfy the Protocol structurally so the harness
-    can enumerate them, but they cannot train yet.
+    The contenders are now wired (MONAI UNet, SwinUNETR, nnU-Net subprocess
+    bridge); this test confirms they still satisfy the Contender Protocol
+    structurally and expose the expected ``name`` attributes. The
+    ``train_and_predict`` behavior is exercised by the full 4-contender
+    benchmark test below.
     """
     pytest.importorskip("torch")
     from liom_toolkit.segmentation.vseg.benchmark.contenders import (
+        Contender,
         MonaiUnetContender,
         NnUnetContender,
         SwinUnetContender,
     )
 
-    for cls in (MonaiUnetContender, SwinUnetContender, NnUnetContender):
-        contender = cls()
-        with pytest.raises(NotImplementedError, match="wiring lands in"):
-            contender.train_and_predict([], [], ".", patch_size=(1, 64, 64), ddp=False)
-        with pytest.raises(NotImplementedError, match="wiring lands in"):
-            contender.predict_on_slices([], "fake.ckpt")
+    assert isinstance(MonaiUnetContender(), Contender)
+    assert isinstance(SwinUnetContender(), Contender)
+    assert isinstance(NnUnetContender(), Contender)
 
 
 def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
@@ -431,3 +431,136 @@ def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
     )
     assert isinstance(captured["cmd"], list), "argv must be a list (no shell=True)"
     assert captured["kwargs"].get("shell") is not True, "shell=True is forbidden"
+
+
+# ---------------------------------------------------------------------------
+# Full 4-contender benchmark end-to-end on synthetic data (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
+    """run_benchmark scores all 4 contenders end-to-end on synthetic data.
+
+    Constructs synthetic 2D vessel-mask PNG slices, calls ``run_benchmark``
+    with all 4 contenders (Improved2D, MonaiUNet, SwinUNETR, NnUNet), with
+    mocked ``train_model`` (no-op) + mocked ``subprocess.run`` for the nnU-Net
+    bridge (writes fake prediction PNGs). Asserts the returned metric table
+    has 4 contender keys each with the 6 gate-metric keys + reported_dice.
+
+    The MONAI contenders actually build real MONAI models (UNet / SwinUNETR)
+    and run real SlidingWindowInferer inference on the synthetic slices —
+    the models are randomly initialized (train_model is mocked), so the
+    predictions are random, but the test only asserts the result-table
+    structure, not specific metric values.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("monai")
+    from subprocess import CompletedProcess
+
+    import imageio.v3 as iio
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import (
+        Improved2DContender,
+        MonaiUnetContender,
+        NnUnetContender,
+        SwinUnetContender,
+    )
+    from liom_toolkit.segmentation.vseg.benchmark.run import run_benchmark
+
+    # Synthetic 64×64 slices (divisible by 32 for SwinUNETR) with a horizontal
+    # vessel. Written as real PNGs so the MONAI contenders can read them.
+    shape = (64, 64)
+    gt = np.zeros(shape, dtype=bool)
+    gt[28:36, 16:48] = True
+    gt_uint8 = gt.astype(np.uint8) * 255
+
+    slice_dir = tmp_path / "slices"
+    slice_dir.mkdir()
+    test_slices: list[str] = []
+    for i in range(2):
+        p = slice_dir / f"test_{i:02d}.png"
+        iio.imwrite(p, gt_uint8)
+        test_slices.append(str(p))
+    # Train slices (also real PNGs for the nnU-Net converter).
+    train_slices: list[str] = []
+    train_dir = tmp_path / "train"
+    train_dir.mkdir()
+    for i in range(2):
+        p = train_dir / f"train_{i:02d}.png"
+        iio.imwrite(p, gt_uint8)
+        train_slices.append(str(p))
+        # Matching _mask.png labels for the nnU-Net converter.
+        iio.imwrite(train_dir / f"train_{i:02d}_mask.png", gt.astype(np.uint8))
+
+    # Mock train_model (no-op) for all contenders.
+    monkeypatch.setattr("liom_toolkit.segmentation.vseg.training.train_model", lambda *a, **k: None)
+    # Mock predict_one + VsegModel for Improved2DContender (returns perfect
+    # predictions — the same pattern as the tracer slice test).
+    fake_model = MagicMock()
+    fake_model.eval.return_value = fake_model
+    fake_model.to.return_value = fake_model
+    fake_model.state_dict.return_value = {}
+    mock_vseg_cls = MagicMock(return_value=fake_model)
+    monkeypatch.setattr("liom_toolkit.segmentation.vseg.model.VsegModel", mock_vseg_cls)
+    mock_predict_one = MagicMock(return_value=gt_uint8)
+    monkeypatch.setattr("liom_toolkit.segmentation.vseg.prediction.predict_one", mock_predict_one)
+    monkeypatch.setattr("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch)
+
+    # Mock subprocess.run for the nnU-Net bridge: when nnUNetv2_predict is
+    # invoked, write fake prediction PNGs (matching the test slices) to the
+    # output folder so NnUnetContender can read them back.
+    def _fake_subprocess_run(cmd, **kwargs):
+        # Parse -o <output_folder> from the argv.
+        out_folder = cmd[cmd.index("-o") + 1]
+        Path(out_folder).mkdir(parents=True, exist_ok=True)
+        for i in range(len(test_slices)):
+            iio.imwrite(Path(out_folder) / f"case_{i:04d}.png", gt_uint8)
+        return CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+
+    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
+
+    monkeypatch.setattr(nnunet_bridge.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+
+    contenders = [
+        Improved2DContender(device="cpu"),
+        MonaiUnetContender(device="cpu"),
+        SwinUnetContender(device="cpu"),
+        NnUnetContender(device="cpu", dataset_id=999),
+    ]
+
+    results = run_benchmark(
+        contenders=contenders,
+        split_config={
+            "train_slices": train_slices,
+            "test_slices": test_slices,
+            "gt_masks": [gt, gt],
+            "patch_size": (1, 64, 64),
+            "ddp": False,
+        },
+        eval_config=None,
+        output_dir=str(tmp_path / "bench_out"),
+    )
+
+    expected_names = {"improved_2d", "monai_unet", "monai_swinunetr", "nnunet_v2"}
+    assert set(results.keys()) == expected_names, (
+        f"result table must have all 4 contender keys; got {set(results.keys())}"
+    )
+    expected_metrics = {
+        "centerline_recall",
+        "caliber_stratified_recall",
+        "boundary_artifact_regression",
+        "spurious_thin_vessel_rate",
+        "fpr_on_empty",
+        "cl_dice_metric",
+        "reported_dice",
+    }
+    for name in expected_names:
+        row = results[name]
+        assert expected_metrics.issubset(row.keys()), (
+            f"contender {name} row must contain all 6 gate metrics + reported_dice; "
+            f"got {set(row.keys())}"
+        )
