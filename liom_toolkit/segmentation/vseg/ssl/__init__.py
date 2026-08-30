@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .compare import run_comparison
     from .corpus import SSLCorpus, extract_plane_slice, mip_qc, z_score_per_channel
     from .masking import vessel_aware_block_mask, vesselness_probability_map
     from .pretrain import build_pretrain_network, masked_inpainting_pretrain
@@ -31,6 +32,7 @@ __all__ = [
     "load_pretrained_checkpoint",
     "masked_inpainting_pretrain",
     "mip_qc",
+    "run_comparison",
     "validate_nnunet_env",
     "vessel_aware_block_mask",
     "vesselness_probability_map",
@@ -79,4 +81,8 @@ def __getattr__(name: str) -> Any:
         from . import warmstart
 
         return getattr(warmstart, name)
+    if name == "run_comparison":
+        from . import compare
+
+        return getattr(compare, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
