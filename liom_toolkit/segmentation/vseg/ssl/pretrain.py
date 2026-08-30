@@ -564,6 +564,17 @@ def masked_inpainting_pretrain(
                 "(check mask_transform prob / block size vs the input size)."
             )
         epoch_losses.append(loss_sum / loss_count)
+        # Per-epoch progress log (rank 0 only under DDP). The real run is
+        # multi-hour, so without this there is no visibility into whether the
+        # loop is progressing or stuck -- the only other log is the final
+        # "Wrote pretrained checkpoint" line after all epochs.
+        if not ddp or rank == 0:
+            print(
+                f"  epoch {len(epoch_losses)}/{epochs} "
+                f"mean_loss={epoch_losses[-1]:.6f} "
+                f"steps={loss_count}",
+                flush=True,
+            )
 
     # Save the checkpoint as {'network_weights': state_dict} -- the exact
     # format load_pretrained_weights expects. Atomic temp-file write so a
