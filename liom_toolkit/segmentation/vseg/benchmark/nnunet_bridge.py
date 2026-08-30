@@ -23,7 +23,7 @@ import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - controlled nnU-Net bridge, list argv no shell
 from pathlib import Path
 
-__all__ = ["nnunet_predict"]
+__all__ = ["nnunet_plan_and_preprocess", "nnunet_predict", "nnunet_train"]
 
 
 def nnunet_predict(
@@ -69,46 +69,16 @@ def nnunet_predict(
         is unset in the environment, or if the subprocess exits non-zero (the
         returncode and the tail of stderr are in the message).
     """
-    if nnunet_venv_python is None:
-        raise ValueError(
-            "nnunet_predict: nnunet_venv_python is required — path to the "
-            "Python interpreter in the separate nnU-Net venv "
-            "(torch-clobbering isolation). There is no lab-independent "
-            "default; pass the venv-python path for your environment."
-        )
+    py = _nnunet_python(nnunet_venv_python)
     if not Path(input_folder).is_dir():
         raise ValueError(f"nnunet_predict: input_folder does not exist: {input_folder}")
-
-    # The nnUNet_raw / nnUNet_preprocessed / nnUNet_results env var names are
-    # mandated by the nnU-Net v2 CLI (lowercase `nnUNet_*` is the upstream
-    # convention — renaming them to NNUNET_* would break nnU-Net's dataset
-    # lookup). SIM112 fires on the os.environ[...] subscript accesses below
-    # and is suppressed inline there for that reason.
-    nnunet_raw = "nnUNet_raw"
-    nnunet_preprocessed = "nnUNet_preprocessed"
-    nnunet_results = "nnUNet_results"
-
-    missing_env = [
-        v for v in (nnunet_raw, nnunet_preprocessed, nnunet_results) if v not in os.environ
-    ]
-    if missing_env:
-        raise RuntimeError(
-            "nnunet_predict: nnUNet_raw/preprocessed/results env vars must be set "
-            f"(missing: {missing_env})"
-        )
-
-    env = {
-        **os.environ,
-        nnunet_raw: os.environ[nnunet_raw],
-        nnunet_preprocessed: os.environ[nnunet_preprocessed],
-        nnunet_results: os.environ[nnunet_results],
-    }
+    env = _nnunet_env(py)
 
     # List argv (no shell=True) — the subprocess-injection mitigation. A list
     # argv means user-supplied paths cannot break out of the argv into a
     # separate shell command.
     cmd = [
-        str(Path(nnunet_venv_python).expanduser()),
+        py,
         "-m",
         "nnunetv2",
         "nnUNetv2_predict",
@@ -130,3 +100,158 @@ def nnunet_predict(
     if proc.returncode != 0:
         stderr_tail = proc.stderr.decode(errors="replace")[-4000:]
         raise RuntimeError(f"nnUNetv2_predict exited {proc.returncode}:\n{stderr_tail}")
+
+
+def _nnunet_env(nnunet_venv_python: str) -> dict[str, str]:
+    """Build the subprocess env with the nnUNet_* vars forwarded.
+
+    Centralises the env-var validation so the three bridge functions
+    (plan_and_preprocess, train, predict) share one check. Raises
+    :class:`RuntimeError` naming the missing vars (no silent pass on an
+    empty env — nnU-Net would refuse to run).
+
+    Returns
+    -------
+    dict[str, str]
+        The environment dict with ``nnUNet_raw`` / ``nnUNet_preprocessed``
+        / ``nnUNet_results`` forwarded from ``os.environ``.
+
+    Raises
+    ------
+    RuntimeError
+        If any of ``nnUNet_raw`` / ``nnUNet_preprocessed`` /
+        ``nnUNet_results`` is unset in the environment.
+    """
+    nnunet_raw = "nnUNet_raw"
+    nnunet_preprocessed = "nnUNet_preprocessed"
+    nnunet_results = "nnUNet_results"
+    missing_env = [
+        v for v in (nnunet_raw, nnunet_preprocessed, nnunet_results) if v not in os.environ
+    ]
+    if missing_env:
+        raise RuntimeError(
+            f"nnUNet_raw/preprocessed/results env vars must be set (missing: {missing_env})"
+        )
+    return {
+        **os.environ,
+        nnunet_raw: os.environ[nnunet_raw],
+        nnunet_preprocessed: os.environ[nnunet_preprocessed],
+        nnunet_results: os.environ[nnunet_results],
+    }
+
+
+def _nnunet_python(nnunet_venv_python: str | None) -> str:
+    """Validate + expand the nnU-Net venv python path.
+
+    Returns
+    -------
+    str
+        The expanded path to the nnU-Net venv Python interpreter.
+
+    Raises
+    ------
+    ValueError
+        If ``nnunet_venv_python`` is ``None`` (no lab-independent default).
+    """
+    if nnunet_venv_python is None:
+        raise ValueError(
+            "nnunet_venv_python is required — path to the Python "
+            "interpreter in the separate nnU-Net venv "
+            "(torch-clobbering isolation). There is no lab-independent "
+            "default; pass the venv-python path for your environment."
+        )
+    return str(Path(nnunet_venv_python).expanduser())
+
+
+def nnunet_plan_and_preprocess(
+    dataset_id: int,
+    *,
+    nnunet_venv_python: str | None = None,
+    verify_dataset_integrity: bool = True,
+) -> None:
+    """Invoke ``nnUNetv2_plan_and_preprocess`` in the separate nnU-Net venv.
+
+    nnU-Net self-configures its patch size, batch size, and network
+    architecture from the dataset statistics. Do NOT override its planned
+    config — the whole point of nnU-Net is that it plans for you.
+
+    Parameters
+    ----------
+    dataset_id : int
+        The nnU-Net dataset id (``-d`` arg).
+    nnunet_venv_python : str | None
+        Path to the Python interpreter in the separate nnU-Net venv.
+    verify_dataset_integrity : bool
+        If True, pass ``--verify_dataset_integrity`` (catches mismatched
+        image/label counts before the long preprocessing run).
+
+    Raises
+    ------
+    RuntimeError
+        If any ``nnUNet_*`` env var is unset, or the subprocess exits
+        non-zero (returncode + stderr tail in the message).
+    """
+    py = _nnunet_python(nnunet_venv_python)
+    env = _nnunet_env(py)
+    cmd = [py, "-m", "nnunetv2", "nnUNetv2_plan_and_preprocess", "-d", str(dataset_id)]
+    if verify_dataset_integrity:
+        cmd.append("--verify_dataset_integrity")
+    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        cmd, capture_output=True, check=False, env=env
+    )
+    if proc.returncode != 0:
+        stderr_tail = proc.stderr.decode(errors="replace")[-4000:]
+        raise RuntimeError(f"nnUNetv2_plan_and_preprocess exited {proc.returncode}:\n{stderr_tail}")
+
+
+def nnunet_train(
+    dataset_id: int,
+    *,
+    configuration: str = "2d",
+    fold: int = 0,
+    nnunet_venv_python: str | None = None,
+) -> None:
+    """Invoke ``nnUNetv2_train`` in the separate nnU-Net venv.
+
+    Trains one fold of the nnU-Net 2d (or 3d) configuration. The trained
+    model lands in ``nnUNet_results/Dataset{id}_{name}/`` and is picked up
+    by :func:`nnunet_predict` at prediction time.
+
+    Parameters
+    ----------
+    dataset_id : int
+        The nnU-Net dataset id (``-d`` arg).
+    configuration : str
+        The nnU-Net configuration (``-c`` arg). Default ``"2d"``.
+    fold : int
+        The fold to train (``-f`` arg). Default 0. Use ``"all"`` via
+        :func:`nnunet_predict` to predict with all folds' models.
+    nnunet_venv_python : str | None
+        Path to the Python interpreter in the separate nnU-Net venv.
+
+    Raises
+    ------
+    RuntimeError
+        If any ``nnUNet_*`` env var is unset, or the subprocess exits
+        non-zero (returncode + stderr tail in the message).
+    """
+    py = _nnunet_python(nnunet_venv_python)
+    env = _nnunet_env(py)
+    cmd = [
+        py,
+        "-m",
+        "nnunetv2",
+        "nnUNetv2_train",
+        "-d",
+        str(dataset_id),
+        "-c",
+        configuration,
+        "-f",
+        str(fold),
+    ]
+    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        cmd, capture_output=True, check=False, env=env
+    )
+    if proc.returncode != 0:
+        stderr_tail = proc.stderr.decode(errors="replace")[-4000:]
+        raise RuntimeError(f"nnUNetv2_train exited {proc.returncode}:\n{stderr_tail}")

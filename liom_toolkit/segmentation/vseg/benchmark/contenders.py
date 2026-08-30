@@ -362,15 +362,28 @@ class MonaiUnetContender:
 
     name: str = "monai_unet"
 
-    def __init__(self, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        device: str = "cpu",
+        *,
+        epochs: int = 50,
+        batch_size: int = 4,
+    ) -> None:
         """Initialise the contender.
 
         Parameters
         ----------
         device : str
             The torch device string for training + inference.
+        epochs : int
+            Number of training epochs (forwarded to ``train_monai_model``).
+            Default 50 for production; tests use 1.
+        batch_size : int
+            Training batch size (forwarded to ``train_monai_model``).
         """
         self.device = device
+        self.epochs = epochs
+        self.batch_size = batch_size
 
     def _build_model(self) -> torch.nn.Module:
         """Build the MONAI UNet (residual encoder, ≤3 strided stages).
@@ -404,16 +417,16 @@ class MonaiUnetContender:
         patch_size: tuple[int, int, int] = (1, 256, 256),
         ddp: bool = False,
     ) -> list[NDArray[np.bool_]]:
-        """Train + predict boolean masks on test slices via SlidingWindowInferer.
+        """Train the MONAI UNet on PNG slices, then predict boolean masks.
 
-        Not yet wired: ``train_model`` trains a :class:`VsegModel`, not the
-        MONAI UNet, so the trained checkpoint cannot be loaded into the MONAI
-        architecture (different parameter names/shapes). Calling this would
-        build a fresh randomly-initialized MONAI model and predict with it —
-        silent wrong data (AGENTS §2). Raise rather than emit random
-        predictions masquerading as trained output. A MONAI training path
-        (model-injection into ``train_model`` or a dedicated MONAI loop) is
-        required before this contender can produce trained predictions.
+        Delegates training to
+        :func:`~liom_toolkit.segmentation.vseg.benchmark.monai_training.train_monai_model`,
+        which builds a PNG-slice dataset, trains with the composite
+        DiceFocal + soft-clDice loss, AdamW, cosine schedule, AMP + grad-clip,
+        and saves ``checkpoint.latest.pth``. The trained ``state_dict`` is
+        loaded into a fresh MONAI UNet before
+        :func:`_monai_predict_slices` runs SlidingWindowInferer + sigmoid +
+        0.5 threshold → bool masks.
 
         Returns
         -------
@@ -422,14 +435,37 @@ class MonaiUnetContender:
 
         Raises
         ------
-        NotImplementedError
-            Always — the MONAI training path is not yet wired.
+        RuntimeError
+            If the checkpoint is not found after training (training likely
+            failed — no silent proceed with a randomly-initialized model).
         """
-        raise NotImplementedError(
-            "MonaiUnetContender.train_and_predict is not wired — train_model "
-            "trains VsegModel, not the MONAI UNet; a MONAI training path is "
-            "required before this contender can produce trained predictions"
+        from liom_toolkit.segmentation.vseg.benchmark.monai_training import (
+            train_monai_model,
         )
+
+        dev = torch.device(self.device)
+        model = self._build_model()
+        ckpt_path = train_monai_model(
+            model=model,
+            train_slices=train_slices,
+            output_dir=output_dir,
+            patch_size=patch_size,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            ddp=ddp,
+            device=dev,
+        )
+        if not ckpt_path.exists():
+            raise RuntimeError(
+                f"MonaiUnetContender: checkpoint not found after training: "
+                f"{ckpt_path} — training likely failed"
+            )
+        # Load the trained weights into a fresh model for prediction
+        # (the training model may be DDP-wrapped or on a different device).
+        pred_model = self._build_model().to(dev)
+        state = torch.load(str(ckpt_path), map_location=dev, weights_only=True)
+        pred_model.load_state_dict(state)
+        return _monai_predict_slices(pred_model, test_slices, dev)
 
     def predict_on_slices(
         self,
@@ -463,15 +499,28 @@ class SwinUnetContender:
 
     name: str = "monai_swinunetr"
 
-    def __init__(self, device: str = "cpu") -> None:
+    def __init__(
+        self,
+        device: str = "cpu",
+        *,
+        epochs: int = 50,
+        batch_size: int = 4,
+    ) -> None:
         """Initialise the contender.
 
         Parameters
         ----------
         device : str
             The torch device string for training + inference.
+        epochs : int
+            Number of training epochs (forwarded to ``train_monai_model``).
+            Default 50 for production; tests use 1.
+        batch_size : int
+            Training batch size (forwarded to ``train_monai_model``).
         """
         self.device = device
+        self.epochs = epochs
+        self.batch_size = batch_size
 
     def _build_model(self) -> torch.nn.Module:
         """Build the MONAI SwinUNETR (2D, gradient checkpointing, no img_size=).
@@ -505,16 +554,16 @@ class SwinUnetContender:
         patch_size: tuple[int, int, int] = (1, 256, 256),
         ddp: bool = False,
     ) -> list[NDArray[np.bool_]]:
-        """Train + predict boolean masks on test slices via SlidingWindowInferer.
+        """Train the MONAI SwinUNETR on PNG slices, then predict boolean masks.
 
-        Not yet wired: ``train_model`` trains a :class:`VsegModel`, not the
-        MONAI SwinUNETR, so the trained checkpoint cannot be loaded into the
-        MONAI architecture (different parameter names/shapes). Calling this
-        would build a fresh randomly-initialized SwinUNETR and predict with it
-        — silent wrong data (AGENTS §2). Raise rather than emit random
-        predictions masquerading as trained output. A MONAI training path
-        (model-injection into ``train_model`` or a dedicated MONAI loop) is
-        required before this contender can produce trained predictions.
+        Delegates training to
+        :func:`~liom_toolkit.segmentation.vseg.benchmark.monai_training.train_monai_model`,
+        which builds a PNG-slice dataset, trains with the composite
+        DiceFocal + soft-clDice loss, AdamW, cosine schedule, AMP + grad-clip,
+        and saves ``checkpoint.latest.pth``. The trained ``state_dict`` is
+        loaded into a fresh SwinUNETR before
+        :func:`_monai_predict_slices` runs SlidingWindowInferer + sigmoid +
+        0.5 threshold → bool masks.
 
         Returns
         -------
@@ -523,14 +572,35 @@ class SwinUnetContender:
 
         Raises
         ------
-        NotImplementedError
-            Always — the MONAI training path is not yet wired.
+        RuntimeError
+            If the checkpoint is not found after training (training likely
+            failed — no silent proceed with a randomly-initialized model).
         """
-        raise NotImplementedError(
-            "SwinUnetContender.train_and_predict is not wired — train_model "
-            "trains VsegModel, not the MONAI SwinUNETR; a MONAI training path "
-            "is required before this contender can produce trained predictions"
+        from liom_toolkit.segmentation.vseg.benchmark.monai_training import (
+            train_monai_model,
         )
+
+        dev = torch.device(self.device)
+        model = self._build_model()
+        ckpt_path = train_monai_model(
+            model=model,
+            train_slices=train_slices,
+            output_dir=output_dir,
+            patch_size=patch_size,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            ddp=ddp,
+            device=dev,
+        )
+        if not ckpt_path.exists():
+            raise RuntimeError(
+                f"SwinUnetContender: checkpoint not found after training: "
+                f"{ckpt_path} — training likely failed"
+            )
+        pred_model = self._build_model().to(dev)
+        state = torch.load(str(ckpt_path), map_location=dev, weights_only=True)
+        pred_model.load_state_dict(state)
+        return _monai_predict_slices(pred_model, test_slices, dev)
 
     def predict_on_slices(
         self,
@@ -618,18 +688,27 @@ class NnUnetContender:
         patch_size: tuple[int, int, int] = (1, 256, 256),
         ddp: bool = False,
     ) -> list[NDArray[np.bool_]]:
-        """Convert train slices to nnU-Net format, predict, read back boolean masks.
+        """Full nnU-Net pipeline: convert → preprocess → train → predict → read back.
 
-        Not yet wired: this method previously converted the train slices to
-        nnU-Net raw format and called ``nnunet_predict`` directly, but
-        ``nnUNetv2_predict`` requires a **trained model** in
-        ``nnUNet_results/Dataset{id}_{name}/``, which requires running
-        ``nnUNetv2_plan_and_preprocess`` + ``nnUNetv2_train`` first. The
-        contender never invoked training or preprocessing, so in production
-        (not the mocked test) the subprocess would exit non-zero with "no
-        trained model found". The method name ``train_and_predict`` is
-        misleading — it only converted + predicted. Raise rather than emit a
-        predict-only path masquerading as train+predict.
+        Runs the complete nnU-Net v2 subprocess sequence in the separate
+        venv (torch-clobbering isolation):
+
+        1. Convert train slices + their ``<stem>_mask.png`` labels to
+           nnU-Net raw format via
+           :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`.
+        2. ``nnUNetv2_plan_and_preprocess`` — nnU-Net self-configures its
+           patch/batch/architecture from the dataset statistics.
+        3. ``nnUNetv2_train`` (2d config, fold 0) — trains the model.
+        4. Copy test slices to a temp input folder in nnU-Net's
+           ``{case}_0000.png`` naming convention.
+        5. ``nnUNetv2_predict`` — predicts on the test folder.
+        6. Read predictions back as boolean masks (nnU-Net writes 0/255
+           uint8 PNGs; binarizing to bool is required so the eval-metric
+           matrix receives ``NDArray[np.bool_]``).
+
+        The ``ddp`` flag is unused — nnU-Net manages its own
+        multi-GPU training internally. Kept for Protocol structural
+        conformance.
 
         Returns
         -------
@@ -638,15 +717,100 @@ class NnUnetContender:
 
         Raises
         ------
-        NotImplementedError
-            Always — the nnU-Net training + preprocessing bridge is not yet
-            wired.
+        ValueError
+            If a train slice has no matching ``<name>_mask.png`` label.
+        RuntimeError
+            If any nnU-Net subprocess exits non-zero (the returncode and
+            stderr tail are in the message), or if a prediction file is
+            missing after ``nnUNetv2_predict`` (no silent zero-mask
+            fallback — AGENTS §2).
         """
-        raise NotImplementedError(
-            "NnUnetContender.train_and_predict is not fully wired — nnU-Net "
-            "training (nnUNetv2_plan_and_preprocess + nnUNetv2_train) and "
-            "preprocessing subprocess calls are required before nnunet_predict"
+        import imageio.v3 as iio
+
+        from liom_toolkit.scripts.liom_prepare_nnunet_dataset import (
+            prepare_nnunet_2d,
         )
+        from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import (
+            nnunet_plan_and_preprocess,
+            nnunet_predict,
+            nnunet_train,
+        )
+
+        # 1. Convert train slices + masks to nnU-Net raw format.
+        train_label_paths = [
+            str(Path(p).with_name(f"{Path(p).stem}_mask{Path(p).suffix}")) for p in train_slices
+        ]
+        # Validate that all mask files exist before starting the long
+        # subprocess chain (no silent failure mid-pipeline).
+        for lbl in train_label_paths:
+            if not Path(lbl).is_file():
+                raise ValueError(
+                    f"NnUnetContender: no matching label for a train slice — "
+                    f"expected {lbl} (the <name>_mask.png convention)"
+                )
+        raw_dir = str(Path(output_dir) / "nnUNet_raw" / f"Dataset{self.dataset_id:03d}_LIOM6p5")
+        prepare_nnunet_2d(
+            image_paths=train_slices,
+            label_paths=train_label_paths,
+            output_dir=raw_dir,
+            dataset_id=self.dataset_id,
+        )
+
+        # 2. Plan + preprocess (nnU-Net self-configures).
+        nnunet_plan_and_preprocess(
+            dataset_id=self.dataset_id,
+            nnunet_venv_python=self.nnunet_venv_python,
+        )
+
+        # 3. Train (2d config, fold 0).
+        nnunet_train(
+            dataset_id=self.dataset_id,
+            configuration="2d",
+            fold=0,
+            nnunet_venv_python=self.nnunet_venv_python,
+        )
+
+        # 4. Copy test slices to a temp input folder in nnU-Net's
+        #    {case}_0000.png naming convention (single channel = _0000).
+        predict_input = Path(output_dir) / "nnunet_predict_input"
+        predict_input.mkdir(parents=True, exist_ok=True)
+        case_names: list[str] = []
+        for slice_path in test_slices:
+            stem = Path(slice_path).stem
+            case_name = f"{stem}_0000"
+            iio.imwrite(
+                predict_input / f"{case_name}.png",
+                iio.imread(slice_path),
+            )
+            case_names.append(stem)
+
+        # 5. Predict.
+        predict_output = Path(output_dir) / "nnunet_predict_output"
+        predict_output.mkdir(parents=True, exist_ok=True)
+        nnunet_predict(
+            input_folder=str(predict_input),
+            output_folder=str(predict_output),
+            dataset_id=self.dataset_id,
+            configuration="2d",
+            fold="0",
+            nnunet_venv_python=self.nnunet_venv_python,
+        )
+
+        # 6. Read predictions back as bool masks. nnU-Net writes
+        #    {case}.png (without the _0000 channel suffix) to the output
+        #    folder. Raise on a missing prediction file — no silent
+        #    zero-mask fallback (AGENTS §2).
+        masks: list[NDArray[np.bool_]] = []
+        for stem in case_names:
+            pred_path = predict_output / f"{stem}.png"
+            if not pred_path.is_file():
+                raise RuntimeError(
+                    f"NnUnetContender: nnU-Net prediction file missing: "
+                    f"{pred_path} — nnUNetv2_predict likely failed for this "
+                    f"case (no silent zero-mask fallback)"
+                )
+            masks.append(np.asarray(iio.imread(pred_path), dtype=bool))
+        return masks
 
     def predict_on_slices(
         self,
@@ -669,15 +833,16 @@ class NnUnetContender:
         ValueError
             If ``slices`` is empty, or the slices span more than one parent
             folder (the bridge predicts on a single input folder).
+        RuntimeError
+            If a prediction file is missing after ``nnUNetv2_predict`` (no
+            silent zero-mask fallback — AGENTS §2).
         """
         import imageio.v3 as iio
 
         from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
 
         if not slices:
-            raise ValueError(
-                "NnUnetContender.predict_on_slices: slices list is empty"
-            )
+            raise ValueError("NnUnetContender.predict_on_slices: slices list is empty")
         parents = {Path(s).parent for s in slices}
         if len(parents) != 1:
             raise ValueError(
@@ -696,9 +861,11 @@ class NnUnetContender:
         masks: list[NDArray[np.bool_]] = []
         for slice_path in slices:
             pred_path = Path(checkpoint_path) / f"{Path(slice_path).stem}.png"
-            if pred_path.is_file():
-                masks.append(np.asarray(iio.imread(pred_path), dtype=bool))
-            else:
-                ref = iio.imread(slice_path)
-                masks.append(np.zeros_like(ref, dtype=bool))
+            if not pred_path.is_file():
+                raise RuntimeError(
+                    f"NnUnetContender.predict_on_slices: prediction file "
+                    f"missing: {pred_path} — nnUNetv2_predict likely failed "
+                    f"for this case (no silent zero-mask fallback, AGENTS §2)"
+                )
+            masks.append(np.asarray(iio.imread(pred_path), dtype=bool))
         return masks

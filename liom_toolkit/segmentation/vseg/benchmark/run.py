@@ -115,9 +115,7 @@ def run_benchmark(
     # produces ny=0/nx=0 (and a misleading "vessel-free slice — metric
     # undefined" row) whenever the caller passes smaller slices or a smaller
     # patch_size — masking the boundary metric, one of the six ship-gate rows.
-    boundary_patch_size = eval_cfg.get(
-        "boundary_patch_size", (patch_size[1], patch_size[2])
-    )
+    boundary_patch_size = eval_cfg.get("boundary_patch_size", (patch_size[1], patch_size[2]))
 
     # (metric_name, callable) pairs — the ship-gate matrix + reported_dice.
     scalar_metrics: list[tuple[str, Callable[..., float]]] = [
@@ -184,9 +182,7 @@ def run_benchmark(
                 # whole benchmark run with an opaque error. Mean over the
                 # slices where the key is present (skip slices missing it).
                 keys = dicts[0].keys()
-                agg[name] = {
-                    k: float(np.mean([d[k] for d in dicts if k in d])) for k in keys
-                }
+                agg[name] = {k: float(np.mean([d[k] for d in dicts if k in d])) for k in keys}
             else:
                 agg[name] = "vessel-free slice — metric undefined"
 
