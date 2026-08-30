@@ -401,7 +401,11 @@ def _upgrade_label_groups_v04_to_v05(root: zarr.Group) -> bool:
     labels_ome = dict(labels_group.attrs).get("ome")
     label_names: list[str]
     if isinstance(labels_ome, dict) and isinstance(labels_ome.get("labels"), list):
-        label_names = [str(n) for n in labels_ome["labels"]]
+        # v0.5 lists name strings, but some non-spec writers emit a list of
+        # {"label": name} dicts here; ``str(n)`` on a dict yields a dict-repr
+        # string and the label is silently skipped by the membership guard
+        # below. Reuse the shape-tolerant parse so both shapes upgrade.
+        label_names = _parse_label_names(labels_ome["labels"])
     else:
         # v0.4: label names are the labels-group's child group keys, or
         # listed under a root-level "labels" list of {"label": name} dicts.
@@ -410,9 +414,7 @@ def _upgrade_label_groups_v04_to_v05(root: zarr.Group) -> bool:
         if not label_names:
             root_labels = dict(labels_group.attrs).get("labels")
             if isinstance(root_labels, list):
-                label_names = [
-                    str(e["label"]) for e in root_labels if isinstance(e, dict) and "label" in e
-                ]
+                label_names = _parse_label_names(root_labels)
     upgraded = False
     for name in label_names:
         if name not in labels_group:
