@@ -100,21 +100,35 @@ def _is_zip_zarr(zarr_file: str) -> bool:
 def _group_ome_attrs(group: zarr.Group) -> dict[str, Any]:
     """Return the ``ome`` metadata dict from a zarr group's attributes.
 
-    zarr group ``.attrs`` values are typed as a broad union (any JSON-ish
-    scalar/list/dict), so ``dict(group.attrs).get("ome", {})`` widens to
-    that union and defeats downstream narrowing (``ome["multiscales"]``
-    flags as not-subscriptable on the non-dict union members). This helper
-    centralises the ``isinstance(ome, dict)`` narrowing and returns a
-    concrete ``dict[str, Any]``.
+    Handles both NGFF v0.5 (metadata nested under an ``ome`` root key) and
+    v0.4 (``multiscales``/``omero`` at the group root, no ``ome`` wrapper).
+    For v0.4 stores the root-level metadata is returned as a synthesised
+    ``ome``-shaped dict so downstream code can treat both versions
+    uniformly. zarr group ``.attrs`` values are typed as a broad union (any
+    JSON-ish scalar/list/dict), so this helper centralises the
+    ``isinstance(..., dict)`` narrowing and returns a concrete
+    ``dict[str, Any]``.
 
     Returns
     -------
     dict[str, Any]
-        The group's ``ome`` attribute, or an empty dict if absent / not a
-        dict (the caller decides whether a missing ``ome`` is an error).
+        The group's ``ome`` attribute (v0.5), or a synthesised dict from
+        the v0.4 root-level ``multiscales``/``omero``/``image-label`` keys,
+        or an empty dict if neither is present (the caller decides whether
+        a missing ``ome`` is an error).
     """
-    ome = dict(group.attrs).get("ome")
-    return ome if isinstance(ome, dict) else {}
+    attrs = dict(group.attrs)
+    ome = attrs.get("ome")
+    if isinstance(ome, dict):
+        return ome
+    # NGFF v0.4: multiscales/omero/image-label live at the group root with
+    # no "ome" wrapper. Synthesise the v0.5 shape so callers stay
+    # version-agnostic.
+    if any(k in attrs for k in ("multiscales", "omero", "image-label")):
+        synth = {k: attrs[k] for k in ("multiscales", "omero", "image-label") if k in attrs}
+        synth.setdefault("version", "0.4")
+        return synth
+    return {}
 
 
 def _group_subgroup(parent: zarr.Group, key: str) -> zarr.Group:
@@ -269,6 +283,114 @@ def finalise_zarr_to_zip(zarr_dir: str, remove_dir: bool = True) -> str:
     return zip_path
 
 
+def upgrade_ngff_v04_to_v05(zarr_dir: str) -> bool:
+    """Upgrade a directory OME-Zarr store's metadata from NGFF v0.4 to v0.5.
+
+    v0.4 stores carry ``multiscales``/``omero``/``image-label`` at the group
+    root; v0.5 nests them under an ``ome`` key with a ``version`` field. This
+    rewrites only the root and per-label group metadata (the chunk data and
+    array layouts are untouched — v0.4 and v0.5 share the same chunk files),
+    so it is cheap regardless of store size.
+
+    The upgrade is idempotent: a store already carrying an ``ome`` root
+    attribute is left unchanged and the function returns ``False``. The
+    root group and every ``labels/<name>`` group are upgraded in place.
+
+    Parameters
+    ----------
+    zarr_dir : str
+        Filesystem path to the directory OME-Zarr store to upgrade.
+
+    Returns
+    -------
+    bool
+        ``True`` if the store was upgraded, ``False`` if it was already
+        v0.5 (or carried no v0.4 metadata to upgrade).
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``zarr_dir`` does not exist.
+    ValueError
+        If the store has neither v0.4 root-level ``multiscales`` nor a v0.5
+        ``ome`` attribute (not an OME-Zarr store).
+    """
+    if not Path(zarr_dir).exists():
+        raise FileNotFoundError(f"zarr directory not found: {zarr_dir}")
+    root = zarr.open_group(zarr_dir, mode="r+")
+    attrs = dict(root.attrs)
+    if isinstance(attrs.get("ome"), dict):
+        # Already v0.5 (or v0.5-shaped). Still recurse into labels in case
+        # a label group is v0.4 while the root is v0.5 (mixed-version store).
+        upgraded = _upgrade_label_groups_v04_to_v05(root)
+        return upgraded
+    if not any(k in attrs for k in ("multiscales", "omero", "image-label")):
+        raise ValueError(
+            f"{zarr_dir} has neither a v0.5 'ome' root attribute nor v0.4 "
+            f"root-level 'multiscales'/'omero'/'image-label' metadata -- "
+            f"not an OME-Zarr store."
+        )
+    # Wrap the v0.4 root-level metadata under "ome" and drop the root-level
+    # copies. Preserve any non-OME root attrs (e.g. "bioformats2raw.layout").
+    ome = {"version": "0.5"}
+    for k in ("multiscales", "omero", "image-label"):
+        if k in attrs:
+            ome[k] = attrs[k]
+    root.attrs["ome"] = ome
+    for k in ("multiscales", "omero", "image-label"):
+        if k in root.attrs:
+            del root.attrs[k]
+    _upgrade_label_groups_v04_to_v05(root)
+    return True
+
+
+def _upgrade_label_groups_v04_to_v05(root: zarr.Group) -> bool:
+    """Upgrade every ``labels/<name>`` group from v0.4 to v0.5 metadata.
+
+    Each label group in a v0.4 store carries ``multiscales`` and
+    ``image-label`` at its root; v0.5 nests them under ``ome``. Returns
+    ``True`` if any label group was upgraded.
+    """
+    if "labels" not in root:
+        return False
+    labels_group = _group_subgroup(root, "labels")
+    labels_ome = dict(labels_group.attrs).get("ome")
+    label_names: list[str]
+    if isinstance(labels_ome, dict) and isinstance(labels_ome.get("labels"), list):
+        label_names = [str(n) for n in labels_ome["labels"]]
+    else:
+        # v0.4: label names are the labels-group's child group keys, or
+        # listed under a root-level "labels" list of {"label": name} dicts.
+        # ``Group.members()`` yields (name, node) pairs in zarr v3.
+        label_names = [k for k, v in labels_group.members() if isinstance(v, zarr.Group)]
+        if not label_names:
+            root_labels = dict(labels_group.attrs).get("labels")
+            if isinstance(root_labels, list):
+                label_names = [
+                    str(e["label"]) for e in root_labels if isinstance(e, dict) and "label" in e
+                ]
+    upgraded = False
+    for name in label_names:
+        if name not in labels_group:
+            continue
+        label_group = _group_subgroup(labels_group, name)
+        lattrs = dict(label_group.attrs)
+        if isinstance(lattrs.get("ome"), dict):
+            continue
+        if not any(k in lattrs for k in ("multiscales", "image-label")):
+            continue
+        ome = {"version": "0.5"}
+        for k in ("multiscales", "omero", "image-label"):
+            if k in lattrs:
+                ome[k] = lattrs[k]
+        label_group.attrs["ome"] = ome
+        for k in ("multiscales", "omero", "image-label"):
+            if k in label_group.attrs:
+                del label_group.attrs[k]
+        upgraded = True
+    return upgraded
+
+
 def _build_multiscale_node(group: zarr.Group, multiscale: dict[str, Any]) -> _ZipNode:
     """Build a ``_ZipNode`` from one ``ome.multiscales`` entry.
 
@@ -290,6 +412,55 @@ def _build_multiscale_node(group: zarr.Group, multiscale: dict[str, Any]) -> _Zi
         "coordinateTransformations": [ds["coordinateTransformations"] for ds in datasets],
     }
     return _ZipNode(data=data, metadata=metadata)
+
+
+def _parse_label_names(raw: list[Any]) -> list[str]:
+    """Parse an ``ome.labels`` (or root-level ``labels``) list into name strings.
+
+    Handles both NGFF v0.5 (a list of name strings) and the non-spec but
+    on-disk-real v0.4 shape (a list of ``{"label": name}`` dicts). Entries
+    that match neither shape are skipped so a malformed entry does not
+    silently corrupt the name list -- only ``str`` entries and dict entries
+    carrying a ``"label"`` key are accepted.
+    """
+    names: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            names.append(entry)
+        elif isinstance(entry, dict) and "label" in entry:
+            names.append(str(entry["label"]))
+    return names
+
+
+def _discover_label_names(labels_group: zarr.Group) -> list[str]:
+    """Discover the label names under a ``labels`` group, v0.4 and v0.5.
+
+    NGFF v0.5 lists label names under ``ome.labels`` (a list of name
+    strings). A NGFF v0.4 labels group carries no ``ome`` wrapper -- the
+    names are either a root-level ``labels`` attribute (a list of
+    ``{"label": name}`` dicts) or, failing that, the labels group's child
+    group keys. ``_group_ome_attrs`` synthesises an empty dict for a v0.4
+    labels group (it carries neither ``multiscales``/``omero``/
+    ``image-label`` nor an ``ome`` key), so consulting only
+    ``ome.labels`` would silently drop every label on a v0.4 store. This
+    helper mirrors the discovery logic in
+    :func:`_upgrade_label_groups_v04_to_v05` so the zip reader and the
+    upgrader agree on which labels exist.
+    """
+    labels_ome = _group_ome_attrs(labels_group)
+    raw = labels_ome.get("labels")
+    if isinstance(raw, list) and raw:
+        names = _parse_label_names(raw)
+        if names:
+            return names
+    # v0.4: a root-level "labels" attribute (list of {"label": name} dicts),
+    # or no list at all -- fall back to the labels group's child group keys.
+    root_labels = dict(labels_group.attrs).get("labels")
+    if isinstance(root_labels, list) and root_labels:
+        names = _parse_label_names(root_labels)
+        if names:
+            return names
+    return [k for k, v in labels_group.members() if isinstance(v, zarr.Group)]
 
 
 def _build_label_node(root: zarr.Group, label_name: str) -> _ZipNode:
@@ -360,18 +531,22 @@ def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
         if "multiscales" not in ome:
             raise ValueError(
                 f"Could not find OME-Zarr multiscales metadata in {zarr_file} "
-                f"-- the store has no 'ome' root attribute with a "
-                f"'multiscales' key (is this an OME-Zarr file?)."
+                f"-- the store has neither an 'ome' root attribute with a "
+                f"'multiscales' key (NGFF v0.5) nor a root-level 'multiscales' "
+                f"key (NGFF v0.4). Is this an OME-Zarr file?"
             )
         nodes: list[Node] = [_build_multiscale_node(root, ms) for ms in ome["multiscales"]]
         # Labels live under a top-level ``labels`` group; its ``ome.labels``
         # attribute lists the label names. Each label group carries its own
-        # ``ome.multiscales`` + ``ome.image-label``.
+        # ``ome.multiscales`` + ``ome.image-label``. Discovery must handle
+        # both v0.5 (``ome.labels`` list of strings) and v0.4 (root-level
+        # ``labels`` list of {"label": name} dicts, or child group keys) --
+        # otherwise a v0.4 store's labels are silently dropped on read.
         if "labels" in root:
             labels_group = _group_subgroup(root, "labels")
-            labels_ome = _group_ome_attrs(labels_group)
             nodes.extend(
-                _build_label_node(root, label_name) for label_name in labels_ome.get("labels", [])
+                _build_label_node(root, label_name)
+                for label_name in _discover_label_names(labels_group)
             )
         return nodes
     finally:

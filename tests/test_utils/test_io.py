@@ -39,6 +39,7 @@ from liom_toolkit.utils.io import (
     load_node_by_name,
     load_zarr,
     save_label_to_zarr,
+    upgrade_ngff_v04_to_v05,
     validate_n_levels,
 )
 
@@ -700,3 +701,216 @@ def test_extract_zarr_to_image_png_no_clobber(tmp_path):
     names = {p.name for p in png_files}
     assert len(names) == 5, f"expected 5 unique PNG filenames, got {len(names)} (slice clobber)"
     assert names == {f"{z}.png" for z in range(5)}
+
+
+def _make_v04_zarr(path: str, shape=(8, 8, 8)) -> np.ndarray:
+    """Write a tiny NGFF v0.4-style store: ``multiscales`` at the group root
+    (no ``ome`` wrapper), one multiscale entry with two levels.
+
+    The current toolkit writer emits v0.5 (``ome.multiscales``); this helper
+    builds the v0.4 shape directly so the upgrade path can be tested against
+    the legacy on-disk format the lab's existing stores use.
+    """
+    arr = np.zeros(shape, dtype=np.uint16)
+    arr[2:6, 2:6, 2:6] = 1000
+    g = zarr.open_group(path, mode="w")
+    g.create_array("0", data=arr)
+    # Level 1: 2x downsample on Y/X (Z stays) -- a real but tiny second level.
+    l1 = arr[:, ::2, ::2]
+    g.create_array("1", data=l1)
+    g.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "axes": [
+                {"name": "z", "type": "space", "unit": "micrometer"},
+                {"name": "y", "type": "space", "unit": "micrometer"},
+                {"name": "x", "type": "space", "unit": "micrometer"},
+            ],
+            "datasets": [
+                {
+                    "coordinateTransformations": [{"type": "scale", "scale": [6.5, 6.5, 6.5]}],
+                    "path": "0",
+                },
+                {
+                    "coordinateTransformations": [{"type": "scale", "scale": [6.5, 13.0, 13.0]}],
+                    "path": "1",
+                },
+            ],
+            "name": "/",
+        }
+    ]
+    return arr
+
+
+def test_upgrade_ngff_v04_to_v05_wraps_metadata(tmp_path):
+    """upgrade_ngff_v04_to_v05 moves root-level multiscales under an ``ome``
+    key with ``version: "0.5"`` and drops the v0.4 root-level copy.
+
+    The chunk data and array paths are untouched -- only the root group's
+    metadata is rewritten -- so load_zarr reads the upgraded store back with
+    the same data, shape, dtype, axes, and per-level scales.
+    """
+    zpath = str(tmp_path / "v04.ome.zarr")
+    arr = _make_v04_zarr(zpath)
+
+    upgraded = upgrade_ngff_v04_to_v05(zpath)
+    assert upgraded is True
+
+    g = zarr.open(zpath, mode="r")
+    attrs = dict(g.attrs)
+    assert "multiscales" not in attrs, "v0.4 root-level multiscales was not removed"
+    ome = attrs["ome"]
+    assert ome["version"] == "0.5"
+    assert "multiscales" in ome
+    assert len(ome["multiscales"]) == 1
+
+    # load_zarr reads the upgraded store with data/metadata parity.
+    nodes = load_zarr(zpath)
+    img = nodes[0]
+    assert len(img.data) == 2
+    assert np.array_equal(np.asarray(img.data[0]), arr)
+    assert img.data[0].shape == arr.shape
+    assert img.data[0].dtype == np.uint16
+    axes = img.metadata["axes"]
+    assert [a["name"] for a in axes] == ["z", "y", "x"]
+    ct = img.metadata["coordinateTransformations"]
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    assert ct[1][0]["scale"] == [6.5, 13.0, 13.0]
+
+
+def test_upgrade_ngff_v04_to_v05_idempotent(tmp_path):
+    """A second upgrade call on an already-v0.5 store is a no-op and returns
+    False (no error, no metadata churn)."""
+    zpath = str(tmp_path / "v04.ome.zarr")
+    _make_v04_zarr(zpath)
+    upgrade_ngff_v04_to_v05(zpath)
+    before = dict(zarr.open(zpath, mode="r").attrs)
+
+    upgraded = upgrade_ngff_v04_to_v05(zpath)
+    assert upgraded is False
+
+    after = dict(zarr.open(zpath, mode="r").attrs)
+    assert before == after
+
+
+def test_upgrade_ngff_v04_to_v05_errors(tmp_path):
+    """upgrade_ngff_v04_to_v05 raises FileNotFoundError for a missing dir and
+    ValueError for a non-OME store (no v0.4 multiscales, no v0.5 ome)."""
+    missing = str(tmp_path / "nope.ome.zarr")
+    with pytest.raises(FileNotFoundError, match="zarr directory not found"):
+        upgrade_ngff_v04_to_v05(missing)
+
+    not_ome = str(tmp_path / "not_ome.zarr")
+    zarr.open_group(not_ome, mode="w")  # empty group, no OME metadata
+    with pytest.raises(ValueError, match="not an OME-Zarr store"):
+        upgrade_ngff_v04_to_v05(not_ome)
+
+
+def test_load_zarr_reads_v04_zip(tmp_path):
+    """load_zarr reads a v0.4 store packed into a zip -- the zip reader
+    handles root-level ``multiscales`` (v0.4) as well as ``ome.multiscales``
+    (v0.5), so a v0.4 store can be finalised to zip and read back without an
+    upgrade. This is the microscope-finalises-then-downstream-reads path for
+    legacy v0.4 stores."""
+    zdir = str(tmp_path / "v04.ome.zarr")
+    arr = _make_v04_zarr(zdir)
+    zip_path = finalise_zarr_to_zip(zdir)
+    assert not Path(zdir).exists()
+
+    nodes = load_zarr(zip_path)
+    img = nodes[0]
+    assert len(img.data) == 2
+    assert np.array_equal(np.asarray(img.data[0]), arr)
+    axes = img.metadata["axes"]
+    assert [a["name"] for a in axes] == ["z", "y", "x"]
+    ct = img.metadata["coordinateTransformations"]
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    assert ct[1][0]["scale"] == [6.5, 13.0, 13.0]
+
+
+def _make_v04_zarr_with_label(path: str, shape=(8, 8, 8)) -> tuple[np.ndarray, np.ndarray]:
+    """Write a tiny NGFF v0.4-style store WITH a ``mask`` label.
+
+    Mirrors :func:`_make_v04_zarr` for the image, then adds a ``labels/mask``
+    subgroup carrying v0.4 root-level ``multiscales`` + ``image-label`` (no
+    ``ome`` wrapper). The ``labels`` group carries a root-level ``labels``
+    attribute -- a list of ``{"label": "mask"}`` dicts -- which is the v0.4
+    labels-group convention the zip reader must consult (``ome.labels`` is
+    absent on a v0.4 labels group). Returns the image and label arrays.
+    """
+    arr = _make_v04_zarr(path, shape=shape)
+    g = zarr.open_group(path, mode="r+")
+    labels_group = g.require_group("labels")
+    mask_group = labels_group.require_group("mask")
+    label = np.zeros(shape, dtype=np.int8)
+    label[2:6, 2:6, 2:6] = 1
+    mask_group.create_array("0", data=label)
+    # Level 1: 2x downsample on Y/X (Z stays), nearest-neighbour.
+    l1 = label[:, ::2, ::2]
+    mask_group.create_array("1", data=l1)
+    mask_group.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "axes": [
+                {"name": "z", "type": "space", "unit": "micrometer"},
+                {"name": "y", "type": "space", "unit": "micrometer"},
+                {"name": "x", "type": "space", "unit": "micrometer"},
+            ],
+            "datasets": [
+                {
+                    "coordinateTransformations": [{"type": "scale", "scale": [6.5, 6.5, 6.5]}],
+                    "path": "0",
+                },
+                {
+                    "coordinateTransformations": [{"type": "scale", "scale": [6.5, 13.0, 13.0]}],
+                    "path": "1",
+                },
+            ],
+            "name": "mask",
+        }
+    ]
+    mask_group.attrs["image-label"] = {
+        "colors": [
+            {"label-value": 0, "rgba": [0, 0, 0, 0]},
+            {"label-value": 1, "rgba": [250, 0, 0, 255]},
+        ],
+        "source": {"image": "../../"},
+        "visible": True,
+    }
+    # v0.4 labels-group convention: a root-level "labels" list of
+    # {"label": name} dicts (no "ome" wrapper on the labels group itself).
+    labels_group.attrs["labels"] = [{"label": "mask"}]
+    return arr, label
+
+
+def test_load_zarr_reads_v04_zip_with_label(tmp_path):
+    """load_zarr reads a v0.4 store WITH a label packed into a zip.
+
+    Regression guard: the zip reader's label discovery previously only
+    consulted the v0.5 ``ome.labels`` list, which is absent on a v0.4 labels
+    group, so the ``mask`` label was silently dropped on read. The fix
+    discovers label names from the v0.4 labels-group ``labels`` attribute
+    (list of ``{"label": name}`` dicts) and/or the labels-group child group
+    keys. This test writes a v0.4 store with a ``mask`` label, finalises it
+    to a zip, and asserts the label node is found by name and round-trips.
+    """
+    zdir = str(tmp_path / "v04_label.ome.zarr")
+    arr, label = _make_v04_zarr_with_label(zdir)
+    zip_path = finalise_zarr_to_zip(zdir)
+    assert not Path(zdir).exists()
+
+    nodes = load_zarr(zip_path)
+    # Image node is still present.
+    img = nodes[0]
+    assert np.array_equal(np.asarray(img.data[0]), arr)
+
+    mask_node = load_node_by_name(nodes, "mask")
+    assert mask_node is not None, "v0.4 label 'mask' was silently dropped on zip read"
+    assert len(mask_node.data) == 2
+    assert np.array_equal(np.asarray(mask_node.data[0]), label)
+    assert mask_node.data[0].dtype == np.int8
+    axes = mask_node.metadata["axes"]
+    assert [a["name"] for a in axes] == ["z", "y", "x"]
+    ct = mask_node.metadata["coordinateTransformations"]
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    assert ct[1][0]["scale"] == [6.5, 13.0, 13.0]
