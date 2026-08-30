@@ -207,6 +207,26 @@ def main() -> None:
         dataset_json = json.load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # DDP setup: when --ddp is passed, torchrun injects
+    # RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT. Init the process
+    # group (nccl on CUDA, gloo on CPU) and pin the device to LOCAL_RANK so
+    # each rank drives its own GPU. The pretraining loop wraps the network in
+    # DistributedDataParallel and shards the dataset across ranks.
+    if args.ddp:
+        import os
+
+        import torch.distributed as dist
+
+        missing = [v for v in ("RANK", "WORLD_SIZE", "LOCAL_RANK") if v not in os.environ]
+        if missing:
+            parser.error(f"--ddp requires torchrun env vars; missing: {missing}")
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        if not dist.is_initialized():
+            dist.init_process_group(backend=backend)
+        if torch.cuda.is_available():
+            torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+            device = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+
     # Build the network with output_channels == input_channels so the
     # masked-inpainting reconstruction objective is well-formed (the network
     # reconstructs the masked image, not a segmentation map). The encoder +
@@ -280,8 +300,18 @@ def main() -> None:
         mask_transform=_mask_transform,
         learning_rate=args.learning_rate,
         use_amp=args.amp,
+        ddp=args.ddp,
     )
-    logger.info("Wrote pretrained checkpoint to %s", args.pretrained_output)
+    # Under DDP only rank 0 writes the checkpoint + logs; suppress the log on
+    # other ranks to avoid duplicate output.
+    if not args.ddp or torch.distributed.get_rank() == 0:
+        logger.info("Wrote pretrained checkpoint to %s", args.pretrained_output)
+    if args.ddp:
+        import torch.distributed as dist
+
+        dist.barrier()
+        if dist.get_rank() == 0:
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":

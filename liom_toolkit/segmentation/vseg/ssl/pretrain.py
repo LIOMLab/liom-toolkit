@@ -328,6 +328,7 @@ def masked_inpainting_pretrain(
     learning_rate: float = 1e-3,
     use_amp: bool = False,
     max_grad_norm: float = 1.0,
+    ddp: bool = False,
 ) -> list[float]:
     """Run the masked-inpainting pretraining loop and save the checkpoint.
 
@@ -346,11 +347,16 @@ def masked_inpainting_pretrain(
     dataset : Sequence[torch.Tensor]
         A sequence of batched input tensors ``(B, C, H, W)``. Each entry is
         one batch; the loop iterates over the sequence per epoch. An empty
-        sequence raises ``ValueError`` (no zero-fill / no silent pass).
+        sequence raises ``ValueError`` (no zero-fill / no silent pass). Under
+        DDP the dataset is sharded across ranks (rank r takes every
+        ``world_size``-th batch starting at r) so each rank sees a disjoint
+        subset and the effective batch throughput scales with world_size.
     epochs : int
         Number of epochs to run.
     output_path : str
         Where to save the checkpoint (``{'network_weights': state_dict}``).
+        Under DDP only rank 0 writes the file (the other ranks' state_dicts
+        are identical post-all-reduce).
     device : torch.device | str, optional
         The device to run on. Defaults to CPU.
     mask_transform : MaskTransform | None, optional
@@ -366,6 +372,11 @@ def masked_inpainting_pretrain(
         serves the CPU tracer and the CUDA real run.
     max_grad_norm : float, optional
         Gradient clipping max norm. Defaults to ``1.0``.
+    ddp : bool, optional
+        Whether to wrap the network in ``DistributedDataParallel`` and shard
+        the dataset across ranks. Requires ``torch.distributed`` to be
+        initialized (the CLI calls ``init_process_group`` under torchrun).
+        Defaults to ``False`` (single-process).
 
     Returns
     -------
@@ -377,6 +388,9 @@ def masked_inpainting_pretrain(
     ValueError
         If ``dataset`` is empty (the loop cannot train on an empty corpus),
         ``epochs`` is not positive, or a batch is not a 4D tensor.
+    RuntimeError
+        If ``ddp=True`` but ``torch.distributed`` is not initialized (run
+        under torchrun so the CLI can call ``init_process_group``).
     """
     if not dataset:
         raise ValueError(
@@ -390,8 +404,34 @@ def masked_inpainting_pretrain(
     if mask_transform is None:
         mask_transform = _default_block_mask
 
+    # DDP setup: when ddp=True, torch.distributed must already be
+    # initialized (the CLI calls init_process_group under torchrun). Wrap the
+    # network in DistributedDataParallel so gradients are all-reduced across
+    # ranks, and shard the dataset so each rank processes a disjoint subset
+    # (effective throughput scales with world_size). Rank 0 writes the
+    # checkpoint; the other ranks' state_dicts are identical post-all-reduce.
+    rank = 0
+    world_size = 1
+    if ddp:
+        import torch.distributed as dist
+        from torch.nn.parallel import DistributedDataParallel
+
+        if not (dist.is_available() and dist.is_initialized()):
+            raise RuntimeError(
+                "masked_inpainting_pretrain: ddp=True requires torch.distributed "
+                "to be initialized -- run under torchrun (the CLI calls "
+                "init_process_group when --ddp is passed)"
+            )
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+
     network = network.to(device)
     network.train()
+    if ddp:
+        network = DistributedDataParallel(
+            network,
+            device_ids=[int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None,
+        )
     optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
     # AMP GradScaler -- no-ops on CPU (enabled=use_amp and
     # torch.cuda.is_available()) so the same code path serves the CPU tracer
@@ -404,7 +444,12 @@ def masked_inpainting_pretrain(
     for _epoch in range(epochs):
         loss_sum = 0.0
         loss_count = 0
-        for batch in dataset:
+        # Shard the dataset across ranks: rank r takes every world_size-th
+        # batch starting at r. Each rank sees a disjoint subset, so the
+        # effective batch throughput scales with world_size. The DDP
+        # all-reduce synchronizes gradients across ranks each step.
+        for batch_idx in range(rank, len(dataset), world_size):
+            batch = dataset[batch_idx]
             if not isinstance(batch, torch.Tensor) or batch.ndim != 4:
                 raise ValueError(
                     f"masked_inpainting_pretrain: each batch must be a 4D "
@@ -478,6 +523,17 @@ def masked_inpainting_pretrain(
 
     # Save the checkpoint as {'network_weights': state_dict} -- the exact
     # format load_pretrained_weights expects. Atomic temp-file write so a
-    # crash mid-write does not leave a partial checkpoint.
-    _save_checkpoint_atomic({"network_weights": network.state_dict()}, output_path)
+    # crash mid-write does not leave a partial checkpoint. Under DDP only
+    # rank 0 writes (the other ranks' state_dicts are identical post-all-
+    # reduce); a barrier ensures all ranks finished the last step before the
+    # save, so rank 0 does not exit and tear down the process group first.
+    if ddp:
+        import torch.distributed as dist
+
+        dist.barrier()
+    if rank == 0:
+        # Under DDP, unwrap the module to get the underlying network's
+        # state_dict (DDP prefixes keys with "module.").
+        sd_module = network.module if hasattr(network, "module") else network
+        _save_checkpoint_atomic({"network_weights": sd_module.state_dict()}, output_path)
     return epoch_losses
