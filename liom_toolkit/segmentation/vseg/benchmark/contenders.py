@@ -390,33 +390,30 @@ class MonaiUnetContender:
     ) -> list[NDArray[np.bool_]]:
         """Train + predict boolean masks on test slices via SlidingWindowInferer.
 
+        Not yet wired: ``train_model`` trains a :class:`VsegModel`, not the
+        MONAI UNet, so the trained checkpoint cannot be loaded into the MONAI
+        architecture (different parameter names/shapes). Calling this would
+        build a fresh randomly-initialized MONAI model and predict with it —
+        silent wrong data (AGENTS §2). Raise rather than emit random
+        predictions masquerading as trained output. A MONAI training path
+        (model-injection into ``train_model`` or a dedicated MONAI loop) is
+        required before this contender can produce trained predictions.
+
         Returns
         -------
         list[NDArray[np.bool_]]
             One boolean mask per test slice, in ``test_slices`` order.
+
+        Raises
+        ------
+        NotImplementedError
+            Always — the MONAI training path is not yet wired.
         """
-        from liom_toolkit.segmentation.vseg.training import train_model
-
-        dev = torch.device(self.device)
-        dataset_file = train_slices[0] if train_slices else ""
-        # Delegate training to the DDP entry (env-var auto-detect, no silent
-        # single-process fallback, AMP/grad-clip). The MONAI model plugs into
-        # the identical training path; the composite loss is built here.
-        train_model(
-            dataset_file=dataset_file,
-            node_name="channel_0",
-            dev=dev,
-            output_train=output_dir,
-            wandb_mode="disabled",
-            epochs=1,
-            batch_size=1,
-            patch_size=patch_size,
-            ddp=ddp,
+        raise NotImplementedError(
+            "MonaiUnetContender.train_and_predict is not wired — train_model "
+            "trains VsegModel, not the MONAI UNet; a MONAI training path is "
+            "required before this contender can produce trained predictions"
         )
-
-        model = self._build_model().to(dev)
-        roi_size = (patch_size[1], patch_size[2])
-        return _monai_predict_slices(model, test_slices, dev, roi_size=roi_size)
 
     def predict_on_slices(
         self,
@@ -494,30 +491,30 @@ class SwinUnetContender:
     ) -> list[NDArray[np.bool_]]:
         """Train + predict boolean masks on test slices via SlidingWindowInferer.
 
+        Not yet wired: ``train_model`` trains a :class:`VsegModel`, not the
+        MONAI SwinUNETR, so the trained checkpoint cannot be loaded into the
+        MONAI architecture (different parameter names/shapes). Calling this
+        would build a fresh randomly-initialized SwinUNETR and predict with it
+        — silent wrong data (AGENTS §2). Raise rather than emit random
+        predictions masquerading as trained output. A MONAI training path
+        (model-injection into ``train_model`` or a dedicated MONAI loop) is
+        required before this contender can produce trained predictions.
+
         Returns
         -------
         list[NDArray[np.bool_]]
             One boolean mask per test slice, in ``test_slices`` order.
+
+        Raises
+        ------
+        NotImplementedError
+            Always — the MONAI training path is not yet wired.
         """
-        from liom_toolkit.segmentation.vseg.training import train_model
-
-        dev = torch.device(self.device)
-        dataset_file = train_slices[0] if train_slices else ""
-        train_model(
-            dataset_file=dataset_file,
-            node_name="channel_0",
-            dev=dev,
-            output_train=output_dir,
-            wandb_mode="disabled",
-            epochs=1,
-            batch_size=1,
-            patch_size=patch_size,
-            ddp=ddp,
+        raise NotImplementedError(
+            "SwinUnetContender.train_and_predict is not wired — train_model "
+            "trains VsegModel, not the MONAI SwinUNETR; a MONAI training path "
+            "is required before this contender can produce trained predictions"
         )
-
-        model = self._build_model().to(dev)
-        roi_size = (patch_size[1], patch_size[2])
-        return _monai_predict_slices(model, test_slices, dev, roi_size=roi_size)
 
     def predict_on_slices(
         self,
