@@ -95,6 +95,15 @@ class _MonaiPngDataset(Dataset):
     ``SoftclDiceLoss(sigmoid=True)``) receives the target shape its
     internals assume — a 0/255 target would scale the Dice numerator by
     255 and silently produce wrong gradients (AGENTS §2).
+
+    Empty patches (no vessel pixels) are NOT filtered out. The previous
+    filtering crippled the MONAI contenders: with 9 train slices and
+    sparse vessels, only 246 of 576 grid patches were non-empty, giving
+    MONAI 4x fewer gradient steps than Improved2D (which retains empty
+    patches via ``empty_percentage``). Including all patches ensures a
+    fair compute-budget comparison. The focal loss component
+    (down-weights easy background pixels) handles the class imbalance
+    from including empty patches.
     """
 
     def __init__(
@@ -114,11 +123,11 @@ class _MonaiPngDataset(Dataset):
         # Pre-load all slices into memory and extract grid patches so
         # __getitem__ is a fast in-memory slice (no PNG I/O per batch).
         # This matches Improved2D's grid patching: each slice is divided
-        # into non-overlapping patch_size crops. Empty patches (no vessel
-        # pixels) are filtered out to match Improved2D's filter_empty=True.
+        # into non-overlapping patch_size crops. All patches are kept
+        # (including empty ones) for a fair compute-budget comparison.
         ph, pw = patch_size
         self._patches: list[tuple[torch.Tensor, torch.Tensor]] = []
-        for img_path, mask_path in zip(self.slice_paths, self.mask_paths):
+        for img_path, mask_path in zip(self.slice_paths, self.mask_paths, strict=True):
             import imageio.v3 as iio
 
             img = np.asarray(iio.imread(img_path), dtype=np.float32)
@@ -134,10 +143,6 @@ class _MonaiPngDataset(Dataset):
                 for x in range(0, w - pw + 1, pw):
                     img_patch = img[y : y + ph, x : x + pw]
                     mask_patch = mask[y : y + ph, x : x + pw]
-                    # Skip empty patches (no vessel pixels) — matches
-                    # Improved2D's filter_empty=True behavior.
-                    if mask_patch.sum() == 0:
-                        continue
                     self._patches.append(
                         (
                             torch.from_numpy(img_patch).unsqueeze(0),
@@ -246,6 +251,7 @@ def train_monai_model(
     use_amp: bool = True,
     val_split: float = 0.2,
     device: torch.device | None = None,
+    iterations_per_epoch: int = 250,
 ) -> Path:
     """Train a MONAI model on PNG slices and save ``checkpoint.latest.pth``.
 
@@ -301,6 +307,11 @@ def train_monai_model(
         The device to use. ``None`` resolves to ``cuda`` if available,
         else ``cpu``. Under DDP, overridden by ``cuda:{LOCAL_RANK}`` or
         ``cpu``.
+    iterations_per_epoch : int
+        Number of gradient steps per epoch. Uses a ``RandomSampler`` with
+        replacement to yield exactly this many samples per epoch,
+        matching nnU-Net's fixed iteration count (250/epoch) for a fair
+        compute-budget comparison. Default 250.
 
     Returns
     -------
@@ -354,7 +365,7 @@ def train_monai_model(
         rank = dist.get_rank()
 
     try:
-        from torch.utils.data import DataLoader, random_split
+        from torch.utils.data import DataLoader, RandomSampler, random_split
 
         spatial = (patch_size[1], patch_size[2])
         full_dataset = _MonaiPngDataset(train_slices, spatial, crop=True)
@@ -362,9 +373,22 @@ def train_monai_model(
         n_train = len(full_dataset) - n_val
         train_dataset, val_dataset = random_split(full_dataset, [n_train, n_val])
 
+        # Fixed iterations per epoch via RandomSampler with replacement.
+        # This matches nnU-Net's 250 iterations/epoch for a fair
+        # compute-budget comparison. Without this, the MONAI contenders
+        # get far fewer gradient steps than nnU-Net (30 vs 250) because
+        # the dataset is small (576 patches, 9 slices).
+        samples_per_epoch = iterations_per_epoch * batch_size
         pin_memory = device.type != "cpu"
         if ddp:
-            train_sampler = DistributedSampler(train_dataset, shuffle=True)
+            # Under DDP, each rank gets samples_per_epoch / world_size
+            # samples. RandomSampler with replacement ensures each rank
+            # sees a fresh random subset.
+            world_size = dist.get_world_size() if dist is not None else 1
+            rank_samples = samples_per_epoch // world_size
+            train_sampler = RandomSampler(
+                train_dataset, replacement=True, num_samples=rank_samples
+            )
             val_sampler = DistributedSampler(val_dataset, shuffle=False)
             train_loader = DataLoader(
                 train_dataset,
@@ -381,11 +405,13 @@ def train_monai_model(
                 pin_memory=pin_memory,
             )
         else:
-            train_sampler = None
+            train_sampler = RandomSampler(
+                train_dataset, replacement=True, num_samples=samples_per_epoch
+            )
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=batch_size,
-                shuffle=True,
+                sampler=train_sampler,
                 num_workers=0,
                 pin_memory=pin_memory,
             )
@@ -418,8 +444,12 @@ def train_monai_model(
 
         best_val_loss = float("inf")
         for epoch in range(epochs):
-            if train_sampler is not None:
-                train_sampler.set_epoch(epoch)
+            # set_epoch on the val DistributedSampler (not the train
+            # RandomSampler, which doesn't have set_epoch). Under DDP,
+            # val_sampler is a DistributedSampler; under single-process,
+            # val_sampler is None.
+            if ddp and val_sampler is not None:
+                val_sampler.set_epoch(epoch)
 
             model.train()
             for x, y in train_loader:

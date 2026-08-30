@@ -459,6 +459,7 @@ def train_model(
     patch_size: tuple[int, int, int] = (1, 256, 256),
     normalisation_value: int | float = 65535,
     num_workers: int = 0,
+    iterations_per_epoch: int | None = None,
 ) -> None:
     """Train the vessel segmentation model.
 
@@ -548,6 +549,12 @@ def train_model(
         keep the smoke dataset tiny (a smaller volume trains faster and
         uses less memory). Included in the resume params-hash so a
         patch-size change between runs invalidates the checkpoint.
+    iterations_per_epoch : int | None
+        Fixed number of gradient steps per epoch. When set, uses a
+        ``RandomSampler`` with replacement to yield exactly this many
+        samples per epoch, matching nnU-Net's fixed iteration count for
+        a fair compute-budget comparison. ``None`` uses the natural
+        dataset length (one pass through all patches per epoch).
 
     Raises
     ------
@@ -690,8 +697,22 @@ def train_model(
         # loader also uses DistributedSampler (all-rank eval, D-02) — the
         # sum+count all-reduce in evaluate() handles len(val_set) % world_size
         # != 0.
+        #
+        # When iterations_per_epoch is set, use RandomSampler with
+        # replacement to yield a fixed number of samples per epoch,
+        # matching nnU-Net's 250 iterations/epoch for a fair compute-
+        # budget comparison.
+        from torch.utils.data import RandomSampler
+
         if ddp:
-            train_sampler = DistributedSampler(train_dataset, shuffle=True)
+            if iterations_per_epoch is not None:
+                world_size_ddp = dist.get_world_size()
+                rank_samples = iterations_per_epoch * batch_size // world_size_ddp
+                train_sampler = RandomSampler(
+                    train_dataset, replacement=True, num_samples=rank_samples
+                )
+            else:
+                train_sampler = DistributedSampler(train_dataset, shuffle=True)
             val_sampler = DistributedSampler(test_dataset, shuffle=False)
             train_loader = DataLoader(
                 train_dataset,
@@ -708,11 +729,19 @@ def train_model(
                 pin_memory=pin_memory_effective,
             )
         else:
-            train_sampler = None
+            if iterations_per_epoch is not None:
+                train_sampler = RandomSampler(
+                    train_dataset,
+                    replacement=True,
+                    num_samples=iterations_per_epoch * batch_size,
+                )
+            else:
+                train_sampler = None
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=batch_size,
-                shuffle=False,
+                sampler=train_sampler if train_sampler is not None else None,
+                shuffle=(train_sampler is None),
                 num_workers=num_workers,
                 pin_memory=pin_memory_effective,
             )
@@ -896,9 +925,10 @@ def train_model(
 
         epoch_range = range(start_epoch, config.epochs)
         for epoch in (pbar := tqdm(epoch_range, desc="Epochs", leave=False, position=0)):
-            # D-02b: set_epoch per-epoch so each epoch sees a different shuffle
-            # across ranks. No-op when train_sampler is None (single-process).
-            if train_sampler is not None:
+            # set_epoch per-epoch for DistributedSampler (shuffles across
+            # ranks). RandomSampler (used when iterations_per_epoch is set)
+            # doesn't have set_epoch — it reshuffles naturally each epoch.
+            if train_sampler is not None and hasattr(train_sampler, "set_epoch"):
                 train_sampler.set_epoch(epoch)
             train_loss, train_y, train_y_pred, x_train = train(
                 model, train_loader, optimizer, loss_fn, dev, use_amp=use_amp

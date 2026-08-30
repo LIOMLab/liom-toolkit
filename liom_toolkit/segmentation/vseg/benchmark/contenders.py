@@ -176,6 +176,7 @@ class Improved2DContender:
             ddp=ddp,
             normalisation_value=255,
             num_workers=0,
+            iterations_per_epoch=250,
         )
 
         model = VsegModel(pretrained=False, device=dev)
