@@ -178,15 +178,18 @@ def _frangi2d_gpu(
         d2gk = d2g.view(1, 1, -1)
         b, h, w = img.shape
         img4 = img.view(b, 1, h, w)
-        # Separable convolutions: apply the 1D kernel along rows then columns.
-        # Dxx = d2g(x) * g(y) -- 2nd deriv along x, smooth along y.
-        dxx = torch.nn.functional.conv2d(img4, d2gk.view(1, 1, -1, 1), padding=(0, radius))
+        # Separable convolutions. A (1,1,1,K) kernel convolves along W (the
+        # last spatial dim) with padding=(0, radius); a (1,1,K,1) kernel
+        # convolves along H with padding=(radius, 0). "x" is the W axis and
+        # "y" is the H axis (image indexing is [row=H, col=W]).
+        # Dxx = d2g(x) * g(y) -- 2nd deriv along W (x), smooth along H (y).
+        dxx = torch.nn.functional.conv2d(img4, d2gk.view(1, 1, 1, -1), padding=(0, radius))
         dxx = torch.nn.functional.conv2d(dxx, gk.view(1, 1, -1, 1), padding=(radius, 0))
-        # Dyy = g(x) * d2g(y).
-        dyy = torch.nn.functional.conv2d(img4, gk.view(1, 1, -1, 1), padding=(0, radius))
+        # Dyy = g(x) * d2g(y) -- smooth along W, 2nd deriv along H.
+        dyy = torch.nn.functional.conv2d(img4, gk.view(1, 1, 1, -1), padding=(0, radius))
         dyy = torch.nn.functional.conv2d(dyy, d2gk.view(1, 1, -1, 1), padding=(radius, 0))
-        # Dxy = dg(x) * dg(y).
-        dxy = torch.nn.functional.conv2d(img4, dgk.view(1, 1, -1, 1), padding=(0, radius))
+        # Dxy = dg(x) * dg(y) -- 1st deriv along both axes.
+        dxy = torch.nn.functional.conv2d(img4, dgk.view(1, 1, 1, -1), padding=(0, radius))
         dxy = torch.nn.functional.conv2d(dxy, dgk.view(1, 1, -1, 1), padding=(radius, 0))
         dxx = dxx.view(b, h, w)
         dyy = dyy.view(b, h, w)
