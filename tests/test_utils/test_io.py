@@ -32,6 +32,7 @@ import zarr
 
 from liom_toolkit.conversion.conversion import save_zarr
 from liom_toolkit.utils.io import (
+    _zip_work_dir,
     extract_zarr_to_image,
     finalise_zarr_to_zip,
     generate_axes_dict,
@@ -246,7 +247,7 @@ def test_save_zarr_zip_write_round_trip(tmp_path):
 
     # Only the single-file zip remains — the working directory is removed.
     assert Path(zpath).is_file()
-    assert not Path(zpath[:-4]).exists(), "working directory was not cleaned up"
+    assert not Path(_zip_work_dir(zpath)).exists(), "working directory was not cleaned up"
 
     nodes = load_zarr(zpath)
     img = nodes[0]
@@ -300,7 +301,7 @@ def test_save_label_to_zarr_zip_append_round_trip(tmp_path):
 
     # Only the single-file zip remains after the repack.
     assert Path(zpath).is_file()
-    assert not Path(zpath[:-4]).exists(), "working directory was not cleaned up"
+    assert not Path(_zip_work_dir(zpath)).exists(), "working directory was not cleaned up"
 
     nodes = load_zarr(zpath)
     mask_node = load_node_by_name(nodes, "mask")

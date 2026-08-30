@@ -233,16 +233,25 @@ def _zip_work_dir(zip_path: str) -> str:
     The zip-aware writers produce the OME-Zarr in a directory first (the
     ome_zarr writer's ``da.to_zarr`` delayed writes corrupt a ZipStore
     directly), then pack the directory into the zip and remove it. This
-    helper picks a sibling directory path by stripping the zip extension
-    (so ``vol.ome.zarr.zip`` -> ``vol.ome.zarr``).
+    helper picks a sibling directory path by stripping only the terminal
+    archive extension (``.zip``/``.ozx``), preserving the ``.zarr``
+    segment, so ``vol.ome.zarr.zip`` -> ``vol.ome.zarr`` and
+    ``vol.ome.ozx`` -> ``vol.ome``. Stripping the whole ``.zarr.zip``
+    suffix (the previous behaviour) yielded ``vol.ome`` -- a collision-prone
+    name that could ``rmtree`` an unrelated sibling directory named
+    ``vol.ome``.
 
     Returns
     -------
     str
         The working directory path to write into before packing.
     """
-    for ext in _ZIP_ZARR_EXTENSIONS:
-        if zip_path.lower().endswith(ext):
+    name = Path(zip_path).name.lower()
+    # Strip only the terminal archive suffix, not the ``.zarr`` segment.
+    # ``.ozx`` is checked first only for clarity; the two suffixes are
+    # mutually exclusive so order does not change the result.
+    for ext in (".ozx", ".zip"):
+        if name.endswith(ext):
             return zip_path[: -len(ext)]
     return zip_path + ".dir"
 
@@ -912,7 +921,11 @@ def save_label_to_zarr(
     cleanup_dir: str | None = None
     if _is_zip_zarr(zarr_file):
         work_dir = _zip_work_dir(zarr_file)
-        if Path(work_dir).exists():
+        # Only remove a pre-existing work_dir if it looks like a prior
+        # unpack (contains a zarr.json marker). Without this guard, a
+        # collision-prone work-dir name could rmtree an unrelated sibling
+        # directory the caller did not create.
+        if Path(work_dir).exists() and (Path(work_dir) / "zarr.json").exists():
             shutil.rmtree(work_dir)
         _zip_store_to_dir(zarr_file, work_dir)
         cleanup_dir = work_dir
