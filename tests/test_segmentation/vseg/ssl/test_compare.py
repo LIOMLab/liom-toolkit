@@ -94,7 +94,8 @@ def test_run_comparison_computes_per_metric_matrix_and_delta_for_both_contenders
         f"pretrained matrix missing metrics: {expected_metrics - set(result['pretrained'].keys())}"
     )
     assert expected_metrics.issubset(result["from_scratch"].keys()), (
-        f"from_scratch matrix missing metrics: {expected_metrics - set(result['from_scratch'].keys())}"
+        "from_scratch matrix missing metrics: "
+        f"{expected_metrics - set(result['from_scratch'].keys())}"
     )
     # The delta (pretrained - from_scratch) is recorded per metric.
     assert "delta" in result, "result must contain the per-metric delta table"
