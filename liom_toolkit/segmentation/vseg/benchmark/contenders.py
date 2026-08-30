@@ -189,6 +189,7 @@ class Improved2DContender:
             )
         state = torch.load(str(checkpoint_path), map_location=dev, weights_only=True)
         model.load_state_dict(state)
+        model.to(dev)
         model.eval()
 
         masks: list[NDArray[np.bool_]] = []
@@ -744,7 +745,7 @@ class NnUnetContender:
         # but we need them here too — read them early with an explicit check.
         # The nnUNet_raw env var name is mandated by the nnU-Net v2 CLI
         # (upstream convention — renaming would break nnU-Net's dataset lookup).
-        nnunet_raw_env = os.environ.get("nnUNet_raw")  # ruff: ignore[SIM112]
+        nnunet_raw_env = os.environ.get("nnUNet_raw")  # ruff: ignore[uncapitalized-environment-variables]
         if nnunet_raw_env is None:
             raise RuntimeError(
                 "NnUnetContender: nnUNet_raw env var is not set — "
