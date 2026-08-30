@@ -492,8 +492,18 @@ def reported_dice(predicted: NDArray[np.bool_], gt: NDArray[np.bool_]) -> float:
         return float(2.0 * intersection / denom)
 
     # MONAI DiceMetric path — expects (B, C, H, W) float tensors.
+    # ignore_empty=False so MONAI returns 1.0 for both-empty (already guarded
+    # by the raise above) and 0.0 for one-empty, matching the NumPy fallback.
+    # The default ignore_empty=True returns NaN for empty-GT cases, which
+    # would silently propagate into the result table (AGENTS §2 violation).
     pred_t = torch.from_numpy(predicted.astype(np.float32))[None, None]
     gt_t = torch.from_numpy(gt.astype(np.float32))[None, None]
-    metric = DiceMetric(include_background=True, reduction="mean")
+    metric = DiceMetric(include_background=True, reduction="mean", ignore_empty=False)
     result = metric(pred_t, gt_t)
-    return float(result.item())
+    val = float(result.item())
+    if val != val:  # NaN check (val != val is True only for NaN)
+        raise ValueError(
+            f"reported_dice: MONAI DiceMetric returned NaN "
+            f"(predicted.sum()={int(predicted.sum())}, gt.sum()={int(gt.sum())})"
+        )
+    return val
