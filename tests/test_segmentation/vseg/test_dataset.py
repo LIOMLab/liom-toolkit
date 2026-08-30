@@ -1,12 +1,8 @@
 """Characterization tests for ``liom_toolkit/segmentation/vseg/dataset.py``.
 
-These tests characterize the CURRENT (pre-fix) behavior of
-``OmeZarrDataset``, including the known rotation-arithmetic bug at
-``dataset.py:132-135`` (``rest = (idx // 4) % 4`` instead of ``idx % 4``).
-This is a characterization, not a correctness claim: Phase 6/8 fixes the
-rotation bug and the assertions in ``test_ome_zarr_dataset_rotation_characterization``
-must be UPDATED then (not xfailed now — the test passes today because it
-asserts the buggy behavior).
+These tests verify the behavior of ``OmeZarrDataset``, including the
+rotation-augmentation formula in ``load_patch`` (``divmod(idx, 4)`` so each
+grid patch's 4 rotated copies cycle k through {0,1,2,3}).
 
 All tests gate on ``pytest.importorskip("torch")`` and
 ``pytest.importorskip("sklearn")`` because ``dataset.py`` module-top imports
@@ -148,22 +144,17 @@ def test_ome_zarr_dataset_get_patch_coordinates(tmp_path):
 
 
 def test_ome_zarr_dataset_rotation_characterization(tmp_path):
-    """Characterize the CURRENT (buggy) rotation formula in dataset.py:132-135.
+    """Verify the rotation formula in dataset.py cycles k through {0,1,2,3} per grid patch.
 
-    For idx in {0,1,2,3} (all map to grid patch 0 after ``idx = idx // 4``),
-    the applied rotation k is ``rest = (idx // 4) % 4 == 0`` for all four —
-    i.e. NO rotation is applied to the first four patches even though a
-    correct 4-fold augmentation design would cycle k through {0,1,2,3}.
+    With ``rotate_patches=True``, each grid patch is expanded into 4 rotated
+    copies: idx ``i`` maps to grid patch ``i // 4`` with rotation
+    ``k = i % 4``. So idx in {0,1,2,3} all map to grid patch 0 but each gets
+    a DISTINCT rotation k in {0,1,2,3} -- the 4-fold augmentation design.
 
-    For idx in {4,5,6,7} (grid patch 1), ``rest = (idx // 4) % 4 == 1`` for
-    all four — i.e. every patch in the second group gets rotation k=1.
-
-    This proves the bug at the boundary between the first and second
-    patch-index groups. It does not exhaustively test every idx/grid_shape
-    combination — only the minimal boundary pair needed to prove the current
-    (buggy) formula.
-
-    Phase 6/8 fixes this — update the assertions then, do not xfail.
+    This is the corrected behavior (``divmod(idx, 4)``). The previous buggy
+    formula computed ``rest = (idx // 4) % 4`` after the floor-division,
+    which cycled the rotation by grid position instead of per-patch and made
+    every grid patch's 4 copies identical.
     """
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
@@ -179,32 +170,34 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
         rotate_patches=True,
     )
 
-    # Patches 0..3 all map to grid patch 0 with rest=0 -> identical raw content
-    # (np.rot90 with k=0 is a no-op).
+    # Patches 0..3 all map to grid patch 0, each with a DISTINCT rotation
+    # k = idx % 4 in {0,1,2,3}. k=0 is a no-op, so idx=0 equals the raw
+    # grid-patch-0 content; idx=1..3 are its rot90 by k=1,2,3.
     patches_group0 = [
         ds.load_patch(ds.data, idx, pre_process=False, normalise=False) for idx in [0, 1, 2, 3]
     ]
-    # Compare as numpy arrays (load_patch returns torch.Tensor -> .numpy())
     arrs_group0 = [p.numpy() if hasattr(p, "numpy") else np.asarray(p) for p in patches_group0]
-    assert np.array_equal(arrs_group0[0], arrs_group0[1])
-    assert np.array_equal(arrs_group0[0], arrs_group0[3])
+    # Grid patch 0 in raveled (z,y,x) order with grid_shape (2,2,2): idx 0 ->
+    # unravel_index(0, (2,2,2)) == (0,0,0) -> slice [0:8, 0:8, 0:8]
+    unrotated_grid0 = ds.data[0:8, 0:8, 0:8].compute()
+    assert np.array_equal(arrs_group0[0], unrotated_grid0)
+    for k in (1, 2, 3):
+        expected = np.rot90(unrotated_grid0, k=k, axes=(-2, -1))
+        assert np.array_equal(arrs_group0[k], expected), f"idx={k} should be rot90 k={k} of grid patch 0"
+    # The 4 rotated copies are mutually distinct (augmentation is not redundant).
+    assert not np.array_equal(arrs_group0[0], arrs_group0[1])
+    assert not np.array_equal(arrs_group0[1], arrs_group0[2])
 
-    # idx=4 -> grid patch 1, rest = (4 // 4) % 4 == 1 -> rotation k=1 applied.
-    # Prove the k=1 rotation actually ran: the patch fetched at idx=4 is NOT
-    # array-equal to the un-rotated grid-patch-1 content fetched directly.
+    # idx=4 -> grid patch 1, k = 4 % 4 == 0 -> no rotation, equals raw grid patch 1.
     patch_at_4 = ds.load_patch(ds.data, 4, pre_process=False, normalise=False)
     arr_at_4 = patch_at_4.numpy() if hasattr(patch_at_4, "numpy") else np.asarray(patch_at_4)
-    # Grid patch 1 in raveled (z,y,x) order with grid_shape (2,2,2): idx 1 ->
-    # unravel_index(1, (2,2,2)) == (0,0,1) -> z=0,y=0,x=1 -> slice [0:8, 0:8, 8:16]
+    # Grid patch 1: unravel_index(1, (2,2,2)) == (0,0,1) -> slice [0:8, 0:8, 8:16]
     unrotated_grid1 = ds.data[0:8, 0:8, 8:16].compute()
-    assert not np.array_equal(arr_at_4, unrotated_grid1)
-    # And the k=1 rotation of that un-rotated content DOES equal the patch
-    # (sanity: proves the difference is exactly the rotation, not something else).
-    expected_rotated = np.rot90(unrotated_grid1, k=1, axes=(-2, -1))
-    assert np.array_equal(arr_at_4, expected_rotated)
-
-    # Characterizes dataset.py:132-135 current formula rest = (idx // 4) % 4;
-    # NOT idx % 4. Phase 6/8 fixes this — update assertions then, do not xfail.
+    assert np.array_equal(arr_at_4, unrotated_grid1)
+    # idx=5 -> grid patch 1, k = 5 % 4 == 1 -> rot90 k=1 of grid patch 1.
+    patch_at_5 = ds.load_patch(ds.data, 5, pre_process=False, normalise=False)
+    arr_at_5 = patch_at_5.numpy() if hasattr(patch_at_5, "numpy") else np.asarray(patch_at_5)
+    assert np.array_equal(arr_at_5, np.rot90(unrotated_grid1, k=1, axes=(-2, -1)))
 
 
 @pytest.mark.real_process_map
