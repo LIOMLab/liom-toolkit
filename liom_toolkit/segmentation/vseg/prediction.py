@@ -234,7 +234,12 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         maps ``idx`` through ``valid_indices`` while
         ``get_patch_coordinates`` uses the unmapped ``idx``, so the
         prediction for patch ``valid_indices[idx]`` would be written to
-        the location of patch ``idx`` (silent wrong-data).
+        the location of patch ``idx`` (silent wrong-data). Also raised if
+        ``dataset.patch_size[0] != 1`` -- ``VsegModel`` is a 2D U-Net and
+        ``do_predict`` treats the leading patch axis as the channel
+        dimension, so a 3D patch produces a confusing channel-count
+        ``RuntimeError`` deep in the forward pass instead of an
+        actionable error.
     """
     try:
         import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
@@ -265,6 +270,23 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
             "the location of patch idx, producing silent wrong-data). "
             "Construct an OmeZarrDataset (not OmeZarrLabelDataSet) or set "
             f"filter_empty=False for prediction. Got filter_empty={dataset.filter_empty}."
+        )
+    # VsegModel is a 2D U-Net: its first Conv2d expects 1 input channel
+    # (Conv2d(1, 64, ...)). When patch_size[0] > 1, do_predict unsqueezes
+    # the 3D patch to (1, Z, Y, X) and the model interprets Z as the
+    # channel dimension -- for Z > 1 the conv raises a confusing
+    # "expected input to have 1 channels, but got Z channels instead"
+    # RuntimeError from deep in the forward pass that does not identify
+    # the real cause. The OmeZarrDataset default patch_size=(32, 32, 32)
+    # makes this a likely user error -- raise an explicit, actionable
+    # ValueError naming the offending patch_size at the top of the call.
+    patch_size = getattr(dataset, "patch_size", None)
+    if patch_size is None or patch_size[0] != 1:
+        raise ValueError(
+            "predict_volume requires a 2D patch size (patch_size[0] == 1) "
+            "-- VsegModel is a 2D U-Net and do_predict treats the leading "
+            "axis as the channel dimension. Use patch_size=(1, H, W) for "
+            f"prediction. Got patch_size={patch_size}."
         )
     # Normalize dask chunks (tuple of tuples per-dimension) to a flat chunk
     # shape tuple for zarr. dask.array.core.Array.chunksize already does this,
