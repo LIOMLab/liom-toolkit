@@ -326,6 +326,28 @@ def vessel_aware_block_mask(
     masked_input = batch.clone()
     mask = torch.zeros((b, c, h, w), dtype=torch.bool, device=batch.device)
 
+    # Pre-compute the per-batch-element Frangi probability maps in parallel.
+    # skimage.filters.frangi releases the GIL during its C-level Hessian
+    # computation, so a thread pool parallelizes the per-sample Frangi calls
+    # across the batch -- the dominant cost (a single Frangi call on a
+    # 512x512 patch with 3 sigmas is ~7-21s; serial across an 8-sample batch
+    # that is ~60-160s, which made pretraining impractical). The prob gate
+    # is applied before submitting so skipped elements do no Frangi work.
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Decide which batch elements will be masked (prob gate) up front so the
+    # thread pool only does Frangi work for the elements that need it.
+    will_mask = [not (prob < 1.0 and float(rng.random()) > prob) for _ in range(b)]
+
+    def _compute_prob_map(bi: int) -> NDArray[np.floating] | None:
+        if not will_mask[bi]:
+            return None
+        image_2d = batch[bi, 0].detach().cpu().numpy().astype(np.float64, copy=False)
+        return vesselness_probability_map(image_2d, sigmas=frangi_sigmas)
+
+    with ThreadPoolExecutor(max_workers=min(b, 8)) as pool:
+        prob_maps = list(pool.map(_compute_prob_map, range(b)))
+
     # Per-batch, per-channel-group hole placement: the Frangi map is computed
     # on a representative channel (channel 0 -- the 555nm vessel channel by
     # convention) and the SAME block mask is applied across all channels
@@ -333,15 +355,9 @@ def vessel_aware_block_mask(
     # applied identically across channels, mirroring RandCoarseDropoutd with
     # spatial_size=(-1, H, W)).
     for bi in range(b):
-        # prob gate: per-batch-element draw. When skipped, leave this element
-        # unmasked (mask stays all-False, masked_input equals the input).
-        if prob < 1.0 and float(rng.random()) > prob:
-            continue
-        # Compute the Frangi probability map on channel 0 of this batch
-        # element (the 555nm vessel channel guides hole placement). The map
-        # is 2D (H, W); the same block mask is applied across all channels.
-        image_2d = batch[bi, 0].detach().cpu().numpy().astype(np.float64, copy=False)
-        prob_map = vesselness_probability_map(image_2d, sigmas=frangi_sigmas)
+        prob_map = prob_maps[bi]
+        if prob_map is None:
+            continue  # prob gate skipped this element
         # Detect the uniform fallback (background-only slice): a flat prob
         # map means no Frangi response, so hole placement degrades to
         # uniform-random. On this path compose with MONAI RandCoarseDropoutd
