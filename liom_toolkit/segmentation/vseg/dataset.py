@@ -13,8 +13,7 @@ import dask.array as da
 import numpy as np
 import zarr
 from numpy.typing import NDArray
-
-from liom_toolkit.utils.concurrency import process_map_tqdm
+from tqdm import tqdm
 
 # torch is moved into the [ai] extra (D-01/D-05). The upfront ImportError
 # here is the honest signal on an io-only install -- the message names [ai]
@@ -653,32 +652,38 @@ class OmeZarrLabelDataSet(OmeZarrDataset):
         # exists, so __len__ falls through to super().__len__()).
         dataset_length = len(self) // 4 if self.rotate_patches else len(self)
 
-        # Validate patches through the managed concurrency layer
-        # (utils.concurrency.process_map_tqdm). The layer injects the spawn
-        # context and the spawn-context Lock centrally: this module imports
-        # torch at the top level, and torch starts internal threads at import
-        # time, so forking a multithreaded process (the Linux default start
-        # method) deadlocks. Spawn creates a fresh interpreter with no
-        # inherited state. The spawn-context _lock is load-bearing too --
-        # tqdm's ensure_lock would otherwise source a fork-context SemLock,
-        # and passing that to a spawn-context ProcessPoolExecutor raises
-        # RuntimeError.
+        # In-memory validation: load the label volume once and check each
+        # grid patch with numpy slicing. This replaces the previous
+        # process_map_tqdm approach which spawned worker processes (each
+        # re-importing torch and re-opening the zarr store) and did one
+        # zarr read per patch — 576 patches at ~2.5 patches/s = ~4 minutes
+        # of pure I/O + spawn overhead, just to check max() > 0 on each
+        # patch. Loading the full label volume into memory once and slicing
+        # with numpy is orders of magnitude faster (seconds, not minutes)
+        # and avoids the process-pool spawn overhead entirely.
         #
-        # No per-call max_workers override: let the layer's
-        # _default_process_cap() (min(cpu-1, 8)) apply so this caller is
-        # subject to the same 8-worker ceiling as every other process-pool
-        # caller -- the cap prevents OOM on high-core machines where each
-        # spawn worker is a full interpreter. chunksize=100 stays a per-call
-        # kwarg (chunksize is workload-specific; the layer has no default).
-        results = process_map_tqdm(
-            self._process_patch,
+        # The label volume for benchmark datasets is small (9 slices x
+        # ~1024x1024 = ~9MB for uint8 masks), so materializing it in full
+        # is not a memory concern. For very large volumes the disk cache
+        # (sidecar JSON) ensures this only runs once per dataset.
+        label_volume = self.label_data.compute()
+        results = []
+        for idx in tqdm(
             range(dataset_length),
             unit="patches",
             desc="Validating patches",
             position=0,
             leave=True,
-            chunksize=100,
-        )
+        ):
+            # idx is a GRID patch index (0..grid_product-1) in both
+            # rotate_patches modes. get_patch_coordinates expects a grid
+            # index, not a dataset index (the old _process_patch went
+            # through __getitem__→load_patch which did divmod(idx, 4) to
+            # convert the dataset index back to a grid index; here we
+            # pass the grid index directly).
+            z1, z2, y1, y2, x1, x2 = self.get_patch_coordinates(idx)
+            patch = label_volume[z1:z2, y1:y2, x1:x2]
+            results.append(bool(patch.max() > 0))
 
         # ``results`` is one validity bit per GRID patch (length
         # ``dataset_length`` == grid_product), so ``valid_grid`` and the

@@ -16,41 +16,11 @@ each test process is independent — no shared file, no runtime coupling.
 """
 
 import contextlib
-from itertools import starmap
 from pathlib import Path
 
+import dask.array as da
 import numpy as np
 import pytest
-
-
-@pytest.fixture(autouse=True)
-def _fast_process_map(request, monkeypatch):
-    """Replace ``process_map_tqdm`` with a fast serial version for tests that
-    don't need the real forked-worker path.
-
-    ``OmeZarrLabelDataSet.get_valid_indices`` calls
-    ``liom_toolkit.utils.concurrency.process_map_tqdm`` (which wraps
-    ``tqdm.contrib.concurrent.process_map``), which spawns a process pool. On
-    spawn-start-method runtimes (macOS), each worker re-imports
-    torch/dask/zarr (~2.7s startup per pool invocation), dominating test
-    runtime for the cache/indexing tests that don't care about fork semantics.
-
-    This fixture replaces ``process_map_tqdm`` with a serial list comprehension
-    that produces identical results (the validity bits are deterministic)
-    without spawning workers. Tests that MUST exercise the real forked-worker
-    path (the D-11 fork-mutation regression) opt out via
-    ``@pytest.mark.real_process_map``.
-    """
-    if request.node.get_closest_marker("real_process_map"):
-        yield
-        return
-    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
-
-    def fast_pm(fn, *iterables, **kwargs):
-        return list(starmap(fn, zip(*iterables, strict=False)))
-
-    monkeypatch.setattr(dataset_mod, "process_map_tqdm", fast_pm)
-    yield
 
 
 def _make_tiny_zarr(tmp_path) -> str:
@@ -183,7 +153,9 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
     assert np.array_equal(arrs_group0[0], unrotated_grid0)
     for k in (1, 2, 3):
         expected = np.rot90(unrotated_grid0, k=k, axes=(-2, -1))
-        assert np.array_equal(arrs_group0[k], expected), f"idx={k} should be rot90 k={k} of grid patch 0"
+        assert np.array_equal(arrs_group0[k], expected), (
+            f"idx={k} should be rot90 k={k} of grid patch 0"
+        )
     # The 4 rotated copies are mutually distinct (augmentation is not redundant).
     assert not np.array_equal(arrs_group0[0], arrs_group0[1])
     assert not np.array_equal(arrs_group0[1], arrs_group0[2])
@@ -200,31 +172,16 @@ def test_ome_zarr_dataset_rotation_characterization(tmp_path):
     assert np.array_equal(arr_at_5, np.rot90(unrotated_grid1, k=1, axes=(-2, -1)))
 
 
-@pytest.mark.real_process_map
-def test_get_valid_indices_fork_mutation(tmp_path):
-    """Regression for the D-11 fork-mutation bug in ``get_valid_indices``.
+def test_get_valid_indices_in_memory_validation(tmp_path):
+    """Verify the in-memory validation produces the correct valid index set.
 
-    ``get_valid_indices`` runs ``process_patch`` under
-    ``tqdm.contrib.concurrent.process_map`` (forked workers). The current
-    (pre-fix) ``process_patch`` appends valid indices to a shared list passed
-    as a third positional arg — but forked workers' list mutations do NOT
-    propagate back to the parent, so ``valid_indices`` ends up empty or
-    partial. The fix rewrites ``process_patch`` to ``return
-    bool(self.check_patch(patch))`` and builds ``valid_indices`` from the
-    ``process_map`` return list.
-
-    This test exercises the REAL ``process_map`` fork path (no monkeypatch of
-    ``process_map`` — that would hide the bug per RESEARCH MP warning) and
-    asserts the FULL expected valid index set is returned. With
-    ``rotate_patches=False`` and ``empty_percentage=0.0`` the result is purely
-    the valid set (no rotation x4 expansion, no empty-patch sampling), so it
-    equals the single-process expected set computed by re-running
+    The validation now loads the label volume into memory once and checks
+    each grid patch with numpy slicing (replacing the previous process-pool
+    approach). This test asserts the FULL expected valid index set is
+    returned. With ``rotate_patches=False`` and ``empty_percentage=0.0`` the
+    result is purely the valid set (no rotation x4 expansion, no empty-patch
+    sampling), so it equals the expected set computed by re-running
     ``check_patch`` over ``range(dataset_length)``.
-
-    RED on the current (pre-fix) code: ``valid_indices`` is empty because the
-    forked appends are lost, while the expected set is non-empty (the label's
-    8x8x8 region makes some patches valid) — the ``len > 0`` guard ensures
-    the test does not pass trivially when both sides are empty.
     """
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
@@ -263,7 +220,7 @@ def test_get_valid_indices_fork_mutation(tmp_path):
     expected = [i for i in range(dataset_length) if ds.check_patch(ds[patch_index(i)][1])]
 
     assert len(ds.valid_indices) > 0, (
-        "valid_indices is empty — forked-worker list mutations were lost (D-11)"
+        "valid_indices is empty — in-memory validation produced no valid patches"
     )
     assert np.array_equal(np.sort(np.asarray(ds.valid_indices)), np.sort(np.asarray(expected)))
 
@@ -344,11 +301,10 @@ def _cache_sidecar_path(zarr_path: str) -> str:
 
 def test_valid_indices_cache_hit(tmp_path, monkeypatch):
     """A second dataset instance with the same params loads from the cache
-    sidecar -- process_map is NOT called (call_count == 0 on the second
-    instance)."""
+    sidecar -- the in-memory validation (label_data.compute()) is NOT called
+    (call_count == 0 on the second instance)."""
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
-    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
 
     zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
@@ -369,15 +325,17 @@ def test_valid_indices_cache_hit(tmp_path, monkeypatch):
     sidecar = _cache_sidecar_path(zarr_path)
     assert Path(sidecar).exists(), "first instance did not write the cache sidecar"
 
-    # Track process_map calls for the second instance.
+    # Track label_data.compute() calls for the second instance. The cache
+    # hit path returns before reaching the compute() call, so call_count
+    # stays 0.
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map_tqdm
+    real_compute = da.Array.compute
 
-    def tracking_process_map(*args, **kwargs):
+    def tracking_compute(self, *args, **kwargs):
         call_count["n"] += 1
-        return real_process_map(*args, **kwargs)
+        return real_compute(self, *args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
+    monkeypatch.setattr(da.Array, "compute", tracking_compute)
 
     ds2 = OmeZarrLabelDataSet(
         zarr_path,
@@ -390,16 +348,18 @@ def test_valid_indices_cache_hit(tmp_path, monkeypatch):
         filter_empty=True,
         empty_percentage=0.0,
     )
-    assert call_count["n"] == 0, "process_map was called on a cache hit (should be skipped)"
+    assert call_count["n"] == 0, (
+        "label_data.compute() was called on a cache hit (should be skipped)"
+    )
     assert np.array_equal(np.sort(np.asarray(ds2.valid_indices)), expected)
 
 
 def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
-    """Same dataset but a different patch_size -> cache miss -> process_map IS
-    called (call_count >= 1) and the result reflects the new patch_size."""
+    """Same dataset but a different patch_size -> cache miss -> the in-memory
+    validation (label_data.compute()) IS called (call_count >= 1) and the
+    result reflects the new patch_size."""
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
-    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
 
     zarr_path = _make_tiny_labeled_zarr(tmp_path, label_name="training")
@@ -418,15 +378,17 @@ def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
     )
     first_indices = np.sort(np.asarray(ds1.valid_indices))
 
-    # Track process_map calls for the second instance with a different patch_size.
+    # Track label_data.compute() calls for the second instance with a
+    # different patch_size. A cache miss means the validation path runs,
+    # which calls label_data.compute() to materialize the full label volume.
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map_tqdm
+    real_compute = da.Array.compute
 
-    def tracking_process_map(*args, **kwargs):
+    def tracking_compute(self, *args, **kwargs):
         call_count["n"] += 1
-        return real_process_map(*args, **kwargs)
+        return real_compute(self, *args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
+    monkeypatch.setattr(da.Array, "compute", tracking_compute)
 
     ds2 = OmeZarrLabelDataSet(
         zarr_path,
@@ -439,7 +401,7 @@ def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
         filter_empty=True,
         empty_percentage=0.0,
     )
-    assert call_count["n"] >= 1, "process_map was NOT called on a cache miss"
+    assert call_count["n"] >= 1, "label_data.compute() was NOT called on a cache miss"
     # The valid set for a 4x4x4 patch grid differs from the 8x8x8 grid.
     second_indices = np.sort(np.asarray(ds2.valid_indices))
     assert not np.array_equal(second_indices, first_indices), (
@@ -449,10 +411,9 @@ def test_valid_indices_cache_miss_different_params(tmp_path, monkeypatch):
 
 def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch):
     """Same params but the zarr array content/metadata changed (different
-    shape) -> cache miss -> re-validation runs (process_map called)."""
+    shape) -> cache miss -> re-validation runs (label_data.compute() called)."""
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")  # dataset.py -> vseg/utils.py -> sklearn.metrics
-    import liom_toolkit.segmentation.vseg.dataset as dataset_mod
     from liom_toolkit.conversion.conversion import save_label_to_zarr, save_zarr
     from liom_toolkit.segmentation.vseg.dataset import OmeZarrLabelDataSet
     from liom_toolkit.utils.io import generate_label_color_dict_mask
@@ -504,13 +465,13 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
     )
 
     call_count = {"n": 0}
-    real_process_map = dataset_mod.process_map_tqdm
+    real_compute = da.Array.compute
 
-    def tracking_process_map(*args, **kwargs):
+    def tracking_compute(self, *args, **kwargs):
         call_count["n"] += 1
-        return real_process_map(*args, **kwargs)
+        return real_compute(self, *args, **kwargs)
 
-    monkeypatch.setattr(dataset_mod, "process_map_tqdm", tracking_process_map)
+    monkeypatch.setattr(da.Array, "compute", tracking_compute)
 
     _ds2 = OmeZarrLabelDataSet(
         zarr_path,
@@ -524,7 +485,7 @@ def test_valid_indices_cache_invalidates_on_dataset_change(tmp_path, monkeypatch
         empty_percentage=0.0,
     )
     assert call_count["n"] >= 1, (
-        "process_map was NOT called after dataset metadata change (stale cache)"
+        "label_data.compute() was NOT called after dataset metadata change (stale cache)"
     )
 
 
