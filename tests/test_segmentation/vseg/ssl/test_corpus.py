@@ -194,3 +194,174 @@ def test_ssl_corpus_rejects_invalid_plane_mix(tmp_path):
     paths = [str(tmp_path / "brain0.zarr")]
     with pytest.raises(ValueError):
         SSLCorpus(volume_paths=paths, axis=1, plane_mix=(0.5, 0.5, 0.5))
+
+
+# ---------------------------------------------------------------------------
+# Plan 03 expansion: multi-plane 50/25/25 + 2-channel + brain-centered+
+# periphery + light aug + z-score (NOT CLAHE). These tests exercise the
+# expanded SSLCorpus.__getitem__ sampler that the tracer-tiny constructor
+# (Plan 01) left as a stub.
+# ---------------------------------------------------------------------------
+
+
+def test_ssl_corpus_multi_plane_mix_within_tolerance(synthetic_ome_zarr):
+    """The multi-plane sampler yields the 50/25/25 coronal/sagittal/axial mix (D-03).
+
+    Over a large sample (N=1000), the per-axis proportions drawn by the
+    sampler must be within +/-0.05 of (0.5, 0.25, 0.25). The sampler draws
+    each sample's plane axis from a categorical distribution weighted by
+    ``plane_mix``; a fresh seeded RNG makes the draw reproducible.
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(0.5, 0.25, 0.25),
+    )
+    rng = np.random.default_rng(42)
+    counts = {1: 0, 2: 0, 3: 0}
+    n = 1000
+    for _ in range(n):
+        axis = corpus._sample_axis(rng)
+        counts[axis] += 1
+    props = {ax: counts[ax] / n for ax in (1, 2, 3)}
+    assert abs(props[1] - 0.5) < 0.05, f"coronal prop {props[1]:.3f} not within 0.05 of 0.5"
+    assert abs(props[2] - 0.25) < 0.05, f"sagittal prop {props[2]:.3f} not within 0.05 of 0.25"
+    assert abs(props[3] - 0.25) < 0.05, f"axial prop {props[3]:.3f} not within 0.05 of 0.25"
+
+
+def test_ssl_corpus_getitem_preserves_both_channels(synthetic_ome_zarr):
+    """The sampler output is (2, H, W) -- both channels preserved (D-03b).
+
+    The channel dim is NOT indexed away (the analog's ``self.data[channel]``
+    channel-drop is wrong here). Both 555nm + 647nm channels are kept so the
+    encoder learns cross-channel vessel structure.
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),  # coronal-only for a deterministic shape
+    )
+    rng = np.random.default_rng(0)
+    sl = corpus[0]
+    assert sl.ndim == 3, f"sampler output ndim {sl.ndim} != 3 (channel dim must be preserved)"
+    assert sl.shape[0] == 2, f"channel dim must be 2 (D-03b), got C={sl.shape[0]}"
+    # Coronal slice of a (2, 8, 16, 16) volume is (2, 16, 16).
+    assert sl.shape[1] == 16 and sl.shape[2] == 16, f"coronal spatial shape {sl.shape[1:]}"
+
+
+def test_ssl_corpus_getitem_includes_background_periphery(synthetic_ome_zarr):
+    """Brain-centered sampling includes background voxels (periphery NOT cropped, D-03c).
+
+    The sampler picks a slice index near the brain center but with a periphery
+    margin so batches contain both vessel-bearing tissue AND truly empty
+    background. The ship gate's FPR-on-empty metric rewards learning what
+    non-vessel looks like; cropping to the brain mask would suppress exactly
+    that signal. The synthetic_ome_zarr fixture has a centered sphere with
+    empty corners, so a brain-centered+periphery sample must contain both
+    non-zero (tissue) AND zero (background) voxels.
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),  # coronal-only for determinism
+    )
+    rng = np.random.default_rng(1)
+    # Sample several slices and confirm at least one has both tissue + bg.
+    found_both = False
+    for idx in range(8):
+        sl = corpus[idx]
+        n_nonzero = int(np.count_nonzero(sl))
+        n_zero = int(sl.size - n_nonzero)
+        if n_nonzero > 0 and n_zero > 0:
+            found_both = True
+            break
+    assert found_both, (
+        "brain-centered+periphery sampling must include both tissue (non-zero) "
+        "AND background (zero) voxels -- the periphery is NOT cropped (D-03c)"
+    )
+
+
+def test_ssl_corpus_getitem_light_aug_shape_and_finite(synthetic_ome_zarr):
+    """Light aug (flips + 90deg rotations + mild jitter) preserves shape and stays finite (D-03e).
+
+    Augmentation is limited to random flips + 90deg rotations + mild intensity
+    jitter -- NO elastic warp, NO heavy intensity remap (those conflict with
+    the reconstruction target). The augmented sample has the same shape as
+    the input and finite values (no NaN/inf from the jitter).
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),
+        augment=True,
+    )
+    rng = np.random.default_rng(2)
+    sl = corpus[0]
+    assert sl.ndim == 3 and sl.shape[0] == 2, "aug must preserve (C, H, W) shape"
+    assert np.all(np.isfinite(sl)), "augmented sample must have finite values (no NaN/inf)"
+
+
+def test_ssl_corpus_getitem_z_scores_per_channel(synthetic_ome_zarr):
+    """The expanded sampler z-scores per-channel (D-03d, NOT CLAHE).
+
+    Each channel is normalized independently (mean ~0, std ~1). CLAHE's
+    non-linear remapping would destroy the intensity relationships the
+    inpainting reconstruction loss relies on; the sampler must NOT apply
+    CLAHE.
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),
+        augment=False,  # disable aug so the z-score stats are clean
+    )
+    sl = corpus[0]
+    for c in range(2):
+        mean = float(sl[c].mean())
+        std = float(sl[c].std())
+        assert abs(mean) < 0.1, f"channel {c} mean {mean:.3f} not ~0 (z-scored)"
+        assert 0.5 < std < 2.0, f"channel {c} std {std:.3f} not ~1 (z-scored)"
+
+
+def test_ssl_corpus_getitem_rejects_out_of_range_index(synthetic_ome_zarr):
+    """SSLCorpus.__getitem__ raises ValueError on an out-of-range index.
+
+    AGENTS section 2 -- explicit failure with the offending value, never a
+    silent IndexError leak.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),
+    )
+    with pytest.raises(ValueError):
+        corpus[99]  # only 8 coronal slices in the synthetic volume
+
