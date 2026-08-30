@@ -24,7 +24,7 @@ The three remaining contenders:
   (:func:`~liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge.nnunet_predict`).
   nnU-Net runs in a separate venv (torch-clobbering isolation); the
   contender converts the train slices to nnU-Net raw format via
-  :func:`~liom_toolkit.scripts.prepare_nnunet_dataset.prepare_nnunet_2d`,
+  :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`,
   shells out to nnU-Net, and reads the predicted PNGs back as boolean masks.
 """
 
@@ -545,7 +545,7 @@ class NnUnetContender:
     — the liom-toolkit process never imports ``nnunetv2``.
 
     The contender converts the train slices to nnU-Net v2 raw format via
-    :func:`~liom_toolkit.scripts.prepare_nnunet_dataset.prepare_nnunet_2d`,
+    :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`,
     invokes ``nnUNetv2_predict`` (subprocess bridge), and reads the predicted
     PNGs back as boolean masks (nnU-Net writes 0/255 uint8 PNGs; binarizing
     to bool is required so the eval-metric matrix receives

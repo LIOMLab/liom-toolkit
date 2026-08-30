@@ -135,7 +135,7 @@ liom-align-annotations = "liom_toolkit.scripts.liom_align_annotations:main"
 liom-build-template = "liom_toolkit.scripts.liom_build_template:main"
 liom-compute-slice-metrics = "liom_toolkit.scripts.liom_compute_slice_metrics:main"
 liom-train-model = "liom_toolkit.scripts.liom_train_model:main"
-liom-prepare-nnunet-dataset = "liom_toolkit.scripts.prepare_nnunet_dataset:main"
+liom-prepare-nnunet-dataset = "liom_toolkit.scripts.liom_prepare_nnunet_dataset:main"
 
 [project.urls]
 Homepage = "https://github.com/LIOMLab/liom-toolkit"

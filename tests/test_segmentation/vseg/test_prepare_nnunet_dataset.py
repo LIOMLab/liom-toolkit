@@ -67,7 +67,7 @@ def test_prepare_nnunet_2d_round_trip(tmp_path) -> None:
     has N files, (c) dataset.json has the nnU-Net v2 schema keys with correct
     values, (d) a written image round-trips (data equality with the input).
     """
-    from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
     src = tmp_path / "src"
     image_paths, label_paths, images, _labels = _write_synthetic_slices(src, n=3)
@@ -119,7 +119,7 @@ def test_prepare_nnunet_2d_raises_on_nonexistent_input(tmp_path) -> None:
     No silent wrong-data fallback (AGENTS §2): the offending path is in the
     message so the failure is actionable.
     """
-    from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
     nonexistent = str(tmp_path / "ghost.png")
     with pytest.raises(ValueError, match="input image does not exist"):
@@ -133,7 +133,7 @@ def test_prepare_nnunet_2d_raises_on_nonexistent_input(tmp_path) -> None:
 
 def test_prepare_nnunet_2d_raises_on_nonexistent_label(tmp_path) -> None:
     """prepare_nnunet_2d raises ValueError when a label path does not exist."""
-    from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
     src = tmp_path / "src"
     src.mkdir()
@@ -150,7 +150,7 @@ def test_prepare_nnunet_2d_raises_on_nonexistent_label(tmp_path) -> None:
 
 def test_prepare_nnunet_2d_raises_on_length_mismatch(tmp_path) -> None:
     """prepare_nnunet_2d raises ValueError when image/label counts differ."""
-    from liom_toolkit.scripts.prepare_nnunet_dataset import prepare_nnunet_2d
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
     src = tmp_path / "src"
     image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
@@ -175,7 +175,7 @@ def test_prepare_nnunet_cli_creates_output(tmp_path, monkeypatch) -> None:
     """
     import sys
 
-    from liom_toolkit.scripts.prepare_nnunet_dataset import main
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import main
 
     src = tmp_path / "src"
     _write_synthetic_slices(src, n=2)
@@ -204,7 +204,7 @@ def test_prepare_nnunet_cli_errors_on_nonexistent_input(tmp_path, monkeypatch, c
     """
     import sys
 
-    from liom_toolkit.scripts.prepare_nnunet_dataset import main
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import main
 
     nonexistent = str(tmp_path / "ghost_dir")
     monkeypatch.setattr(
@@ -231,5 +231,5 @@ def test_liom_prepare_nnunet_dataset_console_script_registered() -> None:
         "liom-prepare-nnunet-dataset must be registered in [project.scripts]"
     )
     assert scripts["liom-prepare-nnunet-dataset"] == (
-        "liom_toolkit.scripts.prepare_nnunet_dataset:main"
+        "liom_toolkit.scripts.liom_prepare_nnunet_dataset:main"
     )
