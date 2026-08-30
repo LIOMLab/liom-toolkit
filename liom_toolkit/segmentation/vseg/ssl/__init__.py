@@ -10,8 +10,8 @@ import predict_one``) never pulls torch / MONAI / nnunetv2.
 The torch / MONAI / nnunetv2 lazy-import guards live INSIDE each module of
 this subpackage (per-module ``try/except ImportError: raise
 ImportError("install liom-toolkit[ai,benchmark]")``), NOT in this barrel.
-The barrel re-exports only the high-level entry points as later plans add
-them; for now only the corpus builder is wired.
+The barrel re-exports only the high-level entry points (the corpus builder,
+the pretraining loop, and the warm-start helper).
 """
 
 from __future__ import annotations
@@ -20,14 +20,26 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .corpus import SSLCorpus, extract_plane_slice, mip_qc, z_score_per_channel
+    from .pretrain import build_pretrain_network, masked_inpainting_pretrain
+    from .warmstart import load_pretrained_checkpoint, validate_nnunet_env, warm_start
 
-__all__ = ["SSLCorpus", "extract_plane_slice", "mip_qc", "z_score_per_channel"]
+__all__ = [
+    "SSLCorpus",
+    "build_pretrain_network",
+    "extract_plane_slice",
+    "load_pretrained_checkpoint",
+    "masked_inpainting_pretrain",
+    "mip_qc",
+    "validate_nnunet_env",
+    "warm_start",
+    "z_score_per_channel",
+]
 
 
 def __getattr__(name: str) -> Any:
-    """Lazy-import the corpus symbols so the barrel imports without the [ai] extra.
+    """Lazy-import the SSL symbols so the barrel imports without the [ai] extra.
 
-    The corpus module's top-level torch import guard raises
+    Each module's top-level torch import guard raises
     ``ImportError("install liom-toolkit[ai,benchmark]")`` when torch is
     absent; deferring the import to attribute access keeps that honest signal
     at call time rather than at ``import liom_toolkit.segmentation.vseg.ssl``
@@ -36,16 +48,28 @@ def __getattr__(name: str) -> Any:
     Returns
     -------
     Any
-        The requested corpus symbol (``SSLCorpus``, ``extract_plane_slice``,
-        ``mip_qc``, or ``z_score_per_channel``).
+        The requested SSL symbol.
 
     Raises
     ------
     AttributeError
-        If ``name`` is not a curated corpus symbol.
+        If ``name`` is not a curated SSL symbol.
     """
-    if name in {"SSLCorpus", "extract_plane_slice", "mip_qc", "z_score_per_channel"}:
+    if name in {
+        "SSLCorpus",
+        "extract_plane_slice",
+        "mip_qc",
+        "z_score_per_channel",
+    }:
         from . import corpus
 
         return getattr(corpus, name)
+    if name in {"build_pretrain_network", "masked_inpainting_pretrain"}:
+        from . import pretrain
+
+        return getattr(pretrain, name)
+    if name in {"load_pretrained_checkpoint", "validate_nnunet_env", "warm_start"}:
+        from . import warmstart
+
+        return getattr(warmstart, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
