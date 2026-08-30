@@ -136,12 +136,37 @@ def build_pretrain_network(
         arch = plans
     elif "configurations" in plans and configuration in plans["configurations"]:
         arch = plans["configurations"][configuration]["architecture"]
+    elif "network_class_name" in plans and "arch_kwargs" in plans:
+        # A real nnU-Net v2 architecture block passed bare (network_class_name
+        # is the nnU-Net v2 plans.json key; the tracer fixture uses
+        # arch_class_name -- handle both).
+        arch = plans
     else:
         raise ValueError(
             f"plans must be either a full nnU-Net plans dict with a "
             f"{configuration!r} configuration or a bare architecture block "
-            f"with arch_class_name/arch_kwargs keys; got keys {sorted(plans.keys())}"
+            f"with arch_class_name/arch_kwargs (tracer) or "
+            f"network_class_name/arch_kwargs (real nnU-Net v2 plans) keys; "
+            f"got keys {sorted(plans.keys())}"
         )
+
+    # nnU-Net v2's real plans.json stores the network class name under
+    # ``network_class_name`` and the import-required kwargs under
+    # ``_kw_requires_import``; the tracer fixture uses ``arch_class_name`` /
+    # ``arch_kwargs_req_import`` (the literal arg names get_network_from_plans
+    # takes). Accept both so the same builder serves the tracer and the real
+    # plans.json (the D-01a key-match guarantee holds for either form -- the
+    # state_dict keys are architecture-determined, not key-name-determined).
+    arch_class_name = arch.get("arch_class_name") or arch.get("network_class_name")
+    if arch_class_name is None:
+        raise ValueError(
+            f"architecture block must carry the network class name under "
+            f"'arch_class_name' (tracer) or 'network_class_name' (real nnU-Net "
+            f"v2 plans); got keys {sorted(arch.keys())}"
+        )
+    arch_kwargs_req_import = arch.get("arch_kwargs_req_import")
+    if arch_kwargs_req_import is None:
+        arch_kwargs_req_import = arch.get("_kw_requires_import", [])
 
     channel_names = dataset_json.get("channel_names")
     if channel_names is None:
@@ -158,9 +183,9 @@ def build_pretrain_network(
     input_channels = len(channel_names)
 
     network = get_network_from_plans(
-        arch_class_name=arch["arch_class_name"],
+        arch_class_name=arch_class_name,
         arch_kwargs=arch["arch_kwargs"],
-        arch_kwargs_req_import=arch["arch_kwargs_req_import"],
+        arch_kwargs_req_import=arch_kwargs_req_import,
         input_channels=input_channels,
         output_channels=int(num_classes),
         allow_init=allow_init,
