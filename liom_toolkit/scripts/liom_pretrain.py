@@ -276,7 +276,10 @@ def main() -> None:
 
     def _sample_batch() -> torch.Tensor:
         patches = [corpus.get_patch(patch_size) for _ in range(args.batch_size)]
-        return torch.stack([torch.as_tensor(p) for p in patches]).to(device)
+        # Cast to float32 -- some corpus volumes are float64 (e.g. S30.ome.zarr)
+        # but the network weights are float32; a float64 input would raise
+        # "Input type (double) and bias type (float) should be the same".
+        return torch.stack([torch.as_tensor(p, dtype=torch.float32) for p in patches]).to(device)
 
     batches = [_sample_batch() for _ in range(args.steps_per_epoch)]
 
