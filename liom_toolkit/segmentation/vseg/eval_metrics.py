@@ -31,7 +31,6 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import binary_dilation, distance_transform_edt, label
 from skimage.morphology import skeletonize
-from skimage.util import view_as_windows
 
 from liom_toolkit.segmentation.vseg.cldice import cl_dice, cl_score
 
@@ -281,8 +280,9 @@ def boundary_artifact_regression(
     pred_c = predicted[:cropped_h, :cropped_w]
     gt_c = gt[:cropped_h, :cropped_w]
 
-    # Validate the non-overlapping patch grid partitioning.
-    view_as_windows(pred_c, patch_size, step=patch_size)
+    # The ny/nx == 0 check above already validates the patch grid fits the
+    # image; no redundant view_as_windows call here (it would materialize a
+    # windowed view for no benefit).
 
     strip_width = max(1, min(ph, pw) // 8)
     ring = np.zeros(patch_size, dtype=bool)
