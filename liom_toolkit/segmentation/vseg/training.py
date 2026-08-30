@@ -557,7 +557,7 @@ def train_model(
     """
     try:
         import torch
-        from torch.utils.data import DataLoader, Subset, random_split
+        from torch.utils.data import DataLoader, random_split
 
         from .dataset import OmeZarrLabelDataSet
         from .loss import DiceBCELoss
@@ -667,19 +667,12 @@ def train_model(
             normalise_label=False,
         )
         train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
-
-        if filter_empty_patches:
-            # random_split returns Subset objects whose .indices are integers
-            # in 0..len(valid_indices)-1 (i.e. indices INTO the filtered
-            # dataset, since full_dataset.__len__ returns len(valid_indices)
-            # when filter_empty is set). OmeZarrLabelDataSet.__getitem__ now
-            # maps each filtered-dataset index through valid_indices to the
-            # underlying dataset index internally, so the Subset can use the
-            # split indices directly -- the previous pre-mapping here would
-            # now double-map (apply valid_indices twice) and yield wrong
-            # patches.
-            train_dataset = Subset(full_dataset, list(train_dataset.indices))
-            test_dataset = Subset(full_dataset, list(test_dataset.indices))
+        # No re-wrap of the Subset objects returned by random_split:
+        # OmeZarrLabelDataSet.__getitem__ maps each filtered-dataset index
+        # through valid_indices to the underlying dataset index internally,
+        # so the Subset uses the split indices directly. A pre-mapping
+        # re-wrap here would double-map (apply valid_indices twice) and
+        # yield wrong patches.
 
         # Pin memory only when the dataset yields CPU tensors. ``OmeZarrLabelDataSet``
         # creates tensors directly on ``dev`` (its ``__getitem__`` does
