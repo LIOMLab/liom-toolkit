@@ -175,7 +175,7 @@ class Improved2DContender:
             patch_size=patch_size,
             ddp=ddp,
             normalisation_value=255,
-            num_workers=4,
+            num_workers=0,
         )
 
         model = VsegModel(pretrained=False, device=dev)
