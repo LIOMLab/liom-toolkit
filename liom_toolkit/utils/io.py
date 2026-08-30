@@ -680,10 +680,22 @@ def load_omero_channels(zarr_file: str) -> list[dict[str, Any]] | None:
         The ``omero.channels`` list of channel dicts, or ``None`` when
         the file has no ``ome`` / ``omero`` / ``omero.channels`` metadata.
     """
-    root = zarr.open(zarr_file, mode="r")
-    ome = root.attrs.get("ome")
-    if not isinstance(ome, dict):
-        return None
+    # Dispatch on the store kind: a ``.zip``/``.ozx`` path must be opened
+    # via ``ZipStore`` (``zarr.open`` routes it to ``LocalStore`` -- a
+    # directory store -- and raises ``GroupNotFoundError``), mirroring
+    # ``load_zarr``. Use ``_group_ome_attrs`` for v0.4/v0.5 uniformity: a
+    # v0.4 store carries ``omero`` at the group root (no ``ome`` wrapper),
+    # which the previous ``root.attrs.get("ome")`` read silently dropped.
+    if _is_zip_zarr(zarr_file):
+        store = ZipStore(zarr_file, mode="r")
+        try:
+            root = zarr.open_group(store=store, mode="r")
+            ome = _group_ome_attrs(root)
+        finally:
+            store.close()
+    else:
+        root = zarr.open_group(zarr_file, mode="r")
+        ome = _group_ome_attrs(root)
     omero = ome.get("omero")
     if not isinstance(omero, dict):
         return None

@@ -37,6 +37,7 @@ from liom_toolkit.utils.io import (
     generate_axes_dict,
     generate_label_color_dict_mask,
     load_node_by_name,
+    load_omero_channels,
     load_zarr,
     save_label_to_zarr,
     upgrade_ngff_v04_to_v05,
@@ -914,3 +915,55 @@ def test_load_zarr_reads_v04_zip_with_label(tmp_path):
     ct = mask_node.metadata["coordinateTransformations"]
     assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
     assert ct[1][0]["scale"] == [6.5, 13.0, 13.0]
+
+
+def test_load_omero_channels_reads_zip(tmp_path):
+    """load_omero_channels reads omero channels from a ``.zip`` OME-Zarr.
+
+    Regression guard: load_omero_channels previously opened the store via
+    ``zarr.open``, which routes a ``.zip`` path to ``LocalStore`` (a
+    directory store) and raises ``GroupNotFoundError`` -- it did not use
+    the ``ZipStore`` dispatch that ``load_zarr`` uses. So a caller who
+    finalised an OME-Zarr to ``.zip`` and then called
+    ``load_omero_channels(zip_path)`` got a hard failure instead of the
+    channel metadata. The fix dispatches on ``_is_zip_zarr`` and opens the
+    zip via ``ZipStore``.
+    """
+    zdir = str(tmp_path / "omero.ome.zarr")
+    arr = np.zeros((8, 8, 8), dtype=np.uint16)
+    g = zarr.open_group(zdir, mode="w")
+    g.create_array("0", data=arr)
+    omero_channels = [
+        {"label": "GFP", "color": "00FF00", "active": True, "wavelength": 488},
+    ]
+    g.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [
+            {
+                "axes": [
+                    {"name": "z", "type": "space", "unit": "micrometer"},
+                    {"name": "y", "type": "space", "unit": "micrometer"},
+                    {"name": "x", "type": "space", "unit": "micrometer"},
+                ],
+                "datasets": [
+                    {
+                        "coordinateTransformations": [
+                            {"type": "scale", "scale": [6.5, 6.5, 6.5]}
+                        ],
+                        "path": "0",
+                    }
+                ],
+                "name": "/",
+            }
+        ],
+        "omero": {"channels": omero_channels},
+    }
+
+    zip_path = finalise_zarr_to_zip(zdir)
+    assert not Path(zdir).exists()
+
+    channels = load_omero_channels(zip_path)
+    assert channels is not None
+    assert len(channels) == 1
+    assert channels[0]["label"] == "GFP"
+    assert channels[0]["color"] == "00FF00"
