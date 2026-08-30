@@ -272,13 +272,12 @@ def nnunet_train(
     py = _nnunet_python(nnunet_venv_python)
     env = _nnunet_env(py)
     train_script = _nnunet_console_script(py, "nnUNetv2_train")
+    # nnUNetv2_train uses POSITIONAL args: dataset_name_or_id configuration fold
+    # (not -d/-c/-f flags like predict and plan_and_preprocess do).
     cmd = [
         train_script,
-        "-d",
         str(dataset_id),
-        "-c",
         configuration,
-        "-f",
         str(fold),
     ]
     proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
