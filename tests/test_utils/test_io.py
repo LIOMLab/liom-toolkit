@@ -968,3 +968,49 @@ def test_load_omero_channels_reads_zip(tmp_path):
     assert len(channels) == 1
     assert channels[0]["label"] == "GFP"
     assert channels[0]["color"] == "00FF00"
+
+
+def test_load_zarr_zip_label_without_multiscales_raises(tmp_path):
+    """A label group carrying ``image-label`` but no ``multiscales`` raises
+    ValueError with the label name, not a bare KeyError/IndexError.
+
+    A malformed but on-disk-real store (e.g. a label group whose
+    multiscales metadata was stripped or never written) must fail
+    explicitly and actionable (AGENTS.md §2: no silent wrong-data
+    fallback, and assert is not validation) -- a raw ``KeyError:
+    'multiscales'`` with no file context is not actionable.
+    """
+    zdir = str(tmp_path / "bad_label.ome.zarr")
+    arr = np.zeros((8, 8, 8), dtype=np.uint16)
+    g = zarr.open_group(zdir, mode="w")
+    g.create_array("0", data=arr)
+    g.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [
+            {
+                "axes": [
+                    {"name": "z", "type": "space", "unit": "micrometer"},
+                    {"name": "y", "type": "space", "unit": "micrometer"},
+                    {"name": "x", "type": "space", "unit": "micrometer"},
+                ],
+                "datasets": [
+                    {
+                        "coordinateTransformations": [
+                            {"type": "scale", "scale": [6.5, 6.5, 6.5]}
+                        ],
+                        "path": "0",
+                    }
+                ],
+                "name": "/",
+            }
+        ],
+    }
+    # Malformed label group: image-label present, multiscales absent.
+    labels_group = g.require_group("labels")
+    labels_group.attrs["ome"] = {"version": "0.5", "labels": ["mask"]}
+    mask_group = labels_group.require_group("mask")
+    mask_group.attrs["ome"] = {"version": "0.5", "image-label": {"visible": True}}
+
+    zip_path = finalise_zarr_to_zip(zdir)
+    with pytest.raises(ValueError, match="label group 'mask' has no 'multiscales'"):
+        load_zarr(zip_path)

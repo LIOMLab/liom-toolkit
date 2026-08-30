@@ -510,6 +510,15 @@ def _build_label_node(root: zarr.Group, label_name: str) -> _ZipNode:
     """
     label_group = _group_subgroup(_group_subgroup(root, "labels"), label_name)
     ome = _group_ome_attrs(label_group)
+    # Validate explicitly (AGENTS.md §2: assert is not validation, and a bare
+    # KeyError/IndexError with no file context is not actionable). A label
+    # group carrying ``image-label`` but no ``multiscales`` is a malformed but
+    # on-disk-real store; surface the label name and the missing key.
+    if "multiscales" not in ome or not ome["multiscales"]:
+        raise ValueError(
+            f"label group '{label_name}' has no 'multiscales' metadata "
+            f"(ome keys present: {sorted(ome)})."
+        )
     multiscale: dict[str, Any] = ome["multiscales"][0]
     datasets: list[dict[str, Any]] = multiscale["datasets"]
     data: list[da.Array] = [_group_array(label_group, ds["path"]) for ds in datasets]
