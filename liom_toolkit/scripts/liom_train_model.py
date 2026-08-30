@@ -23,7 +23,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawTextHelpFormatter,
         parents=[build_common_parser()],
     )
-    p.add_argument("dataset_file", help="Path to the OME-Zarr dataset file")
+    p.add_argument(
+        "dataset_file",
+        help=(
+            "Path to the OME-Zarr dataset file. A '.zip'/'.ozx' extension "
+            "reads a single-file ZIP store; any other path reads a "
+            "directory store."
+        ),
+    )
     p.add_argument("node_name", help="Name of the node in the zarr file")
     p.add_argument(
         "--output-train",

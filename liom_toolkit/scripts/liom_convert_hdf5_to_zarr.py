@@ -25,7 +25,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         parents=[build_common_parser()],
     )
     p.add_argument("input_file", help="Full path to the input HDF5 file")
-    p.add_argument("output_file", help="Full path to the output Zarr file")
+    p.add_argument(
+        "output_file",
+        help=(
+            "Full path to the output Zarr file. A '.zip'/'.ozx' extension "
+            "writes a single-file ZIP store; any other path writes a "
+            "directory store."
+        ),
+    )
     p.add_argument(
         "--scales",
         type=float,

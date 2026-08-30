@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dask.array as da
 import imageio.v3 as iio
@@ -15,6 +17,8 @@ from numpy.typing import NDArray
 from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Node, Reader
+from zarr.core.buffer import default_buffer_prototype
+from zarr.storage import LocalStore, ZipStore
 
 from .utils import convert_to_png_for_saving
 
@@ -34,14 +38,361 @@ _DOWNSAMPLE_AXES = frozenset({"y", "x"})
 # clamps the count to what the downsampled axes can actually support.
 _DEFAULT_N_LEVELS = 4
 
+# File extensions that mark a single-file OME-Zarr stored in a ZIP archive
+# (NGFF RFC 9: ``.ozx`` is the spec-recommended extension; ``.zarr.zip`` is
+# the common pre-spec convention). ``load_zarr`` opens these via
+# ``zarr.storage.ZipStore`` because ``ome_zarr.io.parse_url`` cannot parse
+# ZIP paths -- it only routes ``http``/``s3`` to ``FsspecStore`` and
+# everything else to ``LocalStore`` (a directory), so a ``.zip`` path is
+# misread as a directory and returns ``None``.
+_ZIP_ZARR_EXTENSIONS = (".ozx", ".zarr.zip", ".zip")
+
+
+class _ZipNode(Node):
+    """A :class:`Node` populated from a ZIP-backed OME-Zarr store.
+
+    ``ome_zarr.reader.Reader`` builds nodes by running spec-matching
+    (``Multiscales``/``Label``/...) against a :class:`ZarrLocation`, but
+    ``ZarrLocation`` is coupled to fsspec-backed stores and rejects
+    ``ZipStore`` (``TypeError: not expecting ZipStore``; its ``subpath``
+    also calls ``store.fs.protocol`` which ``ZipStore`` lacks). For
+    ``.zip``/``.ozx`` paths we therefore open the store directly with
+    ``zarr.open_group(ZipStore(...))`` and build nodes from the ``ome``
+    metadata ourselves. This subclass sets the ``.data`` / ``.metadata``
+    attributes the toolkit consumes (see ``load_node_by_name``,
+    ``load_zarr_image_from_node``, ``load_zarr_transform_from_node``)
+    without running ``Node.__init__``'s ``ZarrLocation``-based matching.
+    """
+
+    def __init__(self, data: list[da.Array], metadata: dict[str, Any]) -> None:
+        # Bypass Node.__init__ (which requires a ZarrLocation + runs spec
+        # matching). Set only the attributes the toolkit reads.
+        # ``data`` is declared ``list[da.Array]``; dask's stubs type
+        # ``da.from_zarr`` as returning ``Array | _array_expr.Array``, but
+        # the expr backend does not materialise for zarr-backed arrays (the
+        # runtime type is always ``dask.array.core.Array``), so the cast in
+        # ``_group_array`` is sound.
+        self.data: list[da.Array] = data
+        self.metadata = metadata
+        self.specs: list[Any] = []
+        self.pre_nodes: list[Node] = []
+        self.post_nodes: list[Node] = []
+        self.root: Node | Reader | list[Any] = self
+        self.seen: list[Any] = []
+        # No ZarrLocation backs a zip node; the toolkit never reads .zarr.
+        self.zarr: Any = None
+
+
+def _is_zip_zarr(zarr_file: str) -> bool:
+    """Return True if ``zarr_file`` points at a single-file ZIP OME-Zarr.
+
+    Detected by extension (case-insensitive). A directory store ending in
+    ``.zarr`` (the normal case) returns False.
+
+    Returns
+    -------
+    bool
+        True if the path ends in ``.ozx``/``.zarr.zip``/``.zip``.
+    """
+    return Path(zarr_file).name.lower().endswith(_ZIP_ZARR_EXTENSIONS)
+
+
+def _group_ome_attrs(group: zarr.Group) -> dict[str, Any]:
+    """Return the ``ome`` metadata dict from a zarr group's attributes.
+
+    zarr group ``.attrs`` values are typed as a broad union (any JSON-ish
+    scalar/list/dict), so ``dict(group.attrs).get("ome", {})`` widens to
+    that union and defeats downstream narrowing (``ome["multiscales"]``
+    flags as not-subscriptable on the non-dict union members). This helper
+    centralises the ``isinstance(ome, dict)`` narrowing and returns a
+    concrete ``dict[str, Any]``.
+
+    Returns
+    -------
+    dict[str, Any]
+        The group's ``ome`` attribute, or an empty dict if absent / not a
+        dict (the caller decides whether a missing ``ome`` is an error).
+    """
+    ome = dict(group.attrs).get("ome")
+    return ome if isinstance(ome, dict) else {}
+
+
+def _group_subgroup(parent: zarr.Group, key: str) -> zarr.Group:
+    """Return a child group of ``parent`` by ``key``, narrowed to ``Group``.
+
+    ``zarr.Group.__getitem__`` is typed as returning ``Array | Group`` (a
+    child can be either), so ``parent[key]`` widens to that union and
+    defeats downstream ``Group``-only calls (``.attrs``, recursive
+    subscripting). For the OME-Zarr layout we traverse (``labels``,
+    ``labels/<name>``) the children are always groups, so a cast is safe
+    and keeps the type checker precise.
+
+    Returns
+    -------
+    zarr.Group
+        ``parent[key]`` narrowed to ``Group``.
+    """
+    return cast("zarr.Group", parent[key])
+
+
+def _group_array(group: zarr.Group, path: str) -> da.Array:
+    """Open a multiscale dataset array from ``group`` at ``path``.
+
+    ``da.from_zarr`` is typed as returning ``Array | _array_expr.Array``
+    (dask's new array-expr backend), but at runtime both behave as a
+    ``dask.array.Array`` for the toolkit's purposes (indexing, ``.shape``,
+    ``np.asarray``). The cast pins the declared type to ``da.Array`` so
+    ``_ZipNode.data: list[da.Array]`` type-checks.
+
+    Returns
+    -------
+    da.Array
+        A lazy dask array backed by the zarr dataset at ``group[path]``.
+    """
+    return cast("da.Array", da.from_zarr(group[path]))
+
+
+def _dir_to_zip_store(dir_path: str, zip_path: str) -> None:
+    """Pack a directory zarr store into a single-file ZipStore.
+
+    Copies every key (chunk + metadata file) from the source ``LocalStore``
+    into a new ``ZipStore`` via the async store API. This is the packing
+    step :func:`finalise_zarr_to_zip` runs — the ome_zarr writer uses
+    ``da.to_zarr`` whose delayed writes corrupt a ZipStore directly, so the
+    OME-Zarr is always written to a directory first and packed into a zip
+    as a finalisation step.
+    """
+    proto = default_buffer_prototype()
+    src = LocalStore(dir_path, read_only=True)
+    dest = ZipStore(zip_path, mode="w", compression=0)
+
+    async def _copy() -> None:
+        keys = [k async for k in src.list_prefix("")]
+        for k in keys:
+            buf = await src.get(k, prototype=proto)
+            if buf is not None:
+                await dest.set(k, buf)
+
+    asyncio.run(_copy())
+    dest.close()
+
+
+def _zip_store_to_dir(zip_path: str, dir_path: str) -> None:
+    """Unpack a single-file ZipStore zarr into a directory store.
+
+    The inverse of :func:`_dir_to_zip_store`. Used by the zip-aware
+    ``save_label_to_zarr`` / ``save_atlas_to_zarr`` to unpack an existing
+    image zip into a working directory so a label can be appended via the
+    proven directory write path, before repacking. The unpack happens at
+    save time only — ``load_zarr`` reads a zip directly via ``ZipStore``
+    with no unpack, so in-memory processing stays free of it.
+    """
+    proto = default_buffer_prototype()
+    src = ZipStore(zip_path, mode="r")
+    dest = LocalStore(dir_path, read_only=False)
+
+    async def _copy() -> None:
+        keys = [k async for k in src.list_prefix("")]
+        for k in keys:
+            buf = await src.get(k, prototype=proto)
+            if buf is not None:
+                await dest.set(k, buf)
+
+    asyncio.run(_copy())
+    src.close()
+
+
+def _zip_work_dir(zip_path: str) -> str:
+    """Derive a working directory path for a zip-format write.
+
+    The zip-aware writers produce the OME-Zarr in a directory first (the
+    ome_zarr writer's ``da.to_zarr`` delayed writes corrupt a ZipStore
+    directly), then pack the directory into the zip and remove it. This
+    helper picks a sibling directory path by stripping the zip extension
+    (so ``vol.ome.zarr.zip`` -> ``vol.ome.zarr``).
+
+    Returns
+    -------
+    str
+        The working directory path to write into before packing.
+    """
+    for ext in _ZIP_ZARR_EXTENSIONS:
+        if zip_path.lower().endswith(ext):
+            return zip_path[: -len(ext)]
+    return zip_path + ".dir"
+
+
+def finalise_zarr_to_zip(zarr_dir: str, remove_dir: bool = True) -> str:
+    """Pack a directory OME-Zarr store into a single-file ZipStore ``.zip``.
+
+    The directory store at ``zarr_dir`` is packed into ``zarr_dir + ".zip"``
+    (so ``vol.ome.zarr`` -> ``vol.ome.zarr.zip``). The resulting zip is
+    readable by :func:`load_zarr`, which auto-detects the ``.zip`` extension
+    and opens it via ``zarr.storage.ZipStore``.
+
+    This is the explicit "pack a finished directory" step — useful after the
+    streaming :class:`~liom_toolkit.utils.zarr_writer.OmeZarrWriter` writes
+    and ``finalize``s a directory store. The :func:`save_zarr` /
+    :func:`save_label_to_zarr` / :func:`save_atlas_to_zarr` writers also
+    accept a ``.zip`` path directly and handle the pack (and, for the label
+    writers, the unpack-then-repack append) themselves, so callers can pass
+    a ``.zip`` path end-to-end without calling this function explicitly.
+
+    Parameters
+    ----------
+    zarr_dir : str
+        Filesystem path to the directory OME-Zarr store to pack.
+    remove_dir : bool
+        If ``True`` (default), remove the source directory after the pack
+        succeeds so only the ``.zip`` file remains. If ``False``, the
+        directory is left in place (useful when the directory is still
+        needed, e.g. for further appends).
+
+    Returns
+    -------
+    str
+        The filesystem path of the written ``.zip`` file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``zarr_dir`` does not exist.
+    """
+    if not Path(zarr_dir).exists():
+        raise FileNotFoundError(f"zarr directory not found: {zarr_dir}")
+    zip_path = zarr_dir + ".zip"
+    if Path(zip_path).exists():
+        Path(zip_path).unlink()
+    _dir_to_zip_store(zarr_dir, zip_path)
+    if remove_dir:
+        shutil.rmtree(zarr_dir)
+    return zip_path
+
+
+def _build_multiscale_node(group: zarr.Group, multiscale: dict[str, Any]) -> _ZipNode:
+    """Build a ``_ZipNode`` from one ``ome.multiscales`` entry.
+
+    ``multiscale`` is a dict with ``axes``, ``datasets`` (each carrying a
+    ``path`` into ``group`` and a ``coordinateTransformations`` list), and
+    an optional ``name`` (defaults to ``"image"`` per the NGFF spec).
+
+    Returns
+    -------
+    _ZipNode
+        A node whose ``.data`` is one dask array per multiscale dataset and
+        whose ``.metadata`` carries ``axes``/``name``/``coordinateTransformations``.
+    """
+    datasets = multiscale["datasets"]
+    data: list[da.Array] = [_group_array(group, ds["path"]) for ds in datasets]
+    metadata = {
+        "axes": multiscale["axes"],
+        "name": multiscale.get("name", "image"),
+        "coordinateTransformations": [ds["coordinateTransformations"] for ds in datasets],
+    }
+    return _ZipNode(data=data, metadata=metadata)
+
+
+def _build_label_node(root: zarr.Group, label_name: str) -> _ZipNode:
+    """Build a ``_ZipNode`` for one OME-Zarr label under ``labels/<name>``.
+
+    Reproduces the metadata shape ``ome_zarr``'s ``Label`` spec emits:
+    ``name``, ``axes``, ``coordinateTransformations`` (from the label's own
+    ``ome.multiscales``), plus ``color``/``visible``/``metadata`` derived
+    from the label group's ``ome.image-label`` attributes.
+
+    Returns
+    -------
+    _ZipNode
+        A label node with one dask array per multiscale dataset and the
+        ``Label``-spec metadata dict (``name``/``color``/``visible``/...).
+    """
+    label_group = _group_subgroup(_group_subgroup(root, "labels"), label_name)
+    ome = _group_ome_attrs(label_group)
+    multiscale: dict[str, Any] = ome["multiscales"][0]
+    datasets: list[dict[str, Any]] = multiscale["datasets"]
+    data: list[da.Array] = [_group_array(label_group, ds["path"]) for ds in datasets]
+
+    image_label = ome.get("image-label", {})
+    # ome_zarr maps the colors list to a {label-value: rgba-floats} dict.
+    color: dict[int, list[float]] = {}
+    for entry in image_label.get("colors", []):
+        lv = entry.get("label-value")
+        rgba = entry.get("rgba")
+        if lv is not None and rgba is not None:
+            color[int(lv)] = [c / 255.0 for c in rgba]
+
+    metadata = {
+        "name": label_name,
+        "axes": multiscale["axes"],
+        "coordinateTransformations": [ds["coordinateTransformations"] for ds in datasets],
+        "visible": image_label.get("visible", False),
+        "color": color,
+        "metadata": {"image": {}, "path": label_name},
+    }
+    return _ZipNode(data=data, metadata=metadata)
+
+
+def _load_zarr_from_zip(zarr_file: str) -> list[Node]:
+    """Load a single-file ZIP OME-Zarr into a list of nodes.
+
+    Opens the ZIP via ``ZipStore`` (read-only), reads the root ``ome``
+    metadata, and yields one node per ``multiscales`` entry plus one node
+    per label under ``labels/``. This mirrors what
+    ``ome_zarr.reader.Reader`` produces for a directory store, so callers
+    (``load_node_by_name``, ``load_zarr_image_from_node``) work unchanged.
+
+    Returns
+    -------
+    list[Node]
+        One ``_ZipNode`` per root multiscale, plus one per label under
+        ``labels/`` (in declaration order).
+
+    Raises
+    ------
+    ValueError
+        If the store has no ``ome`` root attribute (not an OME-Zarr) or no
+        ``multiscales`` metadata.
+    """
+    store = ZipStore(zarr_file, mode="r")
+    try:
+        root = zarr.open_group(store=store, mode="r")
+        ome = _group_ome_attrs(root)
+        if "multiscales" not in ome:
+            raise ValueError(
+                f"Could not find OME-Zarr multiscales metadata in {zarr_file} "
+                f"-- the store has no 'ome' root attribute with a "
+                f"'multiscales' key (is this an OME-Zarr file?)."
+            )
+        nodes: list[Node] = [_build_multiscale_node(root, ms) for ms in ome["multiscales"]]
+        # Labels live under a top-level ``labels`` group; its ``ome.labels``
+        # attribute lists the label names. Each label group carries its own
+        # ``ome.multiscales`` + ``ome.image-label``.
+        if "labels" in root:
+            labels_group = _group_subgroup(root, "labels")
+            labels_ome = _group_ome_attrs(labels_group)
+            nodes.extend(
+                _build_label_node(root, label_name) for label_name in labels_ome.get("labels", [])
+            )
+        return nodes
+    finally:
+        store.close()
+
 
 def load_zarr(zarr_file: str) -> list[Node]:
     """Load a zarr file to an ANTs image.
 
+    Accepts both directory OME-Zarr stores (``foo.zarr/``) and single-file
+    ZIP OME-Zarr stores (``foo.zarr.zip`` / ``foo.ozx``). ZIP stores are
+    opened via :class:`zarr.storage.ZipStore` because
+    :func:`ome_zarr.io.parse_url` cannot route a ``.zip`` path to a
+    ZipStore (it treats the path as a directory and returns ``None``); see
+    :func:`_load_zarr_from_zip` for the ZIP read path.
+
     Parameters
     ----------
     zarr_file : str
-        The zarr file to load.
+        The zarr file to load. A directory path for a directory store, or a
+        ``.zip``/``.ozx`` path for a single-file ZIP store.
 
     Returns
     -------
@@ -51,8 +402,11 @@ def load_zarr(zarr_file: str) -> list[Node]:
     Raises
     ------
     ValueError
-        If the zarr URL cannot be parsed.
+        If the zarr URL cannot be parsed (directory store), or if a ZIP
+        store has no OME-Zarr multiscales metadata.
     """
+    if _is_zip_zarr(zarr_file):
+        return _load_zarr_from_zip(zarr_file)
     zarr_location = parse_url(zarr_file)
     if zarr_location is None:
         raise ValueError(f"Could not parse zarr URL: {zarr_file}")
@@ -155,7 +509,10 @@ def save_atlas_to_zarr(
     Parameters
     ----------
     zarr_file : str
-        The zarr file to save the atlas to.
+        The zarr store to save the atlas to (the image store at this path
+        must already exist, written by :func:`save_zarr`). A ``.zip``/``.ozx``
+        extension appends into the single-file ZIP store (unpack-then-repack);
+        any other path appends into the directory store.
     atlas : ArrayLike
         The atlas to save.
     scales : tuple[float, float, float]
@@ -268,12 +625,28 @@ def save_label_to_zarr(
 ) -> None:
     """Save a mask to a zarr file inside the labels group.
 
+    Writes the label into the ``labels/<name>`` group of an existing
+    OME-Zarr store (the image must already have been written by
+    :func:`save_zarr`). A ``.zip``/``.ozx`` extension selects the
+    single-file ZIP store: the existing image zip is unpacked into a
+    working directory, the label is appended via the proven directory write
+    path, and the directory is repacked into the zip (the ome_zarr writer's
+    ``da.to_zarr`` delayed writes corrupt a ZipStore on append, so the
+    unpack-then-repack is required). The unpack happens at save time only
+    — :func:`load_zarr` reads a zip directly with no unpack, so in-memory
+    processing (registration, atlas computation) on a finalised zip stays
+    free of it. Any other path writes into the directory store directly.
+
     Parameters
     ----------
     label : ArrayLike
         The mask to save.
     zarr_file : str
-        The zarr file to save the mask to.
+        The zarr store to save the mask to. The image store at this path must
+        already exist (written by :func:`save_zarr` with the same path); the
+        label is appended under ``labels/<name>``. A ``.zip``/``.ozx``
+        extension appends into the single-file ZIP store; any other path
+        appends into the directory store.
     color_dict : list[dict[str, Any]]
         The color dictionary to use for the mask.
     scales : tuple[float, float, float]
@@ -307,10 +680,11 @@ def save_label_to_zarr(
     # stay unchanged.
     axis_names = [ax["name"] for ax in axes]
 
-    # D-06/D-07: when a low-res label is passed, upscale it to the main
-    # image's level-0 shape (read from the same zarr_file the label is
-    # being written into) using nearest-neighbor resize so integer label
-    # values are preserved.
+    # When a low-res label is passed, upscale it to the main image's level-0
+    # shape (read from the same zarr_file the label is being written into)
+    # using nearest-neighbor resize so integer label values are preserved.
+    # load_zarr reads a zip directly (no unpack) so this stays cheap for zip
+    # inputs — the unpack is deferred to the write step below.
     if resolution_level > 0:
         nodes = load_zarr(zarr_file)
         target_shape = nodes[0].data[0].shape
@@ -320,11 +694,25 @@ def save_label_to_zarr(
             label = da.from_array(label)
         label = dask_resize(label, target_shape, order=0, preserve_range=True, anti_aliasing=False)
 
-    zarr_location = parse_url(zarr_file, mode="w")
-    if zarr_location is None:
-        raise ValueError(f"Could not parse zarr URL: {zarr_file}")
-    file = zarr_location.store
-    root = zarr.group(store=file)
+    # A ``.zip``/``.ozx`` extension selects the single-file ZIP store: the
+    # existing image zip is unpacked into a working directory so the label
+    # can be appended via the proven directory write path, then the
+    # directory is repacked into the zip. Any other path opens the existing
+    # directory store directly (the classic behavior). The unpack happens
+    # here — at save time — so in-memory processing on a zip stays free of it.
+    cleanup_dir: str | None = None
+    if _is_zip_zarr(zarr_file):
+        work_dir = _zip_work_dir(zarr_file)
+        if Path(work_dir).exists():
+            shutil.rmtree(work_dir)
+        _zip_store_to_dir(zarr_file, work_dir)
+        cleanup_dir = work_dir
+        root = zarr.open_group(store=LocalStore(work_dir, read_only=False), mode="a")
+    else:
+        zarr_location = parse_url(zarr_file, mode="w")
+        if zarr_location is None:
+            raise ValueError(f"Could not parse zarr URL: {zarr_file}")
+        root = zarr.group(store=zarr_location.store)
 
     n_levels = validate_n_levels(_DEFAULT_N_LEVELS, label.shape, axis_names)
     scale_factors = build_scale_factors(n_levels, axis_names)
@@ -381,6 +769,14 @@ def save_label_to_zarr(
             colors=color_dict,
             source={"image": "../../"},
         )
+
+    # For the zip format, repack the working directory back into the zip
+    # (overwriting the old image-only zip) and remove the working directory.
+    if cleanup_dir is not None:
+        if Path(zarr_file).exists():
+            Path(zarr_file).unlink()
+        _dir_to_zip_store(cleanup_dir, zarr_file)
+        shutil.rmtree(cleanup_dir)
 
 
 def generate_label_color_dict_mask() -> list[dict[str, Any]]:

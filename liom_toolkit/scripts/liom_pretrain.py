@@ -47,7 +47,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         nargs="+",
         required=True,
         help="Paths to the unlabeled OME-Zarr stores to pretrain on (required -- "
-        "no lab-specific default; all paths are parameters)",
+        "no lab-specific default; all paths are parameters). A '.zip'/'.ozx' "
+        "extension reads a single-file ZIP store; any other path reads a "
+        "directory store.",
     )
     p.add_argument(
         "--plans",

@@ -33,6 +33,7 @@ import zarr
 from liom_toolkit.conversion.conversion import save_zarr
 from liom_toolkit.utils.io import (
     extract_zarr_to_image,
+    finalise_zarr_to_zip,
     generate_axes_dict,
     generate_label_color_dict_mask,
     load_node_by_name,
@@ -222,6 +223,216 @@ def test_save_label_to_zarr_load_zarr_round_trip(tmp_path):
         )
 
 
+def test_save_zarr_zip_write_round_trip(tmp_path):
+    """save_zarr with a ``.zip`` path writes a single-file ZipStore OME-Zarr
+    that load_zarr reads back with full data/metadata parity, and leaves no
+    working directory behind.
+
+    A ``.zip`` extension selects the single-file ZIP store: save_zarr writes
+    the OME-Zarr to a working directory first (the ome_zarr writer's
+    ``da.to_zarr`` delayed writes corrupt a ZipStore directly), packs it into
+    the zip, and removes the directory. This test asserts only the ``.zip``
+    file remains on disk and that the round-tripped image matches the
+    directory-path round-trip on data, shape, dtype, axes, level count, and
+    anisotropic per-level scales.
+    """
+    data = np.zeros((32, 32, 32), dtype=np.uint16)
+    data[8:24, 8:24, 8:24] = 1000
+    zpath = str(tmp_path / "vol.ome.zarr.zip")
+
+    save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32))
+
+    # Only the single-file zip remains — the working directory is removed.
+    assert Path(zpath).is_file()
+    assert not Path(zpath[:-4]).exists(), "working directory was not cleaned up"
+
+    nodes = load_zarr(zpath)
+    img = nodes[0]
+    assert len(img.data) == 5
+    assert np.array_equal(np.asarray(img.data[0]), data)
+    assert img.data[0].shape == (32, 32, 32)
+    assert img.data[0].dtype == np.uint16
+    axes = img.metadata["axes"]
+    assert [a["name"] for a in axes] == ["z", "y", "x"]
+    ct = img.metadata["coordinateTransformations"]
+    assert len(ct) == 5
+    assert ct[0][0]["type"] == "scale"
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    expected_yx = [13.0, 26.0, 52.0, 104.0]
+    for i in range(1, 5):
+        assert ct[i][0]["scale"][0] == 6.5
+        assert ct[i][0]["scale"][1] == expected_yx[i - 1]
+        assert ct[i][0]["scale"][2] == expected_yx[i - 1]
+
+
+def test_save_label_to_zarr_zip_append_round_trip(tmp_path):
+    """save_label_to_zarr with a ``.zip`` path appends a label into an existing
+    image zip (unpack -> write label -> repack) with full data/metadata parity.
+
+    This is the downstream-append use case: the microscope finalised an image
+    to a zip, then registration/atlas adds a label. save_label_to_zarr unpacks
+    the image zip into a working directory at save time, appends the label via
+    the proven directory write path, repacks the directory into the zip, and
+    removes the directory. load_zarr reads the zip directly (no unpack) for
+    the in-memory steps. This test asserts only the ``.zip`` remains, the
+    label node is found by name with matching data and integer dtype, and the
+    NEAREST-resampling integer-value invariant holds at every pyramid level.
+    """
+    data = np.zeros((16, 16, 16), dtype=np.uint16)
+    data[4:12, 4:12, 4:12] = 1000
+    label = np.zeros((16, 16, 16), dtype=np.int8)
+    label[4:12, 4:12, 4:12] = 1
+    zpath = str(tmp_path / "vol.ome.zarr.zip")
+
+    save_zarr(data, zpath, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+    save_label_to_zarr(
+        label=label,
+        zarr_file=zpath,
+        color_dict=generate_label_color_dict_mask(),
+        name="mask",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(16, 16, 16),
+        resolution_level=0,
+        unit="micrometer",
+    )
+
+    # Only the single-file zip remains after the repack.
+    assert Path(zpath).is_file()
+    assert not Path(zpath[:-4]).exists(), "working directory was not cleaned up"
+
+    nodes = load_zarr(zpath)
+    mask_node = load_node_by_name(nodes, "mask")
+    assert mask_node is not None
+    assert len(mask_node.data) == 5
+    assert np.array_equal(np.asarray(mask_node.data[0]), label)
+    assert mask_node.data[0].dtype == np.int8
+
+    # NEAREST-resampling integer invariant (mirrors the directory-path test).
+    original_values = {0, 1}
+    for level in range(len(mask_node.data)):
+        arr = np.asarray(mask_node.data[level])
+        assert np.issubdtype(arr.dtype, np.integer), (
+            f"label level {level} dtype {arr.dtype} is not integer — "
+            "NEAREST resampling must preserve integer label dtype"
+        )
+        unique = {int(v) for v in np.unique(arr)}
+        assert unique.issubset(original_values), (
+            f"label level {level} unique values {unique} are not a subset of "
+            f"the original label value set {original_values} — "
+            "NEAREST resampling must not interpolate fractional label values"
+        )
+
+
+def test_finalise_zarr_to_zip_round_trip(tmp_path):
+    """finalise_zarr_to_zip packs a directory store (image + label) into a
+    single-file ``.zip`` that load_zarr reads back with full data/metadata
+    parity, and removes the source directory.
+
+    The supported zip workflow is: write the image and any labels to a
+    directory with save_zarr / save_label_to_zarr, then call
+    finalise_zarr_to_zip to pack the finished directory into a zip
+    (appending labels into an existing zip is not supported — the ome_zarr
+    writer's ``da.to_zarr`` delayed writes corrupt a ZipStore on append).
+    This test exercises that workflow end-to-end and asserts: only the
+    ``.zip`` remains (source directory removed), the image node matches on
+    data/shape/dtype/axes/levels/anisotropic scales, and the label node
+    matches on data/integer dtype with the NEAREST-resampling integer-value
+    invariant holding at every pyramid level.
+    """
+    data = np.zeros((16, 16, 16), dtype=np.uint16)
+    data[4:12, 4:12, 4:12] = 1000
+    label = np.zeros((16, 16, 16), dtype=np.int8)
+    label[4:12, 4:12, 4:12] = 1
+    dir_path = str(tmp_path / "vol.ome.zarr")
+
+    # Write image + label to the directory (the working format).
+    save_zarr(data, dir_path, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+    save_label_to_zarr(
+        label=label,
+        zarr_file=dir_path,
+        color_dict=generate_label_color_dict_mask(),
+        name="mask",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(16, 16, 16),
+        resolution_level=0,
+        unit="micrometer",
+    )
+
+    zip_path = finalise_zarr_to_zip(dir_path)
+
+    # The zip is at <dir>.zip and the source directory is removed.
+    assert zip_path == dir_path + ".zip"
+    assert Path(zip_path).is_file()
+    assert not Path(dir_path).exists(), "source directory was not removed"
+
+    nodes = load_zarr(zip_path)
+    img = nodes[0]
+    assert len(img.data) == 5
+    assert np.array_equal(np.asarray(img.data[0]), data)
+    assert img.data[0].shape == (16, 16, 16)
+    assert img.data[0].dtype == np.uint16
+    axes = img.metadata["axes"]
+    assert [a["name"] for a in axes] == ["z", "y", "x"]
+    ct = img.metadata["coordinateTransformations"]
+    assert len(ct) == 5
+    assert ct[0][0]["type"] == "scale"
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    expected_yx = [13.0, 26.0, 52.0, 104.0]
+    for i in range(1, 5):
+        assert ct[i][0]["scale"][0] == 6.5
+        assert ct[i][0]["scale"][1] == expected_yx[i - 1]
+        assert ct[i][0]["scale"][2] == expected_yx[i - 1]
+
+    mask_node = load_node_by_name(nodes, "mask")
+    assert mask_node is not None
+    assert len(mask_node.data) == 5
+    assert np.array_equal(np.asarray(mask_node.data[0]), label)
+    assert mask_node.data[0].dtype == np.int8
+
+    # NEAREST-resampling integer invariant (mirrors the directory-path test).
+    original_values = {0, 1}
+    for level in range(len(mask_node.data)):
+        arr = np.asarray(mask_node.data[level])
+        assert np.issubdtype(arr.dtype, np.integer), (
+            f"label level {level} dtype {arr.dtype} is not integer — "
+            "NEAREST resampling must preserve integer label dtype"
+        )
+        unique = {int(v) for v in np.unique(arr)}
+        assert unique.issubset(original_values), (
+            f"label level {level} unique values {unique} are not a subset of "
+            f"the original label value set {original_values} — "
+            "NEAREST resampling must not interpolate fractional label values"
+        )
+
+
+def test_finalise_zarr_to_zip_missing_dir_raises(tmp_path):
+    """finalise_zarr_to_zip raises FileNotFoundError for a missing directory.
+
+    A missing input directory is an explicit failure (AGENTS.md §2: no silent
+    wrong-data fallback), not a silent empty-zip write.
+    """
+    missing = str(tmp_path / "does_not_exist.ome.zarr")
+    with pytest.raises(FileNotFoundError, match="zarr directory not found"):
+        finalise_zarr_to_zip(missing)
+
+
+def test_finalise_zarr_to_zip_keep_dir(tmp_path):
+    """finalise_zarr_to_zip(remove_dir=False) leaves the source directory in
+    place so further appends remain possible, while still producing the zip.
+    """
+    data = np.zeros((16, 16, 16), dtype=np.uint16)
+    dir_path = str(tmp_path / "vol.ome.zarr")
+    save_zarr(data, dir_path, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+
+    zip_path = finalise_zarr_to_zip(dir_path, remove_dir=False)
+
+    assert Path(zip_path).is_file()
+    assert Path(dir_path).is_dir(), "source directory was removed despite remove_dir=False"
+    # The zip is readable and round-trips the image data.
+    nodes = load_zarr(zip_path)
+    assert np.array_equal(np.asarray(nodes[0].data[0]), data)
+
+
 def test_generate_label_color_dict_mask_structure():
     """The mask color dict has 3 entries with label-values {0, 1, None}.
 
@@ -236,6 +447,140 @@ def test_generate_label_color_dict_mask_structure():
     for entry in color_dict:
         assert "rgba" in entry
         assert len(entry["rgba"]) == 4
+
+
+def _dir_zarr_to_zip(dir_path: str, zip_path: str) -> None:
+    """Copy a directory zarr store into a single-file ZipStore.
+
+    Reads every key (chunk + metadata file) from the source ``LocalStore``
+    and writes it into a ``ZipStore`` via the async store API. This is the
+    on-disk transformation the data-offload workflow applies to high-chunk-
+    count stores (a 971k-file zarr becomes one .zip), and the round-trip
+    tests below assert ``load_zarr`` reads the result identically to the
+    directory original.
+    """
+    import asyncio
+
+    from zarr.storage import LocalStore, ZipStore
+
+    src = LocalStore(dir_path, read_only=True)
+    dest = ZipStore(zip_path, mode="w", compression=0)
+
+    async def _copy() -> None:
+        keys = [k async for k in src.list_prefix("")]
+        for k in keys:
+            buf = await src.get(k)
+            if buf is not None:
+                await dest.set(k, buf)
+
+    asyncio.run(_copy())
+    dest.close()
+
+
+def test_load_zarr_zip_store_image_round_trip(tmp_path):
+    """load_zarr reads a single-file ZIP OME-Zarr identically to the dir store.
+
+    A directory store written by ``save_zarr`` is copied into a ``.zarr.zip``
+    ZipStore; ``load_zarr`` must return an image node with the same pyramid
+    level count, per-level shape/dtype/data, axes, name, and per-level
+    ``coordinateTransformations`` as the directory original. This is the
+    transparency contract: callers pass a ``.zip`` path and get the same
+    nodes back, even though ``ome_zarr.io.parse_url`` cannot route a ``.zip``
+    path (it returns ``None`` for non-directory paths).
+    """
+    data = np.zeros((32, 32, 32), dtype=np.uint16)
+    data[8:24, 8:24, 8:24] = 1000
+    dir_path = str(tmp_path / "vol.zarr")
+    zip_path = str(tmp_path / "vol.zarr.zip")
+    save_zarr(data, dir_path, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32))
+    _dir_zarr_to_zip(dir_path, zip_path)
+
+    dir_nodes = load_zarr(dir_path)
+    zip_nodes = load_zarr(zip_path)
+
+    dir_img = load_node_by_name(dir_nodes, "image")
+    zip_img = load_node_by_name(zip_nodes, "image")
+    assert dir_img is not None and zip_img is not None
+
+    assert len(zip_img.data) == len(dir_img.data) == 5
+    for level in range(len(dir_img.data)):
+        a = np.asarray(dir_img.data[level])
+        b = np.asarray(zip_img.data[level])
+        assert b.shape == a.shape
+        assert b.dtype == a.dtype
+        assert np.array_equal(b, a)
+
+    assert zip_img.metadata["axes"] == dir_img.metadata["axes"]
+    assert zip_img.metadata["name"] == dir_img.metadata["name"] == "image"
+    assert (
+        zip_img.metadata["coordinateTransformations"]
+        == dir_img.metadata["coordinateTransformations"]
+    )
+
+
+def test_load_zarr_zip_store_label_round_trip(tmp_path):
+    """load_zarr reads a ZIP store's label node identically to the dir store.
+
+    The image is written first (establishing root multiscales metadata),
+    then a ``mask`` label. After copying to a ZipStore, ``load_node_by_name``
+    must find the ``mask`` node with matching per-level data, axes, and
+    ``coordinateTransformations``. The label node's integer dtype and
+    {0, 1} value subset are preserved (NEAREST resampling guard).
+    """
+    data = np.zeros((16, 16, 16), dtype=np.uint16)
+    data[4:12, 4:12, 4:12] = 1000
+    label = np.zeros((16, 16, 16), dtype=np.int8)
+    label[4:12, 4:12, 4:12] = 1
+    dir_path = str(tmp_path / "vol.zarr")
+    zip_path = str(tmp_path / "vol.zarr.zip")
+    save_zarr(data, dir_path, scales=(6.5, 6.5, 6.5), chunks=(16, 16, 16))
+    save_label_to_zarr(
+        label=label,
+        zarr_file=dir_path,
+        color_dict=generate_label_color_dict_mask(),
+        name="mask",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(16, 16, 16),
+        resolution_level=0,
+        unit="micrometer",
+    )
+    _dir_zarr_to_zip(dir_path, zip_path)
+
+    zip_nodes = load_zarr(zip_path)
+    mask_node = load_node_by_name(zip_nodes, "mask")
+
+    assert mask_node is not None
+    assert len(mask_node.data) == 5
+    assert np.array_equal(np.asarray(mask_node.data[0]), label)
+    assert mask_node.data[0].dtype == np.int8
+    ct = mask_node.metadata["coordinateTransformations"]
+    assert len(ct) == 5
+    assert ct[0][0]["type"] == "scale"
+    assert ct[0][0]["scale"] == [6.5, 6.5, 6.5]
+    for level in range(len(mask_node.data)):
+        arr = np.asarray(mask_node.data[level])
+        assert np.issubdtype(arr.dtype, np.integer)
+        unique = {int(v) for v in np.unique(arr)}
+        assert unique.issubset({0, 1})
+
+
+def test_load_zarr_zip_store_non_ome_raises(tmp_path):
+    """A ZIP store without OME-Zarr multiscales metadata raises ValueError.
+
+    A bare zarr group (no ``ome`` root attribute) packed into a zip is not a
+    valid OME-Zarr file; ``load_zarr`` must raise rather than return an empty
+    or wrong node list (the no-silent-wrong-data rule, AGENTS.md §2).
+    """
+    from zarr.storage import ZipStore
+
+    zip_path = str(tmp_path / "not_ome.zarr.zip")
+    store = ZipStore(zip_path, mode="w")
+    g = zarr.open_group(store=store, mode="w")
+    g.attrs["not_ome"] = True
+    store.close()
+
+    with pytest.raises(ValueError, match="multiscales metadata"):
+        load_zarr(zip_path)
 
 
 def _make_synthetic_zarr(path: str, shape=(4, 8, 8)) -> np.ndarray:

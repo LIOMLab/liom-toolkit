@@ -28,7 +28,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--zarr-files",
         nargs="+",
         required=True,
-        help="Paths to the input OME-Zarr brain files",
+        help=(
+            "Paths to the input OME-Zarr brain files. A '.zip'/'.ozx' "
+            "extension reads a single-file ZIP store; any other path reads "
+            "a directory store."
+        ),
     )
     p.add_argument(
         "--brain-names",

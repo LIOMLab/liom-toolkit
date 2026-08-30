@@ -24,7 +24,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawTextHelpFormatter,
         parents=[build_common_parser()],
     )
-    p.add_argument("input_file", help="Full path to the input zarr file")
+    p.add_argument(
+        "input_file",
+        help=(
+            "Full path to the input zarr file (the mask is written into its "
+            "labels group). A '.zip'/'.ozx' extension reads and appends into "
+            "a single-file ZIP store; any other path uses a directory store."
+        ),
+    )
     p.add_argument(
         "--scales",
         type=float,

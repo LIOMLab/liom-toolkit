@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 import warnings
 from pathlib import Path
@@ -23,6 +24,9 @@ from liom_toolkit.utils.dask_client import dask_client_manager
 from liom_toolkit.utils.io import (
     _DEFAULT_N_LEVELS,
     _NGFF_LENGTH_UNITS,
+    _dir_to_zip_store,
+    _is_zip_zarr,
+    _zip_work_dir,
     build_scale_factors,
     create_mask_from_zarr,
     generate_axes_dict,
@@ -124,12 +128,21 @@ def save_zarr(
 ) -> None:
     """Save a numpy array to a zarr file.
 
+    A ``.zip``/``.ozx`` extension selects the single-file ZIP store: the
+    OME-Zarr is written to a working directory first (the ome_zarr writer's
+    ``da.to_zarr`` delayed writes corrupt a ZipStore directly), then packed
+    into the zip and the directory removed. Any other path writes the
+    classic directory store. To pack an already-finished directory store
+    (e.g. one produced by the streaming ``OmeZarrWriter``) into a zip, use
+    :func:`liom_toolkit.utils.io.finalise_zarr_to_zip`.
+
     Parameters
     ----------
     data : ArrayLike
         The data to save.
     zarr_file : str
-        The zarr file to save to.
+        The zarr file to save to. A ``.zip``/``.ozx`` extension writes a
+        single-file ZIP store; any other path writes a directory store.
     scales : tuple[float, float, float]
         The resolution of the image, in z y x order.
     chunks : tuple[int, int, int]
@@ -157,16 +170,24 @@ def save_zarr(
     axis_names = [ax["name"] for ax in axes]
 
     logger.info("Saving...")
+    # A ``.zip``/``.ozx`` extension selects the single-file ZIP store: the
+    # OME-Zarr is written to a working directory first (the ome_zarr writer's
+    # ``da.to_zarr`` delayed writes corrupt a ZipStore directly), then packed
+    # into the zip and the directory removed. Any other path writes the
+    # directory store directly (the classic behavior).
+    is_zip = _is_zip_zarr(zarr_file)
+    work_dir = _zip_work_dir(zarr_file) if is_zip else zarr_file
+
     # Symlink-aware directory creation with overwrite=True: a second call
     # into an existing zarr store directory shutil.rmtree's the store then
     # recreates it before the zarr write proceeds (zarr stores are
     # directories with subdirectories, so shutil.rmtree is the correct
     # clearing primitive — not os.remove which only handles flat files).
     # Imported at module top to avoid a circular import with utils.zarr_writer.
-    create_directory(Path(zarr_file), overwrite=True)
-    zarr_location = parse_url(zarr_file, mode="w")
+    create_directory(Path(work_dir), overwrite=True)
+    zarr_location = parse_url(work_dir, mode="w")
     if zarr_location is None:
-        raise ValueError(f"Could not parse zarr URL: {zarr_file}")
+        raise ValueError(f"Could not parse zarr URL: {work_dir}")
     store = zarr_location.store
     root = zarr.group(store=store)
 
@@ -210,6 +231,14 @@ def save_zarr(
             storage_options={"chunks": chunks},
             scaler=None,
         )
+
+    # For the zip format, pack the working directory into the zip and remove
+    # the directory so only the single-file zip remains on disk.
+    if is_zip:
+        if Path(zarr_file).exists():
+            Path(zarr_file).unlink()
+        _dir_to_zip_store(work_dir, zarr_file)
+        shutil.rmtree(work_dir)
     logger.info("Done!")
 
 
