@@ -32,6 +32,7 @@ def nnunet_predict(
     dataset_id: int,
     configuration: str = "2d",
     fold: str = "all",
+    trainer: str = "nnUNetTrainer50Epochs",
     nnunet_venv_python: str | None = None,
 ) -> None:
     """Invoke ``nnUNetv2_predict`` in the separate nnU-Net venv.
@@ -53,6 +54,11 @@ def nnunet_predict(
     fold : str
         The nnU-Net fold (nnU-Net ``-f`` arg). Default ``"all"`` (train on all
         folds, predict with the single resulting model).
+    trainer : str
+        The nnU-Net trainer class name (``-tr`` arg). Must match the trainer
+        used during training — nnU-Net locates the model folder as
+        ``nnUNet_results/Dataset{id}_{name}/{trainer}__nnUNetPlans__{config}/``.
+        Default ``"nnUNetTrainer50Epochs"`` (the custom 50-epoch trainer).
     nnunet_venv_python : str | None
         Path to the Python interpreter in the separate nnU-Net venv
         (torch-clobbering isolation). Required — there is no lab-independent
@@ -77,7 +83,8 @@ def nnunet_predict(
 
     # List argv (no shell=True) — the subprocess-injection mitigation. A list
     # argv means user-supplied paths cannot break out of the argv into a
-    # separate shell command.
+    # separate shell command. -tr must match the training trainer so nnU-Net
+    # finds the right model folder.
     cmd = [
         predict_script,
         "-i",
@@ -90,6 +97,8 @@ def nnunet_predict(
         configuration,
         "-f",
         fold,
+        "-tr",
+        trainer,
     ]
 
     proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - controlled nnU-Net bridge, list argv no shell

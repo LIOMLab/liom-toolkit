@@ -815,6 +815,7 @@ class NnUnetContender:
             dataset_id=self.dataset_id,
             configuration="2d",
             fold="0",
+            trainer="nnUNetTrainer50Epochs",
             nnunet_venv_python=self.nnunet_venv_python,
         )
 
@@ -878,6 +879,7 @@ class NnUnetContender:
             dataset_id=self.dataset_id,
             configuration="2d",
             fold="all",
+            trainer="nnUNetTrainer50Epochs",
             nnunet_venv_python=self.nnunet_venv_python,
         )
         masks: list[NDArray[np.bool_]] = []
