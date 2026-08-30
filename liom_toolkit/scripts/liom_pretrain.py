@@ -121,11 +121,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--patch-size",
         type=int,
         nargs=2,
-        default=(256, 256),
+        default=(512, 512),
         metavar=("PH", "PW"),
         help="Random patch size cropped from each slice before batching "
         "(the network is fully-convolutional so the state_dict keys are "
-        "patch-size-independent; default: %(default)s -- fits a 49GB A6000)",
+        "patch-size-independent; must be large enough to survive the "
+        "encoder's 8 stride-2 downsamples without collapsing below 2x2 "
+        "at the bottleneck -- InstanceNorm2d requires >1 spatial element "
+        "in training mode; default: %(default)s -- fits a 49GB A6000)",
     )
     p.add_argument(
         "--seed",
