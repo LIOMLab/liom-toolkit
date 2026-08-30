@@ -188,8 +188,15 @@ def _dir_to_zip_store(dir_path: str, zip_path: str) -> None:
             if buf is not None:
                 await dest.set(k, buf)
 
-    asyncio.run(_copy())
-    dest.close()
+    try:
+        asyncio.run(_copy())
+    finally:
+        # Close both stores even if the copy raises (a single key get/set
+        # failure, cancellation, etc.) so the ZipStore's open zipfile and
+        # the LocalStore handle are released -- otherwise the half-written
+        # zip may stay locked on Windows and the handles leak everywhere.
+        dest.close()
+        src.close()
 
 
 def _zip_store_to_dir(zip_path: str, dir_path: str) -> None:
@@ -213,8 +220,11 @@ def _zip_store_to_dir(zip_path: str, dir_path: str) -> None:
             if buf is not None:
                 await dest.set(k, buf)
 
-    asyncio.run(_copy())
-    src.close()
+    try:
+        asyncio.run(_copy())
+    finally:
+        src.close()
+        dest.close()
 
 
 def _zip_work_dir(zip_path: str) -> str:
