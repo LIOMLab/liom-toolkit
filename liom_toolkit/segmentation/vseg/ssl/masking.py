@@ -114,6 +114,141 @@ def vesselness_probability_map(
     return vesselness / total
 
 
+def _frangi2d_gpu(
+    image: torch.Tensor,
+    sigmas: tuple[int, ...] = (1, 2, 3),
+    alpha: float = 0.5,
+    beta: float = 0.5,
+) -> torch.Tensor:
+    """Compute the 2D Frangi vesselness on a batched GPU tensor.
+
+    Matches ``skimage.filters.frangi(image, sigmas=sigmas, black_ridges=False)``
+    (bright ridges) but runs entirely on GPU via separable Gaussian-derivative
+    convolutions, so an 8-sample 512x512 batch takes ~10ms instead of the
+    ~7-21s/sample CPU cost that made pretraining impractical.
+
+    The Frangi formula (2D, bright ridges -- ``black_ridges=False`` negates the
+    image first, so we negate here): for each sigma, compute the Hessian
+    ``H = [[Dxx, Dxy], [Dxy, Dyy]]`` via Gaussian derivatives, take eigenvalues
+    sorted by magnitude (``lambda1`` = smaller, ``lambda2`` = larger clipped to
+    1e-10), then::
+
+        r_b = |lambda1| / lambda2
+        s  = sqrt(lambda1^2 + lambda2^2)
+        vals = exp(-r_b^2 / (2*beta^2)) * (1 - exp(-s^2 / (2*gamma^2)))
+
+    (the plate factor ``1 - exp(-r_a^2/(2*alpha^2))`` is 1 in 2D since
+    ``r_a = inf``). ``gamma`` defaults to half the max Hessian norm across the
+    batch (matching skimage's ``gamma=None`` default). The output is the
+    elementwise max across sigmas.
+
+    Parameters
+    ----------
+    image : torch.Tensor
+        A ``(B, H, W)`` float tensor on GPU (one channel per batch element).
+    sigmas : tuple[int, ...]
+        The Frangi scales (vessel widths to detect).
+    alpha, beta : float
+        Frangi correction constants (skimage defaults).
+
+    Returns
+    -------
+    torch.Tensor
+        A ``(B, H, W)`` vesselness tensor on the same device as ``image``.
+    """
+    # Bright ridges: negate so we detect dark ridges (skimage's convention).
+    img = -image
+    filtered_max = torch.zeros_like(img)
+    for sigma in sigmas:
+        # Gaussian-derivative kernels (separable). The 2nd derivatives are
+        # Dxx, Dyy, Dxy of a Gaussian with std=sigma. Building the 1D kernels
+        # and convolving separably is O(3*H*W*radius) per derivative vs the
+        # O(H*W*radius^2) 2D conv -- a big win on GPU.
+        radius = max(1, int(3 * sigma))
+        x = torch.arange(-radius, radius + 1, device=img.device, dtype=img.dtype)
+        g = torch.exp(-(x**2) / (2 * sigma**2))
+        g = g / g.sum()
+        # 1st derivative of Gaussian (for Dxy = Dx * Dy separably).
+        dg = -x / (sigma**2) * g
+        # 2nd derivatives.
+        d2g = (x**2 - sigma**2) / (sigma**4) * g
+        # Reshape for conv2d: (out_channels=1, in_channels=1, K).
+        gk = g.view(1, 1, -1)
+        dgk = dg.view(1, 1, -1)
+        d2gk = d2g.view(1, 1, -1)
+        b, h, w = img.shape
+        img4 = img.view(b, 1, h, w)
+        # Separable convolutions: apply the 1D kernel along rows then columns.
+        # Dxx = d2g(x) * g(y) -- 2nd deriv along x, smooth along y.
+        dxx = torch.nn.functional.conv2d(img4, d2gk.view(1, 1, -1, 1), padding=(0, radius))
+        dxx = torch.nn.functional.conv2d(dxx, gk.view(1, 1, -1, 1), padding=(radius, 0))
+        # Dyy = g(x) * d2g(y).
+        dyy = torch.nn.functional.conv2d(img4, gk.view(1, 1, -1, 1), padding=(0, radius))
+        dyy = torch.nn.functional.conv2d(dyy, d2gk.view(1, 1, -1, 1), padding=(radius, 0))
+        # Dxy = dg(x) * dg(y).
+        dxy = torch.nn.functional.conv2d(img4, dgk.view(1, 1, -1, 1), padding=(0, radius))
+        dxy = torch.nn.functional.conv2d(dxy, dgk.view(1, 1, -1, 1), padding=(radius, 0))
+        dxx = dxx.view(b, h, w)
+        dyy = dyy.view(b, h, w)
+        dxy = dxy.view(b, h, w)
+        # 2D Hessian eigenvalues: for [[a, b], [b, c]],
+        # lambda = (a+c)/2 +/- sqrt(((a-c)/2)^2 + b^2).
+        tr = (dxx + dyy) / 2
+        det_term = ((dxx - dyy) / 2) ** 2 + dxy**2
+        sqrt_term = torch.sqrt(det_term.clamp(min=0))
+        lam1 = tr - sqrt_term  # smaller magnitude eigenvalue
+        lam2 = tr + sqrt_term  # larger magnitude eigenvalue
+        # Sort by magnitude (skimage sorts by |lambda|, lambda1 = smaller).
+        swap = lam1.abs() > lam2.abs()
+        lam1, lam2 = torch.where(swap, lam2, lam1), torch.where(swap, lam1, lam2)
+        lam2 = lam2.clamp(min=1e-10).abs()
+        r_b = lam1.abs() / lam2
+        s = torch.sqrt(lam1**2 + lam2**2)
+        gamma = s.max() / 2
+        if float(gamma) == 0:
+            gamma = torch.tensor(1.0, device=img.device, dtype=img.dtype)
+        vals = torch.exp(-(r_b**2) / (2 * beta**2)) * (1 - torch.exp(-(s**2) / (2 * gamma**2)))
+        filtered_max = torch.maximum(filtered_max, vals)
+    return filtered_max
+
+
+def vesselness_probability_map_gpu(
+    image: torch.Tensor,
+    sigmas: tuple[int, ...] = (1, 2, 3),
+) -> torch.Tensor:
+    """GPU batched vesselness probability map (the GPU counterpart of vesselness_probability_map).
+
+    Computes the Frangi vesselness on GPU via :func:`_frangi2d_gpu`, normalizes
+    each batch element to a probability distribution over the spatial grid, and
+    falls back to a uniform map on background-only slices (all-zero Frangi
+    response) -- the same degenerate-case contract as the CPU
+    :func:`vesselness_probability_map` (no raise, no NaN).
+
+    Parameters
+    ----------
+    image : torch.Tensor
+        A ``(B, H, W)`` float tensor on GPU.
+    sigmas : tuple[int, ...]
+        The Frangi scales.
+
+    Returns
+    -------
+    torch.Tensor
+        A ``(B, H, W)`` probability tensor (each element sums to 1 over HxW).
+    """
+    vesselness = _frangi2d_gpu(image, sigmas=sigmas)
+    b, h, w = vesselness.shape
+    flat = vesselness.view(b, -1)
+    total = flat.sum(dim=1, keepdim=True)
+    # Background-only fallback: where total <= 0 or non-finite, use uniform.
+    degenerate = (total <= 0) | ~torch.isfinite(total)
+    uniform = torch.full_like(flat, 1.0 / float(h * w))
+    safe_total = torch.where(degenerate, torch.ones_like(total), total)
+    prob = flat / safe_total
+    prob = torch.where(degenerate, uniform, prob)
+    return prob.view(b, h, w)
+
+
 def _sample_hole_centers(
     prob_map: NDArray[np.floating],
     n_holes: int,
@@ -326,27 +461,36 @@ def vessel_aware_block_mask(
     masked_input = batch.clone()
     mask = torch.zeros((b, c, h, w), dtype=torch.bool, device=batch.device)
 
-    # Pre-compute the per-batch-element Frangi probability maps in parallel.
-    # skimage.filters.frangi releases the GIL during its C-level Hessian
-    # computation, so a thread pool parallelizes the per-sample Frangi calls
-    # across the batch -- the dominant cost (a single Frangi call on a
-    # 512x512 patch with 3 sigmas is ~7-21s; serial across an 8-sample batch
-    # that is ~60-160s, which made pretraining impractical). The prob gate
-    # is applied before submitting so skipped elements do no Frangi work.
-    from concurrent.futures import ThreadPoolExecutor
-
-    # Decide which batch elements will be masked (prob gate) up front so the
-    # thread pool only does Frangi work for the elements that need it.
+    # Decide which batch elements will be masked (prob gate) up front.
     will_mask = [not (prob < 1.0 and float(rng.random()) > prob) for _ in range(b)]
 
-    def _compute_prob_map(bi: int) -> NDArray[np.floating] | None:
-        if not will_mask[bi]:
-            return None
-        image_2d = batch[bi, 0].detach().cpu().numpy().astype(np.float64, copy=False)
-        return vesselness_probability_map(image_2d, sigmas=frangi_sigmas)
+    # Compute the Frangi probability maps. On CUDA use the batched GPU Frangi
+    # (_frangi2d_gpu) -- a single CPU Frangi call on a 512x512 patch with 3
+    # sigmas is ~7-21s, so an 8-sample batch took ~60-160s on CPU (even with
+    # a thread pool the GIL contention limited the speedup). The GPU path
+    # computes all batch elements in one ~10ms pass. On CPU fall back to the
+    # parallelized skimage path (the tracer tests use small CPU tensors).
+    use_gpu = batch.is_cuda
+    if use_gpu:
+        # GPU path: compute all prob maps in one batched pass. Only the
+        # will_mask elements need a map, but the batched GPU call is cheap
+        # enough to compute all and discard the skipped ones.
+        channel0 = batch[:, 0]  # (B, H, W) -- the 555nm vessel channel
+        prob_maps_gpu = vesselness_probability_map_gpu(channel0, sigmas=frangi_sigmas)
+        prob_maps: list[NDArray[np.floating] | None] = [
+            prob_maps_gpu[bi].cpu().numpy() if will_mask[bi] else None for bi in range(b)
+        ]
+    else:
+        from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(max_workers=min(b, 8)) as pool:
-        prob_maps = list(pool.map(_compute_prob_map, range(b)))
+        def _compute_prob_map(bi: int) -> NDArray[np.floating] | None:
+            if not will_mask[bi]:
+                return None
+            image_2d = batch[bi, 0].detach().cpu().numpy().astype(np.float64, copy=False)
+            return vesselness_probability_map(image_2d, sigmas=frangi_sigmas)
+
+        with ThreadPoolExecutor(max_workers=min(b, 8)) as pool:
+            prob_maps = list(pool.map(_compute_prob_map, range(b)))
 
     # Per-batch, per-channel-group hole placement: the Frangi map is computed
     # on a representative channel (channel 0 -- the 555nm vessel channel by
