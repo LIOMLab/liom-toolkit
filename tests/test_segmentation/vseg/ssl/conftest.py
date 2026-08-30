@@ -82,3 +82,65 @@ def synthetic_vessel_slice() -> np.ndarray:
     sl = np.zeros((1, 16, 16), dtype=np.float32)
     sl[0, 7:8, 1:15] = 1.0
     return sl
+
+
+@pytest.fixture
+def tiny_2d_resenc_plans() -> dict:
+    """A minimal nnU-Net 2D ResEnc plans dict that builds a tiny CPU-friendly network.
+
+    The plans dict mirrors the structure nnU-Net's planner writes for a 2D
+    ResEnc configuration: ``arch_class_name`` points at
+    ``ResidualEncoderUNet`` and ``arch_kwargs`` carries the per-stage
+    layout. The values are deliberately tiny (3 stages, 4/8/16 features,
+    16x16 input) so a forward + backward pass runs in well under a second
+    on CPU. ``arch_kwargs_req_import`` lists the kwargs whose values are
+    dotted-path strings that must be resolved to live objects via
+    ``pydoc.locate`` (the same resolution ``get_network_from_plans``
+    performs).
+
+    The point of this fixture is the D-01a tracer proof: a network built
+    from this plan has the EXACT state_dict key layout
+    ``load_pretrained_weights`` expects (``encoder.*``, ``decoder.*``,
+    ``decoder.seg_layers.*``), so a checkpoint saved from one network
+    built from this plan loads into a second network built from the same
+    plan with NO AssertionError.
+    """
+    return {
+        "arch_class_name": (
+            "dynamic_network_architectures.architectures.unet.ResidualEncoderUNet"
+        ),
+        "arch_kwargs": {
+            "n_stages": 3,
+            "features_per_stage": (4, 8, 16),
+            "kernel_sizes": (3, 3, 3),
+            "strides": (1, 2, 2),
+            "n_blocks_per_stage": (1, 1, 1),
+            "n_conv_per_stage_decoder": (1, 1),
+            "conv_op": "torch.nn.modules.conv.Conv2d",
+            "norm_op": "torch.nn.modules.instancenorm.InstanceNorm2d",
+            "norm_op_kwargs": {"eps": 1e-5, "affine": True},
+            "nonlin": "torch.nn.LeakyReLU",
+            "nonlin_kwargs": {"inplace": True, "negative_slope": 0.01},
+            "dropout_op": None,
+            "dropout_op_kwargs": None,
+            "conv_bias": False,
+        },
+        "arch_kwargs_req_import": ["conv_op", "norm_op", "nonlin", "dropout_op"],
+    }
+
+
+@pytest.fixture
+def tiny_2d_resenc_dataset_json() -> dict:
+    """A minimal nnU-Net dataset.json for the tiny 2D ResEnc tracer (2 channels, 2 classes).
+
+    Mirrors the nnU-Net dataset.json contract (``channel_names`` maps the
+    channel index to a name, ``numClasses`` counts background + foreground,
+    ``labels`` maps label names to integer codes). Two input channels
+    match the SSL corpus output (555nm + 647nm, D-03b) and two output
+    classes (background + vessel) match the production segmentation head.
+    """
+    return {
+        "channel_names": {"0": "ch0", "1": "ch1"},
+        "numClasses": 2,
+        "labels": {"bg": 0, "fg": 1},
+    }
