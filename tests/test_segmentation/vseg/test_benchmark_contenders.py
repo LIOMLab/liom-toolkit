@@ -178,8 +178,27 @@ def test_skeletal_contenders_raise_on_missing_labels() -> None:
         monai.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
     with pytest.raises(ValueError, match="no matching label"):
         swin.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
-    with pytest.raises(ValueError, match="no matching label"):
-        nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
+    # nnU-Net contender checks nnUNet_raw env var first (before labels).
+    # Without it set, it raises RuntimeError. With it set, it raises
+    # ValueError on the missing label.
+    import os
+
+    old_raw = os.environ.pop("nnUNet_raw", None)
+    try:
+        with pytest.raises(RuntimeError, match="nnUNet_raw env var is not set"):
+            nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
+    finally:
+        if old_raw is not None:
+            os.environ["nnUNet_raw"] = old_raw
+    os.environ["nnUNet_raw"] = "/tmp/fake_nnunet_raw"
+    try:
+        with pytest.raises(ValueError, match="no matching label"):
+            nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
+    finally:
+        if old_raw is None:
+            os.environ.pop("nnUNet_raw", None)
+        else:
+            os.environ["nnUNet_raw"] = old_raw
 
 
 def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
@@ -595,6 +614,8 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
     # the bool conversion.
     from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
 
+    # nnU-Net contender reads nnUNet_raw to locate the dataset directory.
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "nnUNet_raw"))
     monkeypatch.setattr(nnunet_bridge, "nnunet_plan_and_preprocess", lambda **k: None)
     monkeypatch.setattr(nnunet_bridge, "nnunet_train", lambda **k: None)
 

@@ -30,6 +30,7 @@ The three remaining contenders:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -737,6 +738,18 @@ class NnUnetContender:
         )
 
         # 1. Convert train slices + masks to nnU-Net raw format.
+        # nnU-Net looks for datasets in $nnUNet_raw/Dataset{id:03d}_{name}/,
+        # so prepare_nnunet_2d must write there (not to a local output dir).
+        # The env vars are validated by nnunet_plan_and_preprocess below,
+        # but we need them here too — read them early with an explicit check.
+        # The nnUNet_raw env var name is mandated by the nnU-Net v2 CLI
+        # (upstream convention — renaming would break nnU-Net's dataset lookup).
+        nnunet_raw_env = os.environ.get("nnUNet_raw")  # ruff: ignore[SIM112]
+        if nnunet_raw_env is None:
+            raise RuntimeError(
+                "NnUnetContender: nnUNet_raw env var is not set — "
+                "nnU-Net needs it to locate the raw dataset directory"
+            )
         train_label_paths = [
             str(Path(p).with_name(f"{Path(p).stem}_mask{Path(p).suffix}")) for p in train_slices
         ]
@@ -748,7 +761,7 @@ class NnUnetContender:
                     f"NnUnetContender: no matching label for a train slice — "
                     f"expected {lbl} (the <name>_mask.png convention)"
                 )
-        raw_dir = str(Path(output_dir) / "nnUNet_raw" / f"Dataset{self.dataset_id:03d}_LIOM6p5")
+        raw_dir = str(Path(nnunet_raw_env) / f"Dataset{self.dataset_id:03d}_LIOM6p5")
         prepare_nnunet_2d(
             image_paths=train_slices,
             label_paths=train_label_paths,
