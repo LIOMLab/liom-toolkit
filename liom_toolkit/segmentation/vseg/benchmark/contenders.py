@@ -169,9 +169,17 @@ class Improved2DContender:
 
         model = VsegModel(pretrained=False, device=dev)
         checkpoint_path = Path(output_dir) / "files" / "checkpoint.latest.pth"
-        if checkpoint_path.exists():
-            state = torch.load(str(checkpoint_path), map_location=dev, weights_only=True)
-            model.load_state_dict(state)
+        if not checkpoint_path.exists():
+            # Training failed silently, disk full, or wrong path — raise
+            # rather than proceed with a randomly-initialized VsegModel and
+            # present random predictions as trained-model output (the
+            # silent-wrong-data path AGENTS §2 forbids).
+            raise RuntimeError(
+                f"Improved2DContender: checkpoint not found after train_model: "
+                f"{checkpoint_path} — training likely failed"
+            )
+        state = torch.load(str(checkpoint_path), map_location=dev, weights_only=True)
+        model.load_state_dict(state)
         model.eval()
 
         masks: list[NDArray[np.bool_]] = []
