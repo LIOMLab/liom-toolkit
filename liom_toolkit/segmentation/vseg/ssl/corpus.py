@@ -87,12 +87,14 @@ def extract_plane_slice(volume: da.Array, axis: int, index: int) -> NDArray[np.g
         raise ValueError(f"index {index} out of bounds for axis {axis} (size {size_along_axis})")
     sl = [slice(None)] * volume.ndim
     sl[axis] = index
-    # Materialize the Dask slice to a real NumPy array -- torch.tensor()
+    sliced = volume[tuple(sl)]
+    # Materialize a Dask slice to a real NumPy array -- torch.tensor()
     # below (in the pretraining loop) requires a concrete array, not a
     # Dask array (removing this .compute() would pass a Dask Array to
     # torch.tensor, which raises TypeError). This is a genuine
-    # Dask->PyTorch boundary.
-    return np.asarray(volume[tuple(sl)].compute())
+    # Dask->PyTorch boundary. A numpy array (in_memory=True) is already
+    # concrete -- .compute() is skipped.
+    return np.asarray(sliced.compute() if hasattr(sliced, "compute") else sliced)
 
 
 def z_score_per_channel(slice_2d: NDArray[np.generic]) -> NDArray[np.floating]:
@@ -251,6 +253,7 @@ class SSLCorpus(Dataset):
         intensity_jitter: float = 0.05,
         periphery_margin: float = 0.5,
         rng: np.random.Generator | None = None,
+        in_memory: bool = False,
     ) -> None:
         if not volume_paths:
             raise ValueError(
@@ -283,9 +286,19 @@ class SSLCorpus(Dataset):
         self.intensity_jitter: float = float(intensity_jitter)
         self.periphery_margin: float = float(periphery_margin)
         self._rng: np.random.Generator = rng if rng is not None else np.random.default_rng()
-        # Cache the per-volume level-0 dask arrays so __getitem__ does not
+        # When in_memory=True, each volume is materialized into RAM as a real
+        # numpy array on first access (the real-run path -- the corpus zarrs
+        # have 2048x2048 spatial chunks, so a dask patch read pulls the whole
+        # slice from disk anyway; holding the volume in RAM makes patch
+        # sampling pure in-memory slicing). The box has 499GB RAM; the 6-brain
+        # 555nm corpus is ~108GB, which fits. Defaults to False (the tracer
+        # and tests use dask, no RAM cost).
+        self.in_memory: bool = bool(in_memory)
+        # Cache the per-volume level-0 arrays so __getitem__ does not
         # re-resolve the NGFF component on every access. Lazily populated.
-        self._volume_cache: dict[int, da.Array] = {}
+        # Under in_memory=True the cached value is a numpy array; otherwise a
+        # dask array.
+        self._volume_cache: dict[int, da.Array | np.ndarray] = {}
 
     def __len__(self) -> int:
         """Return the per-slice dataset length along the dominant axis.
@@ -317,16 +330,24 @@ class SSLCorpus(Dataset):
 
         Returns
         -------
-        da.Array
-            The level-0 ``(C, Z, Y, X)`` dask array for the store.
+        da.Array | np.ndarray
+            The level-0 ``(C, Z, Y, X)`` array for the store. A dask array
+            by default; a real numpy array when ``in_memory=True`` (the
+            real-run path -- materializes the volume into RAM so patch
+            sampling is pure in-memory slicing instead of disk reads).
         """
         if vol_idx not in self._volume_cache:
-            self._volume_cache[vol_idx] = self._load_volume(self.volume_paths[vol_idx])
-        # cast narrows the cached dict value to da.Array for the type checker
-        # (dask's collection-expression / legacy-array split makes da.Array
-        # broader than the concrete return type ty infers) -- mirrors
-        # _load_volume; no assert (AGENTS section 2).
-        return cast("da.Array", self._volume_cache[vol_idx])
+            vol = self._load_volume(self.volume_paths[vol_idx])
+            if self.in_memory:
+                # Materialize the full volume into RAM. This is a genuine
+                # boundary (the corpus zarrs have 2048x2048 spatial chunks,
+                # so a dask patch read pulls the whole slice from disk
+                # anyway; holding the volume in RAM makes patch sampling
+                # pure in-memory slicing). The box has enough RAM for the
+                # real corpus (~108GB for 6 brains vs 499GB RAM).
+                vol = np.asarray(vol.compute())
+            self._volume_cache[vol_idx] = vol
+        return self._volume_cache[vol_idx]
 
     def _sample_axis(self, rng: np.random.Generator) -> int:
         """Sample a plane axis from the categorical ``plane_mix`` distribution.
@@ -560,7 +581,9 @@ class SSLCorpus(Dataset):
             sl[axis] = slice_idx
             sl[h_axis] = slice(top, top + patch_h)
             sl[w_axis] = slice(left, left + patch_w)
-            raw = np.asarray(vol[tuple(sl)].compute())
+            sliced = vol[tuple(sl)]
+            # dask arrays need .compute(); numpy arrays are already concrete.
+            raw = np.asarray(sliced.compute() if hasattr(sliced, "compute") else sliced)
             try:
                 out = z_score_per_channel(raw)
             except ValueError as err:

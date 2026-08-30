@@ -155,6 +155,16 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Use AMP mixed precision (no-op on CPU; the scaler disables itself "
         "when CUDA is unavailable)",
     )
+    p.add_argument(
+        "--in-memory",
+        action="store_true",
+        default=False,
+        help="Materialize each volume into RAM as a numpy array at first access "
+        "(the real-run path -- the corpus zarrs have 2048x2048 spatial chunks, "
+        "so a dask patch read pulls the whole slice from disk anyway; holding "
+        "the volume in RAM makes patch sampling pure in-memory slicing). "
+        "Requires enough RAM for the full corpus (~18GB per brain).",
+    )
     return p
 
 
@@ -245,6 +255,7 @@ def main() -> None:
     corpus = SSLCorpus(
         volume_paths=args.volume_paths,
         plane_mix=tuple(args.plane_mix),
+        in_memory=args.in_memory,
     )
     n_corpus = len(corpus)
     if n_corpus == 0:
