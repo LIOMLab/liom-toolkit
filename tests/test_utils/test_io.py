@@ -948,9 +948,7 @@ def test_load_omero_channels_reads_zip(tmp_path):
                 ],
                 "datasets": [
                     {
-                        "coordinateTransformations": [
-                            {"type": "scale", "scale": [6.5, 6.5, 6.5]}
-                        ],
+                        "coordinateTransformations": [{"type": "scale", "scale": [6.5, 6.5, 6.5]}],
                         "path": "0",
                     }
                 ],
@@ -995,9 +993,7 @@ def test_load_zarr_zip_label_without_multiscales_raises(tmp_path):
                 ],
                 "datasets": [
                     {
-                        "coordinateTransformations": [
-                            {"type": "scale", "scale": [6.5, 6.5, 6.5]}
-                        ],
+                        "coordinateTransformations": [{"type": "scale", "scale": [6.5, 6.5, 6.5]}],
                         "path": "0",
                     }
                 ],

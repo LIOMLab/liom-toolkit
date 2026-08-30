@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import tempfile
 import warnings
@@ -245,7 +244,7 @@ def save_zarr(
             Path(tmp_zip).unlink()
         try:
             _dir_to_zip_store(work_dir, tmp_zip)
-            os.replace(tmp_zip, zarr_file)
+            Path(tmp_zip).replace(zarr_file)
         finally:
             if Path(tmp_zip).exists():
                 Path(tmp_zip).unlink(missing_ok=True)

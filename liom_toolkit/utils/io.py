@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import warnings
 from pathlib import Path
@@ -318,7 +317,7 @@ def finalise_zarr_to_zip(zarr_dir: str, remove_dir: bool = True) -> str:
         Path(tmp_zip).unlink()
     try:
         _dir_to_zip_store(zarr_dir, tmp_zip)
-        os.replace(tmp_zip, zip_path)
+        Path(tmp_zip).replace(zip_path)
     finally:
         if Path(tmp_zip).exists():
             Path(tmp_zip).unlink(missing_ok=True)
@@ -366,8 +365,7 @@ def upgrade_ngff_v04_to_v05(zarr_dir: str) -> bool:
     if isinstance(attrs.get("ome"), dict):
         # Already v0.5 (or v0.5-shaped). Still recurse into labels in case
         # a label group is v0.4 while the root is v0.5 (mixed-version store).
-        upgraded = _upgrade_label_groups_v04_to_v05(root)
-        return upgraded
+        return _upgrade_label_groups_v04_to_v05(root)
     if not any(k in attrs for k in ("multiscales", "omero", "image-label")):
         raise ValueError(
             f"{zarr_dir} has neither a v0.5 'ome' root attribute nor v0.4 "
@@ -392,8 +390,12 @@ def _upgrade_label_groups_v04_to_v05(root: zarr.Group) -> bool:
     """Upgrade every ``labels/<name>`` group from v0.4 to v0.5 metadata.
 
     Each label group in a v0.4 store carries ``multiscales`` and
-    ``image-label`` at its root; v0.5 nests them under ``ome``. Returns
-    ``True`` if any label group was upgraded.
+    ``image-label`` at its root; v0.5 nests them under ``ome``.
+
+    Returns
+    -------
+    bool
+        ``True`` if any label group was upgraded, ``False`` otherwise.
     """
     if "labels" not in root:
         return False
@@ -470,6 +472,12 @@ def _parse_label_names(raw: list[Any]) -> list[str]:
     that match neither shape are skipped so a malformed entry does not
     silently corrupt the name list -- only ``str`` entries and dict entries
     carrying a ``"label"`` key are accepted.
+
+    Returns
+    -------
+    list[str]
+        The parsed label name strings (entries that match neither shape are
+        omitted).
     """
     names: list[str] = []
     for entry in raw:
@@ -494,6 +502,11 @@ def _discover_label_names(labels_group: zarr.Group) -> list[str]:
     helper mirrors the discovery logic in
     :func:`_upgrade_label_groups_v04_to_v05` so the zip reader and the
     upgrader agree on which labels exist.
+
+    Returns
+    -------
+    list[str]
+        The discovered label names, in declaration order.
     """
     labels_ome = _group_ome_attrs(labels_group)
     raw = labels_ome.get("labels")
@@ -511,9 +524,7 @@ def _discover_label_names(labels_group: zarr.Group) -> list[str]:
     return [k for k, v in labels_group.members() if isinstance(v, zarr.Group)]
 
 
-def _build_label_node(
-    root: zarr.Group, label_name: str, store: ZipStore | None = None
-) -> _ZipNode:
+def _build_label_node(root: zarr.Group, label_name: str, store: ZipStore | None = None) -> _ZipNode:
     """Build a ``_ZipNode`` for one OME-Zarr label under ``labels/<name>``.
 
     Reproduces the metadata shape ``ome_zarr``'s ``Label`` spec emits:
@@ -526,6 +537,12 @@ def _build_label_node(
     _ZipNode
         A label node with one dask array per multiscale dataset and the
         ``Label``-spec metadata dict (``name``/``color``/``visible``/...).
+
+    Raises
+    ------
+    ValueError
+        If the label group carries no ``multiscales`` metadata (a malformed
+        but on-disk-real store).
     """
     label_group = _group_subgroup(_group_subgroup(root, "labels"), label_name)
     ome = _group_ome_attrs(label_group)
@@ -1041,7 +1058,7 @@ def save_label_to_zarr(
             Path(tmp_zip).unlink()
         try:
             _dir_to_zip_store(cleanup_dir, tmp_zip)
-            os.replace(tmp_zip, zarr_file)
+            Path(tmp_zip).replace(zarr_file)
         finally:
             if Path(tmp_zip).exists():
                 Path(tmp_zip).unlink(missing_ok=True)
