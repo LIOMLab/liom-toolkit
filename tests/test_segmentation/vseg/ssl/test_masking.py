@@ -53,7 +53,7 @@ def test_vesselness_probability_map_peaks_on_vessel(synthetic_vessel_slice):
     assert peak_row in (6, 7, 8), f"vesselness peak row {peak_row} not on vessel row 7 (±1)"
     # Flat background corners should be near-zero (the vessel line carries the
     # probability mass). Pick the four corners, well away from row 7.
-    for (r, c) in [(0, 0), (0, 15), (15, 0), (15, 15)]:
+    for r, c in [(0, 0), (0, 15), (15, 0), (15, 15)]:
         assert float(prob[r, c]) < 1e-3, (
             f"background corner ({r},{c}) prob {float(prob[r, c])} not near-zero"
         )
@@ -103,7 +103,6 @@ def test_vessel_aware_block_mask_hole_centers_cluster_toward_vessel(synthetic_ve
     )
 
     image_2d = synthetic_vessel_slice[0]  # (16, 16), vessel at row 7
-    vessel_row = 7
     # Vessel mask: the set of pixels on the vessel line (for distance scoring).
     vessel_pixels = np.argwhere(image_2d >= 0.5)  # (N, 2) (row, col) on the line
 
