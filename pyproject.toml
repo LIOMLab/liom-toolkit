@@ -543,6 +543,7 @@ replace-imports-with-any = [
     "matplotlib.**",
     "allensdk.**",
     "SimpleITK.**",
+    "monai.**",
 ]
 
 [tool.ty.terminal]
