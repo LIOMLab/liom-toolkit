@@ -141,20 +141,24 @@ def test_skeletal_contender_names() -> None:
 
     assert MonaiUnetContender().name == "monai_unet"
     assert SwinUnetContender().name == "monai_swinunetr"
-    assert NnUnetContender().name == "nnunet_v2"
+    assert NnUnetContender(nnunet_venv_python="/usr/bin/python3").name == "nnunet_v2"
     assert isinstance(MonaiUnetContender(), Contender)
     assert isinstance(SwinUnetContender(), Contender)
-    assert isinstance(NnUnetContender(), Contender)
+    assert isinstance(NnUnetContender(nnunet_venv_python="/usr/bin/python3"), Contender)
 
 
 def test_skeletal_contenders_raise_not_implemented() -> None:
-    """The 3 wired contenders satisfy the Protocol and have the expected names.
+    """The 3 wired contenders raise NotImplementedError from train_and_predict.
 
-    The contenders are now wired (MONAI UNet, SwinUNETR, nnU-Net subprocess
-    bridge); this test confirms they still satisfy the Contender Protocol
-    structurally and expose the expected ``name`` attributes. The
-    ``train_and_predict`` behavior is exercised by the full 4-contender
-    benchmark test below.
+    The MONAI contenders (MonaiUnetContender, SwinUnetContender) and the
+    nnU-Net contender (NnUnetContender) are not yet fully wired:
+    ``train_model`` trains a VsegModel, not the MONAI architecture, so the
+    trained checkpoint cannot be loaded into a MONAI model; and the nnU-Net
+    contender never runs nnU-Net training/preprocessing before predict.
+    Calling ``train_and_predict`` would silently emit random predictions
+    masquerading as trained output (AGENTS §2). The contenders raise
+    NotImplementedError until a real training path exists. They still
+    satisfy the Contender Protocol structurally.
     """
     pytest.importorskip("torch")
     from liom_toolkit.segmentation.vseg.benchmark.contenders import (
@@ -164,9 +168,18 @@ def test_skeletal_contenders_raise_not_implemented() -> None:
         SwinUnetContender,
     )
 
-    assert isinstance(MonaiUnetContender(), Contender)
-    assert isinstance(SwinUnetContender(), Contender)
-    assert isinstance(NnUnetContender(), Contender)
+    monai = MonaiUnetContender()
+    swin = SwinUnetContender()
+    nnunet = NnUnetContender(nnunet_venv_python="/usr/bin/python3")
+    assert isinstance(monai, Contender)
+    assert isinstance(swin, Contender)
+    assert isinstance(nnunet, Contender)
+    with pytest.raises(NotImplementedError, match="not wired"):
+        monai.train_and_predict(["x"], ["y"], "/tmp/out")
+    with pytest.raises(NotImplementedError, match="not wired"):
+        swin.train_and_predict(["x"], ["y"], "/tmp/out")
+    with pytest.raises(NotImplementedError, match="not fully wired"):
+        nnunet.train_and_predict(["x"], ["y"], "/tmp/out")
 
 
 def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
@@ -197,7 +210,12 @@ def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
         patch("liom_toolkit.segmentation.vseg.training.train_model"),
         patch("liom_toolkit.segmentation.vseg.prediction.predict_one", return_value=pred_uint8),
         patch("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch),
-        patch.object(Path, "exists", return_value=False),
+        # WR-06: train_and_predict now raises RuntimeError if the checkpoint
+        # is missing after train_model. Mock the checkpoint as present and
+        # torch.load returning an empty state_dict (loaded into the fake
+        # model whose load_state_dict is a MagicMock no-op).
+        patch.object(Path, "exists", return_value=True),
+        patch.object(torch, "load", return_value={}),
     ):
         contender = Improved2DContender(device="cpu")
         masks = contender.train_and_predict(
@@ -212,6 +230,43 @@ def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
     for m in masks:
         assert m.dtype == np.bool_, f"train_and_predict must return bool masks, got {m.dtype}"
         assert m.shape == (64, 64)
+
+
+def test_improved_2d_train_and_predict_raises_on_missing_checkpoint(tmp_path) -> None:
+    """Improved2DContender.train_and_predict raises RuntimeError if checkpoint missing.
+
+    WR-06: after train_model, if the checkpoint is missing (training failed
+    silently, disk full, wrong path), the contender must raise RuntimeError
+    rather than proceed with a randomly-initialized VsegModel and present
+    random predictions as trained-model output (the silent-wrong-data path
+    AGENTS §2 forbids).
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import Improved2DContender
+
+    fake_model = MagicMock()
+    fake_model.eval.return_value = fake_model
+    fake_model.to.return_value = fake_model
+    fake_model.state_dict.return_value = {}
+
+    with (
+        patch("liom_toolkit.segmentation.vseg.model.VsegModel", return_value=fake_model),
+        patch("liom_toolkit.segmentation.vseg.training.train_model"),
+        patch("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch),
+        # Checkpoint missing after train_model → RuntimeError.
+        patch.object(Path, "exists", return_value=False),
+    ):
+        contender = Improved2DContender(device="cpu")
+        with pytest.raises(RuntimeError, match="checkpoint not found after train_model"):
+            contender.train_and_predict(
+                train_slices=["train.zarr"],
+                test_slices=["test_0.png"],
+                output_dir=str(tmp_path / "out"),
+                patch_size=(1, 64, 64),
+                ddp=False,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +302,9 @@ def test_run_benchmark_tracer_slice(tmp_path) -> None:
         patch("liom_toolkit.segmentation.vseg.training.train_model"),
         patch("liom_toolkit.segmentation.vseg.prediction.predict_one", return_value=pred_uint8),
         patch("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch),
-        patch.object(Path, "exists", return_value=False),
+        # WR-06: checkpoint present + torch.load returns empty state_dict.
+        patch.object(Path, "exists", return_value=True),
+        patch.object(torch, "load", return_value={}),
     ):
         results = run_benchmark(
             contenders=[Improved2DContender(device="cpu")],
@@ -301,6 +358,7 @@ def test_nnunet_bridge_validates_input_path(tmp_path) -> None:
             input_folder=nonexistent,
             output_folder=str(tmp_path / "out"),
             dataset_id=999,
+            nnunet_venv_python="/usr/bin/python3",
         )
 
 
@@ -333,6 +391,7 @@ def test_nnunet_bridge_raises_on_nonzero_exit(tmp_path, monkeypatch) -> None:
             input_folder=str(input_folder),
             output_folder=str(tmp_path / "out"),
             dataset_id=999,
+            nnunet_venv_python="/usr/bin/python3",
         )
 
 
@@ -357,6 +416,7 @@ def test_nnunet_bridge_raises_on_missing_env_vars(tmp_path, monkeypatch) -> None
             input_folder=str(input_folder),
             output_folder=str(tmp_path / "out"),
             dataset_id=999,
+            nnunet_venv_python="/usr/bin/python3",
         )
 
 
@@ -392,6 +452,7 @@ def test_nnunet_bridge_does_not_import_nnunetv2(tmp_path, monkeypatch) -> None:
         input_folder=str(input_folder),
         output_folder=str(tmp_path / "out"),
         dataset_id=999,
+        nnunet_venv_python="/usr/bin/python3",
     )
     assert "nnunetv2" not in sys.modules, (
         "nnunet_bridge must NEVER import nnunetv2 (torch-clobbering isolation)"
@@ -428,6 +489,7 @@ def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
         input_folder=str(input_folder),
         output_folder=str(tmp_path / "out"),
         dataset_id=999,
+        nnunet_venv_python="/usr/bin/python3",
     )
     assert isinstance(captured["cmd"], list), "argv must be a list (no shell=True)"
     assert captured["kwargs"].get("shell") is not True, "shell=True is forbidden"
@@ -439,24 +501,22 @@ def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
 
 
 def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
-    """run_benchmark scores all 4 contenders end-to-end on synthetic data.
+    """run_benchmark scores Improved2D end-to-end; the 3 wired contenders raise.
 
-    Constructs synthetic 2D vessel-mask PNG slices, calls ``run_benchmark``
-    with all 4 contenders (Improved2D, MonaiUNet, SwinUNETR, NnUNet), with
-    mocked ``train_model`` (no-op) + mocked ``subprocess.run`` for the nnU-Net
-    bridge (writes fake prediction PNGs). Asserts the returned metric table
-    has 4 contender keys each with the 6 gate-metric keys + reported_dice.
-
-    The MONAI contenders actually build real MONAI models (UNet / SwinUNETR)
-    and run real SlidingWindowInferer inference on the synthetic slices —
-    the models are randomly initialized (train_model is mocked), so the
-    predictions are random, but the test only asserts the result-table
-    structure, not specific metric values.
+    The MONAI contenders (MonaiUnetContender, SwinUnetContender) and the
+    nnU-Net contender (NnUnetContender) are not yet fully wired:
+    ``train_and_predict`` raises NotImplementedError (the MONAI training
+    path and the nnU-Net training/preprocessing bridge do not exist yet —
+    see CR-01/CR-02). Previously this test ran all 4 contenders through
+    run_benchmark and asserted a 4-key result table, but the MONAI/nnU-Net
+    contenders silently predicted with random weights (the bug the
+    NotImplementedError fixes). Now the test asserts the correct new
+    behavior: Improved2DContender scores end-to-end through run_benchmark,
+    and the three not-yet-wired contenders raise NotImplementedError from
+    ``train_and_predict`` (run_benchmark propagates contender exceptions —
+    no silent swallow, AGENTS §2).
     """
     pytest.importorskip("torch")
-    pytest.importorskip("monai")
-    from subprocess import CompletedProcess
-
     import imageio.v3 as iio
     import torch
 
@@ -468,8 +528,7 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
     )
     from liom_toolkit.segmentation.vseg.benchmark.run import run_benchmark
 
-    # Synthetic 64×64 slices (divisible by 32 for SwinUNETR) with a horizontal
-    # vessel. Written as real PNGs so the MONAI contenders can read them.
+    # Synthetic 64×64 slices with a horizontal vessel.
     shape = (64, 64)
     gt = np.zeros(shape, dtype=bool)
     gt[28:36, 16:48] = True
@@ -482,7 +541,6 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
         p = slice_dir / f"test_{i:02d}.png"
         iio.imwrite(p, gt_uint8)
         test_slices.append(str(p))
-    # Train slices (also real PNGs for the nnU-Net converter).
     train_slices: list[str] = []
     train_dir = tmp_path / "train"
     train_dir.mkdir()
@@ -490,13 +548,9 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
         p = train_dir / f"train_{i:02d}.png"
         iio.imwrite(p, gt_uint8)
         train_slices.append(str(p))
-        # Matching _mask.png labels for the nnU-Net converter.
-        iio.imwrite(train_dir / f"train_{i:02d}_mask.png", gt.astype(np.uint8))
 
-    # Mock train_model (no-op) for all contenders.
-    monkeypatch.setattr("liom_toolkit.segmentation.vseg.training.train_model", lambda *a, **k: None)
-    # Mock predict_one + VsegModel for Improved2DContender (returns perfect
-    # predictions — the same pattern as the tracer slice test).
+    # Mock train_model (no-op) + predict_one + VsegModel for Improved2DContender
+    # (returns perfect predictions). WR-06: checkpoint present + torch.load.
     fake_model = MagicMock()
     fake_model.eval.return_value = fake_model
     fake_model.to.return_value = fake_model
@@ -505,49 +559,28 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("liom_toolkit.segmentation.vseg.model.VsegModel", mock_vseg_cls)
     mock_predict_one = MagicMock(return_value=gt_uint8)
     monkeypatch.setattr("liom_toolkit.segmentation.vseg.prediction.predict_one", mock_predict_one)
+    monkeypatch.setattr("liom_toolkit.segmentation.vseg.training.train_model", lambda *a, **k: None)
     monkeypatch.setattr("liom_toolkit.segmentation.vseg.benchmark.contenders.torch", torch)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(torch, "load", lambda *a, **k: {})
 
-    # Mock subprocess.run for the nnU-Net bridge: when nnUNetv2_predict is
-    # invoked, write fake prediction PNGs (matching the test slices) to the
-    # output folder so NnUnetContender can read them back.
-    def _fake_subprocess_run(cmd, **kwargs):
-        # Parse -o <output_folder> from the argv.
-        out_folder = cmd[cmd.index("-o") + 1]
-        Path(out_folder).mkdir(parents=True, exist_ok=True)
-        for i in range(len(test_slices)):
-            iio.imwrite(Path(out_folder) / f"case_{i:04d}.png", gt_uint8)
-        return CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+    split_config = {
+        "train_slices": train_slices,
+        "test_slices": test_slices,
+        "gt_masks": [gt, gt],
+        "patch_size": (1, 64, 64),
+        "ddp": False,
+    }
 
-    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
-
-    monkeypatch.setattr(nnunet_bridge.subprocess, "run", _fake_subprocess_run)
-    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
-    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
-    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
-
-    contenders = [
-        Improved2DContender(device="cpu"),
-        MonaiUnetContender(device="cpu"),
-        SwinUnetContender(device="cpu"),
-        NnUnetContender(device="cpu", dataset_id=999),
-    ]
-
+    # Improved2DContender scores end-to-end through run_benchmark.
     results = run_benchmark(
-        contenders=contenders,
-        split_config={
-            "train_slices": train_slices,
-            "test_slices": test_slices,
-            "gt_masks": [gt, gt],
-            "patch_size": (1, 64, 64),
-            "ddp": False,
-        },
+        contenders=[Improved2DContender(device="cpu")],
+        split_config=split_config,
         eval_config=None,
         output_dir=str(tmp_path / "bench_out"),
     )
-
-    expected_names = {"improved_2d", "monai_unet", "monai_swinunetr", "nnunet_v2"}
-    assert set(results.keys()) == expected_names, (
-        f"result table must have all 4 contender keys; got {set(results.keys())}"
+    assert set(results.keys()) == {"improved_2d"}, (
+        f"result table must have the improved_2d key; got {set(results.keys())}"
     )
     expected_metrics = {
         "centerline_recall",
@@ -558,12 +591,32 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
         "cl_dice_metric",
         "reported_dice",
     }
-    for name in expected_names:
-        row = results[name]
-        assert expected_metrics.issubset(row.keys()), (
-            f"contender {name} row must contain all 6 gate metrics + reported_dice; "
-            f"got {set(row.keys())}"
-        )
+    row = results["improved_2d"]
+    assert expected_metrics.issubset(row.keys()), (
+        f"improved_2d row must contain all 6 gate metrics + reported_dice; "
+        f"got {set(row.keys())}"
+    )
+
+    # The three not-yet-wired contenders raise NotImplementedError from
+    # train_and_predict (run_benchmark propagates the exception — no silent
+    # swallow). Assert both the direct call and via run_benchmark.
+    nnunet = NnUnetContender(device="cpu", dataset_id=999, nnunet_venv_python="/usr/bin/python3")
+    for contender in [
+        MonaiUnetContender(device="cpu"),
+        SwinUnetContender(device="cpu"),
+        nnunet,
+    ]:
+        with pytest.raises(NotImplementedError, match=r"not .*wired"):
+            contender.train_and_predict(
+                train_slices, test_slices, str(tmp_path / "out"), patch_size=(1, 64, 64)
+            )
+        with pytest.raises(NotImplementedError, match=r"not .*wired"):
+            run_benchmark(
+                contenders=[contender],
+                split_config=split_config,
+                eval_config=None,
+                output_dir=str(tmp_path / "bench_out"),
+            )
 
 
 # ---------------------------------------------------------------------------
