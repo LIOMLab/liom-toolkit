@@ -564,3 +564,104 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
             f"contender {name} row must contain all 6 gate metrics + reported_dice; "
             f"got {set(row.keys())}"
         )
+
+
+# ---------------------------------------------------------------------------
+# MONAI model forward must output LOGITS (no sigmoid in forward)
+#
+# The composite loss (_monai_composite_loss) uses DiceFocalLoss(sigmoid=True)
+# + SoftclDiceLoss(sigmoid=True) — each applies sigmoid internally. The
+# post-processing (_monai_predict_slices) uses
+# Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)]). If a
+# sigmoid is added to the model forward, the loss computes
+# sigmoid(sigmoid(logits)) → wrong gradients, and post-processing
+# double-sigmoids the predictions → silent wrong data (AGENTS §2). These
+# tests assert the model forward outputs unbounded logits (at least one value
+# outside [0, 1]); a sigmoid-in-forward regression would clamp the output to
+# [0, 1] and the assertion would fail.
+# ---------------------------------------------------------------------------
+
+
+def test_monai_unet_forward_outputs_logits_not_probabilities() -> None:
+    """MonaiUnetContender._build_model() forward outputs logits, not probabilities.
+
+    Asserts the MONAI UNet forward must NOT apply sigmoid — the model outputs
+    unbounded logits. The composite loss (DiceFocalLoss(sigmoid=True) +
+    SoftclDiceLoss(sigmoid=True)) and the post-processing
+    (Activations(sigmoid=True)) each apply sigmoid internally; a sigmoid in
+    the model forward would compute sigmoid(sigmoid(logits)) → wrong
+    gradients, and double-sigmoid the predictions → silent wrong data
+    (AGENTS §2). A large-magnitude input (1e4 fill) drives logits far outside
+    [0, 1] when no sigmoid clamps them; the assertion requires at least one
+    output value outside [0, 1]. A sigmoid-in-forward regression would clamp
+    every output to [0, 1] and fail this assertion.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("monai")
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import MonaiUnetContender
+
+    contender = MonaiUnetContender(device="cpu")
+    model = contender._build_model()
+    model.eval()
+    # Large-magnitude input drives logits well outside [0, 1] when no sigmoid
+    # clamps the output. (1, 1, 64, 64) float32 — divisible by 32 for the
+    # strided encoder.
+    x = torch.full((1, 1, 64, 64), 1e4, dtype=torch.float32)
+    with torch.no_grad():
+        out = model(x)
+    out_np = out.detach().cpu().numpy()
+    assert out_np.size > 0, "model forward must produce a non-empty output"
+    assert (out_np < 0.0).any() or (out_np > 1.0).any(), (
+        "MONAI UNet forward must output unbounded logits (at least one value "
+        "outside [0, 1]); a sigmoid in forward would clamp to [0, 1] and "
+        "cause a 2x sigmoid in the loss + post-processing."
+    )
+
+
+def test_monai_swinunetr_forward_outputs_logits_not_probabilities() -> None:
+    """SwinUnetContender._build_model() forward outputs logits, not probabilities.
+
+    Asserts the MONAI SwinUNETR forward must NOT apply sigmoid — the model
+    outputs unbounded logits. The composite loss (DiceFocalLoss(sigmoid=True)
+    + SoftclDiceLoss(sigmoid=True)) and the post-processing
+    (Activations(sigmoid=True)) each apply sigmoid internally; a sigmoid in
+    the model forward would compute sigmoid(sigmoid(logits)) → wrong
+    gradients, and double-sigmoid the predictions → silent wrong data
+    (AGENTS §2). A large-magnitude input (1e4 fill) drives logits far outside
+    [0, 1] when no sigmoid clamps them; the assertion requires at least one
+    output value outside [0, 1]. A sigmoid-in-forward regression would clamp
+    every output to [0, 1] and fail this assertion.
+
+    SwinUNETR uses gradient checkpointing (use_checkpoint=True); under
+    torch.no_grad() checkpointing has nothing to checkpoint and may error, so
+    the forward runs inside a torch.enable_grad() context (the assertion is on
+    the output values, not the gradients). Spatial dims 64×64 are divisible by
+    32 (SwinUNETR's requirement).
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("monai")
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import SwinUnetContender
+
+    contender = SwinUnetContender(device="cpu")
+    model = contender._build_model()
+    model.eval()
+    # Large-magnitude input drives logits well outside [0, 1] when no sigmoid
+    # clamps the output. (1, 1, 64, 64) float32 — divisible by 32 for
+    # SwinUNETR's patch embedding.
+    x = torch.full((1, 1, 64, 64), 1e4, dtype=torch.float32)
+    # use_checkpoint=True requires grad to be enabled (checkpointing replays
+    # the forward in a backward pass); run under enable_grad even though we
+    # only inspect the output values.
+    with torch.enable_grad():
+        out = model(x)
+    out_np = out.detach().cpu().numpy()
+    assert out_np.size > 0, "model forward must produce a non-empty output"
+    assert (out_np < 0.0).any() or (out_np > 1.0).any(), (
+        "MONAI SwinUNETR forward must output unbounded logits (at least one "
+        "value outside [0, 1]); a sigmoid in forward would clamp to [0, 1] "
+        "and cause a 2x sigmoid in the loss + post-processing."
+    )
