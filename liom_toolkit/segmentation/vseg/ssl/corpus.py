@@ -485,6 +485,97 @@ class SSLCorpus(Dataset):
             f"Last error: {last_err}"
         )
 
+    def get_patch(self, patch_size: tuple[int, int]) -> NDArray[np.floating]:
+        """Sample one z-scored, augmented random patch (efficient disk read).
+
+        Like :meth:`__getitem__` but crops the patch region from the dask
+        array BEFORE ``.compute()``, so only the ``patch_size`` region is
+        read from disk (not the full 2048x2048 slice). This is the
+        real-run path -- materializing a full slice per patch would make
+        pretraining disk-bound (each slice is ~8MB; 800 slices/epoch is
+        ~6.4GB of reads per epoch just to crop 512x512 patches).
+
+        Samples a volume (round-robin via the dominant-axis index space),
+        a plane axis (per ``plane_mix``), a brain-centered slice index, a
+        random patch offset within the slice's spatial extent, reads only
+        that patch region, z-scores it per-channel, and applies light aug.
+        Retries on a zero-std (constant) patch up to ``max_slice_attempts``
+        times (a degenerate background patch -- same policy as
+        :meth:`__getitem__`).
+
+        Parameters
+        ----------
+        patch_size : tuple[int, int]
+            The ``(PH, PW)`` patch size to crop from the 2D slice.
+
+        Returns
+        -------
+        NDArray
+            A ``(C, PH, PW)`` z-scored (and optionally augmented) patch.
+
+        Raises
+        ------
+        ValueError
+            If ``patch_size`` is larger than the slice spatial extent, or
+            no patch with signal could be sampled after the retry budget.
+        """
+        patch_h, patch_w = patch_size
+        if patch_h < 1 or patch_w < 1:
+            raise ValueError(f"patch_size must be positive, got {(patch_h, patch_w)}")
+        n = len(self)
+        max_slice_attempts = 8
+        last_err: Exception | None = None
+        for _attempt in range(max_slice_attempts):
+            # Sample a volume + dominant-axis slice index (same mapping as
+            # __getitem__).
+            idx = int(self._rng.integers(0, n))
+            vol_idx = 0
+            remaining = idx
+            for vi, _path in enumerate(self.volume_paths):
+                vol = self._get_volume(vi)
+                size_along_axis = int(vol.shape[self.axis])
+                if remaining < size_along_axis:
+                    vol_idx = vi
+                    break
+                remaining -= size_along_axis
+            vol = self._get_volume(vol_idx)
+            axis = self._sample_axis(self._rng)
+            axis_size = int(vol.shape[axis])
+            slice_idx = self._sample_slice_index(axis_size, self._rng)
+            # The two spatial axes are the non-channel, non-plane axes.
+            spatial_axes = [a for a in range(1, vol.ndim) if a != axis]
+            h_axis, w_axis = spatial_axes[0], spatial_axes[1]
+            h_size, w_size = int(vol.shape[h_axis]), int(vol.shape[w_axis])
+            if h_size < patch_h or w_size < patch_w:
+                raise ValueError(
+                    f"slice spatial extent {(h_size, w_size)} smaller than "
+                    f"patch_size {(patch_h, patch_w)} -- reduce --patch-size"
+                )
+            top = int(self._rng.integers(0, h_size - patch_h + 1))
+            left = int(self._rng.integers(0, w_size - patch_w + 1))
+            # Build the dask slice expression: full channel axis, the single
+            # plane slice, and the patch crop on the two spatial axes. Only
+            # this region is read from disk on .compute().
+            sl = [slice(None)] * vol.ndim
+            sl[axis] = slice_idx
+            sl[h_axis] = slice(top, top + patch_h)
+            sl[w_axis] = slice(left, left + patch_w)
+            raw = np.asarray(vol[tuple(sl)].compute())
+            try:
+                out = z_score_per_channel(raw)
+            except ValueError as err:
+                last_err = err
+                continue
+            if self.augment:
+                out = self._apply_light_aug(out)
+            return out
+        raise ValueError(
+            f"SSLCorpus.get_patch: could not z-score any patch in volume "
+            f"{vol_idx} ({self.volume_paths[vol_idx]}) after "
+            f"{max_slice_attempts} attempts -- every sampled patch had a "
+            f"zero-std channel (constant patch). Last error: {last_err}"
+        )
+
     def _apply_light_aug(self, slice_2d: NDArray[np.floating]) -> NDArray[np.floating]:
         """Apply light augmentation: random flips + 90deg rotations + mild jitter (D-03e).
 

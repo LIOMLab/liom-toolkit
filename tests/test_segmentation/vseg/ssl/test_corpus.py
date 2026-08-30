@@ -314,6 +314,60 @@ def test_ssl_corpus_getitem_includes_background_periphery(synthetic_ome_zarr):
     )
 
 
+def test_ssl_corpus_get_patch_returns_correct_shape_and_is_finite(synthetic_ome_zarr):
+    """get_patch returns a (C, PH, PW) z-scored patch -- the real-run disk-efficient path.
+
+    get_patch crops the patch region from the dask array BEFORE .compute(),
+    so only the patch is read from disk (not the full slice). The output is
+    (C, PH, PW), z-scored, and finite -- the same contract as __getitem__
+    but patch-sized.
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),  # coronal-only for determinism
+        augment=False,
+        rng=np.random.default_rng(0),
+    )
+    patch = corpus.get_patch((8, 8))  # 8x8 patch from a 16x16 slice
+    assert patch.ndim == 3, f"get_patch output ndim {patch.ndim} != 3"
+    assert patch.shape[0] == 2, f"channel dim must be 2, got C={patch.shape[0]}"
+    assert patch.shape[1:] == (8, 8), f"patch spatial shape {patch.shape[1:]} != (8, 8)"
+    assert bool(np.isfinite(patch).all()), "get_patch output must be finite (no NaN)"
+
+
+def test_ssl_corpus_get_patch_smaller_than_slice(synthetic_ome_zarr):
+    """get_patch with a patch smaller than the slice spatial extent succeeds.
+
+    The synthetic volume is (2, 8, 16, 16); a coronal slice is (2, 16, 16)
+    so an 8x8 patch is valid. A patch larger than 16x16 raises ValueError
+    (the patch cannot exceed the slice extent).
+    """
+    pytest.importorskip("torch")
+    import numpy as np
+
+    from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
+
+    corpus = SSLCorpus(
+        volume_paths=[synthetic_ome_zarr],
+        axis=1,
+        plane_mix=(1.0, 0.0, 0.0),
+        augment=False,
+        rng=np.random.default_rng(1),
+    )
+    # Valid patch.
+    p = corpus.get_patch((4, 4))
+    assert p.shape[1:] == (4, 4)
+    # Patch larger than the 16x16 slice extent raises.
+    with pytest.raises(ValueError, match="smaller than"):
+        corpus.get_patch((32, 32))
+
+
 def test_ssl_corpus_getitem_light_aug_shape_and_finite(synthetic_ome_zarr):
     """Light aug (flips + 90deg rotations + mild jitter) preserves shape and stays finite (D-03e).
 

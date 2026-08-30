@@ -253,33 +253,19 @@ def main() -> None:
             "(check the volume paths and the plane-mix config)"
         )
 
-    # Sample random patches on-the-fly: each step draws a fresh batch of
-    # random slice indices, extracts the full (C, H, W) z-scored slice, then
-    # crops a random (PH, PW) patch. This avoids materializing the whole
-    # corpus into memory (the real corpus is ~9700 2048x2048 slices -- far
-    # too large to hold as a tensor list) and keeps the GPU fed with
-    # patch-sized inputs (a full 2048x2048 slice would OOM a 49GB A6000 on a
-    # 59M-param 9-stage U-Net). The network is fully-convolutional so the
-    # state_dict keys are patch-size-independent -- the checkpoint loads into
-    # the production network regardless of the patch size used here.
-    patch_h, patch_w = args.patch_size
-    g = torch.Generator().manual_seed(args.seed)
+    # Sample random patches on-the-fly via corpus.get_patch(): each step
+    # draws a fresh batch of patches, reading ONLY the patch region from disk
+    # (dask slicing before .compute()). This is the real-run path --
+    # materializing full 2048x2048 slices per patch (the __getitem__ path)
+    # would make pretraining disk-bound (~8MB read per slice just to crop a
+    # 512x512 patch). The network is fully-convolutional so the state_dict
+    # keys are patch-size-independent -- the checkpoint loads into the
+    # production network regardless of the patch size used here.
+    patch_size = tuple(args.patch_size)
 
     def _sample_batch() -> torch.Tensor:
-        idxs = torch.randint(0, n_corpus, (args.batch_size,), generator=g).tolist()
-        slices = [corpus[i] for i in idxs]  # each (C, H, W) z-scored ndarray
-        crops = []
-        for sl in slices:
-            c, h, w = sl.shape
-            if h < patch_h or w < patch_w:
-                raise ValueError(
-                    f"slice shape {(c, h, w)} smaller than patch size "
-                    f"{(patch_h, patch_w)} -- reduce --patch-size"
-                )
-            top = int(torch.randint(0, h - patch_h + 1, (1,), generator=g).item())
-            left = int(torch.randint(0, w - patch_w + 1, (1,), generator=g).item())
-            crops.append(sl[:, top : top + patch_h, left : left + patch_w])
-        return torch.stack([torch.as_tensor(crop) for crop in crops]).to(device)
+        patches = [corpus.get_patch(patch_size) for _ in range(args.batch_size)]
+        return torch.stack([torch.as_tensor(p) for p in patches]).to(device)
 
     batches = [_sample_batch() for _ in range(args.steps_per_epoch)]
 
