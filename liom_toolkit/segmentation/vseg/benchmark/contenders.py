@@ -641,11 +641,28 @@ class NnUnetContender:
         -------
         list[NDArray[np.bool_]]
             One boolean mask per slice, in ``slices`` order.
+
+        Raises
+        ------
+        ValueError
+            If ``slices`` is empty, or the slices span more than one parent
+            folder (the bridge predicts on a single input folder).
         """
         import imageio.v3 as iio
 
         from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
 
+        if not slices:
+            raise ValueError(
+                "NnUnetContender.predict_on_slices: slices list is empty"
+            )
+        parents = {Path(s).parent for s in slices}
+        if len(parents) != 1:
+            raise ValueError(
+                f"NnUnetContender.predict_on_slices: all slices must be in one "
+                f"folder (the bridge predicts on a single input folder); got "
+                f"{len(parents)} distinct folders"
+            )
         nnunet_predict(
             input_folder=str(Path(slices[0]).parent),
             output_folder=checkpoint_path,
