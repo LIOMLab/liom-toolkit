@@ -38,7 +38,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # centerline_recall
 # ---------------------------------------------------------------------------
@@ -63,16 +62,17 @@ def test_centerline_recall_known_answer_perfect():
 def test_centerline_recall_known_answer_break():
     """centerline_recall drops below 1.0 when a break is introduced.
 
-    Removing two columns from the prediction breaks the centreline coverage
-    without costing much area overlap — the exact failure mode Dice hides and
-    centreline recall exposes.
+    A 1-voxel-wide horizontal line is its own skeleton (20 centreline voxels,
+    no endpoint removal). Removing two columns from the prediction breaks the
+    centreline coverage without costing much area overlap — the exact failure
+    mode Dice hides and centreline recall exposes.
     """
     from liom_toolkit.segmentation.vseg.eval_metrics import centerline_recall
 
     gt = np.zeros((10, 20), dtype=bool)
-    gt[3:6, :] = True  # 3-wide vessel, skeleton = 20 centreline voxels
+    gt[5, :] = True  # 1-wide vessel, skeleton = 20 centreline voxels
     predicted = gt.copy()
-    predicted[:, 9:11] = False  # break the centreline at 2 voxels
+    predicted[5, 9:11] = False  # break the centreline at 2 voxels
 
     # 18 of 20 centreline voxels covered -> 0.9
     assert centerline_recall(predicted, gt) == pytest.approx(0.9, abs=1e-6)
@@ -135,9 +135,7 @@ def test_caliber_stratified_recall_known_answer_both_covered():
     gt = _caliber_fixture()
     predicted = gt.copy()
 
-    result = caliber_stratified_recall(
-        predicted, gt, voxel_size_um=1.0, capillary_radius_um=3.0
-    )
+    result = caliber_stratified_recall(predicted, gt, voxel_size_um=1.0, capillary_radius_um=3.0)
 
     assert set(result) == {"capillary_recall", "large_vessel_recall"}
     assert result["capillary_recall"] == pytest.approx(1.0, abs=1e-6)
@@ -157,9 +155,7 @@ def test_caliber_stratified_recall_known_answer_capillary_missed():
     yy, xx = np.mgrid[0:40, 0:40]
     predicted = (((yy - 28) ** 2 + (xx - 28) ** 2) <= 25).astype(bool)
 
-    result = caliber_stratified_recall(
-        predicted, gt, voxel_size_um=1.0, capillary_radius_um=3.0
-    )
+    result = caliber_stratified_recall(predicted, gt, voxel_size_um=1.0, capillary_radius_um=3.0)
 
     assert result["capillary_recall"] == pytest.approx(0.0, abs=1e-6)
     assert result["large_vessel_recall"] == pytest.approx(1.0, abs=1e-6)
@@ -290,9 +286,7 @@ def test_spurious_thin_vessel_rate_known_answer():
     predicted = gt.copy()
     predicted[5, 10:21] = True  # 11-voxel false-positive thin vessel
 
-    rate = spurious_thin_vessel_rate(
-        predicted, gt, voxel_size_um=1.0, capillary_radius_um=1.5
-    )
+    rate = spurious_thin_vessel_rate(predicted, gt, voxel_size_um=1.0, capillary_radius_um=1.5)
 
     assert rate == pytest.approx(11 / 2500, abs=1e-9)
 
@@ -466,7 +460,6 @@ def test_reported_dice_monai_dice_metric():
     """
     pytest.importorskip("torch")
     pytest.importorskip("monai")
-    from monai.metrics import DiceMetric  # noqa: F401
 
     from liom_toolkit.segmentation.vseg.eval_metrics import reported_dice
 
