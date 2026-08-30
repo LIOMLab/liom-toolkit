@@ -28,6 +28,7 @@ from .io import (
     load_zarr,
     save_atlas_to_zarr,
     save_label_to_zarr,
+    upgrade_ngff_v04_to_v05,
 )
 from .utils import (
     convert_to_png_for_saving,
@@ -58,6 +59,7 @@ __all__ = [
     "read_manifest",
     "save_atlas_to_zarr",
     "save_label_to_zarr",
+    "upgrade_ngff_v04_to_v05",
     "write_done_marker",
     "write_manifest",
 ]
