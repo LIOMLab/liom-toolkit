@@ -807,33 +807,71 @@ def train_model(
             last_epoch = resume_mgr.get_last_completed_epoch()
             if last_epoch is not None:
                 ckpt_file = f"{checkpoint_path}.epoch_{last_epoch}.pth"
-                if Path(ckpt_file).exists():
+                latest_file = f"{checkpoint_path}.latest.pth"
+                # Prefer the per-epoch checkpoint (exact last-epoch weights);
+                # fall back to checkpoint.latest.pth (best-val-loss weights,
+                # saved on every val_loss improvement — guaranteed to exist
+                # after epoch 0 since best_valid_loss starts at +inf) before
+                # resorting to epoch 0 with random weights. The per-epoch
+                # checkpoint is only saved every 10 epochs (epoch % 10 == 0),
+                # so a crash at a non-multiple-of-10 epoch leaves the manifest
+                # recording last_completed_epoch=N but no checkpoint.epoch_N.pth
+                # — without this fallback training would silently restart from
+                # scratch, discarding all progress.
+                load_file = (
+                    ckpt_file
+                    if Path(ckpt_file).exists()
+                    else latest_file
+                    if Path(latest_file).exists()
+                    else None
+                )
+                if load_file is not None:
                     # weights_only=True restricts deserialization to tensor
                     # storage (no arbitrary pickle code execution). PyTorch 2.6+
                     # defaults to this, but the ai extra does not pin a torch
                     # version, so a user on torch < 2.6 would otherwise load with
                     # weights_only=False (pickle.load under the hood) — a
                     # malicious or swapped .pth would execute arbitrary code.
-                    # Match the model.py load path (weights_only=True).
+                    # Match the model.py load path (weights_only=True). The same
+                    # secure load path is used for both the per-epoch and the
+                    # latest.pth fallback.
                     if ddp:
                         # DDPResumeManager handles rank-0 load + post-restore
                         # barrier (single barrier after rank-0 save; the next
                         # backward AllReduce is the subsequent sync point).
-                        resume_mgr.restore_weights(model, ckpt_file)
+                        resume_mgr.restore_weights(model, load_file)
                     else:
-                        model.load_state_dict(torch.load(ckpt_file, weights_only=True))
+                        model.load_state_dict(torch.load(load_file, weights_only=True))
+                    # Continue from last_epoch + 1 regardless of which file was
+                    # loaded: the manifest records that training completed
+                    # through last_epoch, so the epoch loop picks up there.
+                    # When load_file is latest.pth the weights may be from an
+                    # earlier (best-val-loss) epoch — this is consistent with
+                    # the 1.0.0 limitation that resume is not bit-deterministic
+                    # (optimizer/scheduler/RNG state is re-initialized).
                     start_epoch = last_epoch + 1
-                    logger.info(
-                        "train_model: resuming from epoch %d (loaded %s).",
-                        start_epoch,
-                        ckpt_file,
-                    )
+                    if load_file == ckpt_file:
+                        logger.info(
+                            "train_model: resuming from epoch %d (loaded %s).",
+                            start_epoch,
+                            ckpt_file,
+                        )
+                    else:
+                        logger.info(
+                            "train_model: per-epoch checkpoint %s is missing; "
+                            "falling back to %s (best-val-loss weights) and "
+                            "resuming from epoch %d.",
+                            ckpt_file,
+                            latest_file,
+                            start_epoch,
+                        )
                 else:
                     logger.warning(
                         "train_model: manifest says last_completed_epoch=%d but "
-                        "%s is missing — starting from epoch 0.",
+                        "both %s and %s are missing — starting from epoch 0.",
                         last_epoch,
                         ckpt_file,
+                        latest_file,
                     )
 
         model = model.to(dev)
