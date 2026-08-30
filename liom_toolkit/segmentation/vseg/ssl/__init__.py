@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .corpus import SSLCorpus, extract_plane_slice, mip_qc, z_score_per_channel
+    from .masking import vessel_aware_block_mask, vesselness_probability_map
     from .pretrain import build_pretrain_network, masked_inpainting_pretrain
     from .warmstart import load_pretrained_checkpoint, validate_nnunet_env, warm_start
 
@@ -31,6 +32,8 @@ __all__ = [
     "masked_inpainting_pretrain",
     "mip_qc",
     "validate_nnunet_env",
+    "vessel_aware_block_mask",
+    "vesselness_probability_map",
     "warm_start",
     "z_score_per_channel",
 ]
@@ -68,6 +71,10 @@ def __getattr__(name: str) -> Any:
         from . import pretrain
 
         return getattr(pretrain, name)
+    if name in {"vessel_aware_block_mask", "vesselness_probability_map"}:
+        from . import masking
+
+        return getattr(masking, name)
     if name in {"load_pretrained_checkpoint", "validate_nnunet_env", "warm_start"}:
         from . import warmstart
 
