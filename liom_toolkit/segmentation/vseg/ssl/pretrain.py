@@ -459,6 +459,15 @@ def masked_inpainting_pretrain(
         network = DistributedDataParallel(
             network,
             device_ids=[int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None,
+            # The nnU-Net ResEnc network has deep-supervision decoder branches
+            # whose parameters do not receive gradients under the
+            # reconstruction objective (only the primary/full-resolution
+            # output feeds the loss). DDP's default all-reduce expects every
+            # parameter to receive a gradient each step, so
+            # find_unused_parameters=True is required -- otherwise DDP raises
+            # "Expected to have finished reduction in the prior iteration
+            # before starting a new one" on the second forward.
+            find_unused_parameters=True,
         )
     optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
     # AMP GradScaler -- no-ops on CPU (enabled=use_amp and
