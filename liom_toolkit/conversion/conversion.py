@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import tempfile
 import warnings
@@ -233,12 +234,22 @@ def save_zarr(
         )
 
     # For the zip format, pack the working directory into the zip and remove
-    # the directory so only the single-file zip remains on disk.
+    # the directory so only the single-file zip remains on disk. The new zip
+    # is written to a temp sibling path and atomically ``os.replace``d over
+    # the destination so a failure mid-pack never leaves a partial zip in
+    # place of the original, and the working directory is removed in a
+    # ``finally`` so a pack failure does not leak it on disk.
     if is_zip:
-        if Path(zarr_file).exists():
-            Path(zarr_file).unlink()
-        _dir_to_zip_store(work_dir, zarr_file)
-        shutil.rmtree(work_dir)
+        tmp_zip = f"{zarr_file}.tmp"
+        if Path(tmp_zip).exists():
+            Path(tmp_zip).unlink()
+        try:
+            _dir_to_zip_store(work_dir, tmp_zip)
+            os.replace(tmp_zip, zarr_file)
+        finally:
+            if Path(tmp_zip).exists():
+                Path(tmp_zip).unlink(missing_ok=True)
+            shutil.rmtree(work_dir, ignore_errors=True)
     logger.info("Done!")
 
 
