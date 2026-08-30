@@ -376,12 +376,15 @@ def test_nnunet_bridge_raises_on_nonzero_exit(tmp_path, monkeypatch) -> None:
     input_folder = tmp_path / "imgs"
     input_folder.mkdir()
     fake_proc = CompletedProcess(
-        args=["python", "-m", "nnunetv2", "nnUNetv2_predict"],
+        args=["nnUNetv2_predict"],
         returncode=1,
         stdout=b"",
         stderr=b"some nnunet error detail",
     )
     monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
+    monkeypatch.setattr(
+        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
+    )
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
     monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
     monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
@@ -438,12 +441,15 @@ def test_nnunet_bridge_does_not_import_nnunetv2(tmp_path, monkeypatch) -> None:
     input_folder = tmp_path / "imgs"
     input_folder.mkdir()
     fake_proc = CompletedProcess(
-        args=["python", "-m", "nnunetv2", "nnUNetv2_predict"],
+        args=["nnUNetv2_predict"],
         returncode=0,
         stdout=b"",
         stderr=b"",
     )
     monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
+    monkeypatch.setattr(
+        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
+    )
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
     monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
     monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
@@ -481,6 +487,9 @@ def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
         return fake_proc
 
     monkeypatch.setattr(nnunet_bridge.subprocess, "run", _capture)
+    monkeypatch.setattr(
+        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
+    )
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
     monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
     monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))

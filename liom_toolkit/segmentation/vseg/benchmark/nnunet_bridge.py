@@ -73,15 +73,13 @@ def nnunet_predict(
     if not Path(input_folder).is_dir():
         raise ValueError(f"nnunet_predict: input_folder does not exist: {input_folder}")
     env = _nnunet_env(py)
+    predict_script = _nnunet_console_script(py, "nnUNetv2_predict")
 
     # List argv (no shell=True) — the subprocess-injection mitigation. A list
     # argv means user-supplied paths cannot break out of the argv into a
     # separate shell command.
     cmd = [
-        py,
-        "-m",
-        "nnunetv2",
-        "nnUNetv2_predict",
+        predict_script,
         "-i",
         input_folder,
         "-o",
@@ -163,6 +161,41 @@ def _nnunet_python(nnunet_venv_python: str | None) -> str:
     return str(Path(nnunet_venv_python).expanduser())
 
 
+def _nnunet_console_script(nnunet_venv_python: str, script_name: str) -> str:
+    """Resolve a nnU-Net console-script path from the venv python path.
+
+    nnU-Net v2 installs console scripts (``nnUNetv2_plan_and_preprocess``,
+    ``nnUNetv2_train``, ``nnUNetv2_predict``, etc.) into the venv's ``bin/``
+    directory. These are the correct entry points — ``python -m nnunetv2``
+    does NOT work (the package has no ``__main__``).
+
+    Parameters
+    ----------
+    nnunet_venv_python : str
+        Path to the venv's Python interpreter (e.g. ``~/venvs/nnunet/bin/python``).
+    script_name : str
+        The console script name (e.g. ``nnUNetv2_predict``).
+
+    Returns
+    -------
+    str
+        The path to the console script in the venv's ``bin/`` directory.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the console script does not exist in the venv.
+    """
+    bin_dir = Path(nnunet_venv_python).expanduser().parent
+    script_path = bin_dir / script_name
+    if not script_path.is_file():
+        raise FileNotFoundError(
+            f"nnU-Net console script not found: {script_path} — "
+            f"verify nnunetv2 is installed in the venv at {bin_dir.parent}"
+        )
+    return str(script_path)
+
+
 def nnunet_plan_and_preprocess(
     dataset_id: int,
     *,
@@ -193,7 +226,8 @@ def nnunet_plan_and_preprocess(
     """
     py = _nnunet_python(nnunet_venv_python)
     env = _nnunet_env(py)
-    cmd = [py, "-m", "nnunetv2", "nnUNetv2_plan_and_preprocess", "-d", str(dataset_id)]
+    pp_script = _nnunet_console_script(py, "nnUNetv2_plan_and_preprocess")
+    cmd = [pp_script, "-d", str(dataset_id)]
     if verify_dataset_integrity:
         cmd.append("--verify_dataset_integrity")
     proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
@@ -237,11 +271,9 @@ def nnunet_train(
     """
     py = _nnunet_python(nnunet_venv_python)
     env = _nnunet_env(py)
+    train_script = _nnunet_console_script(py, "nnUNetv2_train")
     cmd = [
-        py,
-        "-m",
-        "nnunetv2",
-        "nnUNetv2_train",
+        train_script,
         "-d",
         str(dataset_id),
         "-c",
