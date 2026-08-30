@@ -311,12 +311,13 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
 
         if not isinstance(new_volume, zarr.Array):
             raise TypeError(f"Expected zarr Array, got {type(new_volume)}")
-        # do_predict returns 0/1 uint8 (a boolean threshold of the sigmoid
-        # output). predict_one scales its output to 0/255 (the canonical
-        # mask convention documented in its return type: "uint8, 0 or 255").
-        # Scale the volume predictions to the same 0/255 convention so a
-        # downstream consumer loading both 2D (predict_one) and 3D
-        # (predict_volume) outputs sees a consistent scale -- without this,
+        # do_predict returns 0/1 uint8 (a boolean threshold of the model
+        # logits at 0, equivalent to sigmoid(logits) > 0.5). predict_one
+        # scales its output to 0/255 (the canonical mask convention
+        # documented in its return type: "uint8, 0 or 255"). Scale the
+        # volume predictions to the same 0/255 convention so a downstream
+        # consumer loading both 2D (predict_one) and 3D (predict_volume)
+        # outputs sees a consistent scale -- without this,
         # vessel pixels (value 1) in the volume are indistinguishable from
         # near-background noise in an 8-bit display range.
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y.astype(np.uint8) * 255
@@ -355,5 +356,7 @@ def do_predict(model: VsegModel, patch: torch.Tensor) -> NDArray[np.uint8]:
         pred_y = pred_y.cpu()
         pred_y = pred_y[0].numpy()
         pred_y = np.squeeze(pred_y, axis=0)
-        pred_y = pred_y > 0.5
+        # Model outputs raw logits — threshold at 0 (equivalent to
+        # sigmoid(logits) > 0.5, but avoids the sigmoid computation).
+        pred_y = pred_y > 0
         return np.array(pred_y, dtype=np.uint8)

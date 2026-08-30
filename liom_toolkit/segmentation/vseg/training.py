@@ -444,7 +444,7 @@ def train_model(
     node_name: str,
     dev: device | None = None,
     output_train: str = "training",
-    learning_rate: float = 0.003673,
+    learning_rate: float = 1e-4,
     batch_size: int = 35,
     epochs: int = 62,
     wandb_mode: str = "offline",
@@ -455,8 +455,10 @@ def train_model(
     pin_memory: bool = True,
     resume: bool = False,
     ddp: bool = False,
-    use_amp: bool = False,
+    use_amp: bool = True,
     patch_size: tuple[int, int, int] = (1, 256, 256),
+    normalisation_value: int | float = 65535,
+    num_workers: int = 0,
 ) -> None:
     """Train the vessel segmentation model.
 
@@ -560,7 +562,7 @@ def train_model(
         from torch.utils.data import DataLoader, random_split
 
         from .dataset import OmeZarrLabelDataSet
-        from .loss import DiceBCELoss
+        from .loss import DiceFocalClDiceLoss
         from .model import VsegModel
     except ImportError as e:
         raise ImportError(
@@ -666,6 +668,7 @@ def train_model(
             patch_size=patch_size,
             filter_empty=filter_empty_patches,
             normalise_label=False,
+            normalisation_value=normalisation_value,
         )
         train_dataset, test_dataset = random_split(full_dataset, [0.8, 0.2])
         # No re-wrap of the Subset objects returned by random_split:
@@ -675,20 +678,11 @@ def train_model(
         # re-wrap here would double-map (apply valid_indices twice) and
         # yield wrong patches.
 
-        # Pin memory only when the dataset yields CPU tensors. ``OmeZarrLabelDataSet``
-        # creates tensors directly on ``dev`` (its ``__getitem__`` does
-        # ``torch.tensor(..., device=self.device)``), so when ``dev`` is CUDA the
-        # DataLoader's pin-memory worker receives already-CUDA tensors and raises
-        # ``RuntimeError: cannot pin 'torch.cuda.FloatTensor' only dense CPU
-        # tensors can be pinned``. Pinning is an async CPU→GPU staging optimization;
-        # when the data is already on the target GPU it is wrong, not just redundant.
-        # Gate it on the dataset device being CPU so both the DDP and non-DDP CUDA
-        # paths are correct (the CPU gloo smoke keeps pin_memory=True). The original
-        # ``pin_memory`` (what the caller requested) is preserved for the resume
-        # params-hash below — the gating is a device-dependent correctness
-        # adjustment, not a config change, and ``dev`` already captures the device
-        # in the hash.
-        pin_memory_effective = pin_memory and dev.type == "cpu"
+        # Pin memory for async CPU→GPU transfer. The dataset now returns
+        # CPU tensors (not CUDA tensors), so pin_memory works correctly
+        # on both CPU and CUDA devices. The training loop moves batches
+        # to the GPU with x.to(device) after collation.
+        pin_memory_effective = pin_memory
 
         # Create data loaders. Under DDP, wrap both loaders with
         # DistributedSampler (D-02b: set_epoch called per-epoch on the train
@@ -703,14 +697,14 @@ def train_model(
                 train_dataset,
                 batch_size=batch_size,
                 sampler=train_sampler,
-                num_workers=0,
+                num_workers=num_workers,
                 pin_memory=pin_memory_effective,
             )
             validation_loader = DataLoader(
                 test_dataset,
                 batch_size=batch_size,
                 sampler=val_sampler,
-                num_workers=0,
+                num_workers=num_workers,
                 pin_memory=pin_memory_effective,
             )
         else:
@@ -719,14 +713,14 @@ def train_model(
                 train_dataset,
                 batch_size=batch_size,
                 shuffle=False,
-                num_workers=0,
+                num_workers=num_workers,
                 pin_memory=pin_memory_effective,
             )
             validation_loader = DataLoader(
                 test_dataset,
                 batch_size=batch_size,
                 shuffle=False,
-                num_workers=0,
+                num_workers=num_workers,
                 pin_memory=pin_memory_effective,
             )
 
@@ -886,9 +880,9 @@ def train_model(
             device_ids = [int(os.environ["LOCAL_RANK"])] if torch.cuda.is_available() else None
             model = DistributedDataParallel(model, device_ids=device_ids)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5)
-        loss_fn = DiceBCELoss()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
+        loss_fn = DiceFocalClDiceLoss()
 
         # Track model with Wandb — rank-0 only (D-01 W&B invariant).
         if rank == 0:
@@ -916,7 +910,7 @@ def train_model(
 
             train_losses.append(train_loss)
             val_losses.append(val_loss)
-            scheduler.step(val_loss)
+            scheduler.step()
 
             """ Saving model """
             if val_loss < best_valid_loss:

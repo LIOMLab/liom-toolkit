@@ -439,7 +439,11 @@ class OmeZarrDataset(Dataset):
         if pre_process:
             patch_data = self.pre_process_patch(patch_data)
 
-        return torch.tensor(patch_data.copy(), device=self.device, dtype=torch.float32)
+        # Return CPU tensors — DataLoader workers (num_workers>0) cannot
+        # create CUDA tensors in their separate processes. The training
+        # loop moves batches to the GPU after collation. This enables
+        # pin_memory for async CPU→GPU transfer.
+        return torch.tensor(patch_data.copy(), dtype=torch.float32)
 
     def normalise_patch(
         self, patch: NDArray[np.floating], normalisation_value: int | float = 65535

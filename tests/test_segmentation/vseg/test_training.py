@@ -91,7 +91,7 @@ def _install_fake_wandb(epochs, learning_rate, batch_size):
 
     The fake ``wandb.config`` is populated with real values for the
     hyperparameters train_model reads (``config.epochs``, ``config.learning_rate``,
-    ``config.batch_size``) so torch.optim.Adam gets a real float lr.
+    ``config.batch_size``) so torch.optim.AdamW gets a real float lr.
 
     Saves the original ``sys.modules["wandb"]`` entry (if any) so
     ``_run_train_model_resume`` can restore it on teardown instead of popping,
@@ -158,7 +158,7 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
                 "dev": "cuda",
                 "pin_memory": True,
                 "ddp": False,
-                "use_amp": False,
+                "use_amp": True,
                 "patch_size": (1, 256, 256),
             },
             steps_total=epochs,
@@ -184,7 +184,10 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
         with (
             patch("liom_toolkit.segmentation.vseg.dataset.OmeZarrLabelDataSet", fake_dataset),
             patch("liom_toolkit.segmentation.vseg.model.VsegModel", return_value=fake_model),
-            patch("liom_toolkit.segmentation.vseg.loss.DiceBCELoss", return_value=fake_loss),
+            patch(
+                "liom_toolkit.segmentation.vseg.loss.DiceFocalClDiceLoss",
+                return_value=fake_loss,
+            ),
             patch("liom_toolkit.segmentation.vseg.training.train") as train_mock,
             patch("liom_toolkit.segmentation.vseg.training.evaluate") as eval_mock,
             patch("liom_toolkit.segmentation.vseg.training.create_images", return_value=[]),
@@ -193,8 +196,8 @@ def _run_train_model_resume(tmp_path, last_completed_epoch, epochs, crash_on_epo
             patch("torch.utils.data.random_split") as random_split_mock,
             patch("torch.utils.data.DataLoader"),
             patch("torch.utils.data.Subset"),
-            patch("torch.optim.Adam"),
-            patch("torch.optim.lr_scheduler.ReduceLROnPlateau"),
+            patch("torch.optim.AdamW"),
+            patch("torch.optim.lr_scheduler.CosineAnnealingLR"),
         ):
             # random_split returns two Subsets with .indices for the
             # filter_empty_patches branch.
