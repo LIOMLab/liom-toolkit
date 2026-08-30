@@ -559,7 +559,7 @@ class NnUnetContender:
         self,
         device: str = "cpu",
         dataset_id: int = 999,
-        nnunet_venv_python: str = "~/venvs/nnunet/bin/python",
+        nnunet_venv_python: str | None = None,
     ) -> None:
         """Initialise the contender.
 
@@ -570,9 +570,20 @@ class NnUnetContender:
             config) — kept for Protocol structural conformance.
         dataset_id : int
             The nnU-Net dataset id to use for the converter + predictor.
-        nnunet_venv_python : str
-            Path to the Python interpreter in the separate nnU-Net venv.
+        nnunet_venv_python : str | None
+            Path to the Python interpreter in the separate nnU-Net venv
+            (torch-clobbering isolation). Required — there is no
+            lab-independent default. A lab that installs nnU-Net elsewhere
+            must pass its own venv-python path (AGENTS §1: no hardcoded lab
+            config). ``None`` raises :class:`ValueError`.
         """
+        if nnunet_venv_python is None:
+            raise ValueError(
+                "nnunet_venv_python is required — path to the Python "
+                "interpreter in the separate nnU-Net venv "
+                "(torch-clobbering isolation). There is no lab-independent "
+                "default; pass the venv-python path for your environment."
+            )
         self.device = device
         self.dataset_id = dataset_id
         self.nnunet_venv_python = nnunet_venv_python

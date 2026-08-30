@@ -32,7 +32,7 @@ def nnunet_predict(
     dataset_id: int,
     configuration: str = "2d",
     fold: str = "all",
-    nnunet_venv_python: str = "~/venvs/nnunet/bin/python",
+    nnunet_venv_python: str | None = None,
 ) -> None:
     """Invoke ``nnUNetv2_predict`` in the separate nnU-Net venv.
 
@@ -53,21 +53,29 @@ def nnunet_predict(
     fold : str
         The nnU-Net fold (nnU-Net ``-f`` arg). Default ``"all"`` (train on all
         folds, predict with the single resulting model).
-    nnunet_venv_python : str
-        Path to the Python interpreter in the separate nnU-Net venv. Default
-        ``"~/venvs/nnunet/bin/python"`` (the lab-box convention). ``~`` is
-        expanded via :func:`os.path.expanduser`.
+    nnunet_venv_python : str | None
+        Path to the Python interpreter in the separate nnU-Net venv
+        (torch-clobbering isolation). Required — there is no lab-independent
+        default (AGENTS §1: no hardcoded lab config). ``~`` is expanded via
+        :func:`os.path.expanduser`. ``None`` raises :class:`ValueError`.
 
     Raises
     ------
     ValueError
-        If ``input_folder`` does not exist (the offending path is in the
-        message).
+        If ``input_folder`` does not exist, or ``nnunet_venv_python`` is
+        ``None`` (the offending value is in the message).
     RuntimeError
         If any of ``nnUNet_raw`` / ``nnUNet_preprocessed`` / ``nnUNet_results``
         is unset in the environment, or if the subprocess exits non-zero (the
         returncode and the tail of stderr are in the message).
     """
+    if nnunet_venv_python is None:
+        raise ValueError(
+            "nnunet_predict: nnunet_venv_python is required — path to the "
+            "Python interpreter in the separate nnU-Net venv "
+            "(torch-clobbering isolation). There is no lab-independent "
+            "default; pass the venv-python path for your environment."
+        )
     if not Path(input_folder).is_dir():
         raise ValueError(f"nnunet_predict: input_folder does not exist: {input_folder}")
 
