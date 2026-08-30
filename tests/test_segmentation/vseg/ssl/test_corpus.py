@@ -250,8 +250,9 @@ def test_ssl_corpus_getitem_preserves_both_channels(synthetic_ome_zarr):
         volume_paths=[synthetic_ome_zarr],
         axis=1,
         plane_mix=(1.0, 0.0, 0.0),  # coronal-only for a deterministic shape
+        augment=False,
+        rng=np.random.default_rng(0),
     )
-    rng = np.random.default_rng(0)
     sl = corpus[0]
     assert sl.ndim == 3, f"sampler output ndim {sl.ndim} != 3 (channel dim must be preserved)"
     assert sl.shape[0] == 2, f"channel dim must be 2 (D-03b), got C={sl.shape[0]}"
@@ -268,7 +269,8 @@ def test_ssl_corpus_getitem_includes_background_periphery(synthetic_ome_zarr):
     non-vessel looks like; cropping to the brain mask would suppress exactly
     that signal. The synthetic_ome_zarr fixture has a centered sphere with
     empty corners, so a brain-centered+periphery sample must contain both
-    non-zero (tissue) AND zero (background) voxels.
+    bright (tissue) and dim (background) regions -- verified by the presence
+    of both high and low z-scored values (the periphery is NOT cropped away).
     """
     pytest.importorskip("torch")
     import numpy as np
@@ -279,20 +281,36 @@ def test_ssl_corpus_getitem_includes_background_periphery(synthetic_ome_zarr):
         volume_paths=[synthetic_ome_zarr],
         axis=1,
         plane_mix=(1.0, 0.0, 0.0),  # coronal-only for determinism
+        augment=False,  # disable aug so the tissue/bg contrast is clean
     )
-    rng = np.random.default_rng(1)
     # Sample several slices and confirm at least one has both tissue + bg.
+    # After z-scoring, "background" voxels are not literally zero -- they are
+    # the low tail of the z-score distribution. The check is for a bimodal
+    # spread: both clearly-bright (tissue) and clearly-dim (background)
+    # voxels exist, which a crop-to-tissue slice would NOT have.
     found_both = False
     for idx in range(8):
         sl = corpus[idx]
-        n_nonzero = int(np.count_nonzero(sl))
-        n_zero = int(sl.size - n_nonzero)
-        if n_nonzero > 0 and n_zero > 0:
-            found_both = True
+        # Full spatial extent (no crop): coronal slice of (2,8,16,16) is (2,16,16).
+        assert sl.shape == (2, 16, 16), f"slice shape {sl.shape} -- periphery must not be cropped"
+        # Both tissue (bright) and background (dim) voxels: the slice has a
+        # meaningful spread (std > 0) AND both high and low quantiles are
+        # present (not a uniform tissue-only slab).
+        for c in range(2):
+            std = float(sl[c].std())
+            if std < 1e-6:
+                continue  # constant channel -- skip (z-score would have raised)
+            q_low = float(np.quantile(sl[c], 0.05))
+            q_high = float(np.quantile(sl[c], 0.95))
+            if q_high - q_low > 1.0:
+                # Both bright and dim regions exist -- tissue + background.
+                found_both = True
+                break
+        if found_both:
             break
     assert found_both, (
-        "brain-centered+periphery sampling must include both tissue (non-zero) "
-        "AND background (zero) voxels -- the periphery is NOT cropped (D-03c)"
+        "brain-centered+periphery sampling must include both tissue (bright) "
+        "AND background (dim) voxels -- the periphery is NOT cropped (D-03c)"
     )
 
 
@@ -314,8 +332,8 @@ def test_ssl_corpus_getitem_light_aug_shape_and_finite(synthetic_ome_zarr):
         axis=1,
         plane_mix=(1.0, 0.0, 0.0),
         augment=True,
+        rng=np.random.default_rng(2),
     )
-    rng = np.random.default_rng(2)
     sl = corpus[0]
     assert sl.ndim == 3 and sl.shape[0] == 2, "aug must preserve (C, H, W) shape"
     assert np.all(np.isfinite(sl)), "augmented sample must have finite values (no NaN/inf)"
@@ -339,6 +357,7 @@ def test_ssl_corpus_getitem_z_scores_per_channel(synthetic_ome_zarr):
         axis=1,
         plane_mix=(1.0, 0.0, 0.0),
         augment=False,  # disable aug so the z-score stats are clean
+        rng=np.random.default_rng(3),
     )
     sl = corpus[0]
     for c in range(2):
@@ -364,4 +383,3 @@ def test_ssl_corpus_getitem_rejects_out_of_range_index(synthetic_ome_zarr):
     )
     with pytest.raises(ValueError):
         corpus[99]  # only 8 coronal slices in the synthetic volume
-
