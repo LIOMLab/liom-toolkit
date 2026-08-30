@@ -430,6 +430,20 @@ def cl_dice_metric(predicted: NDArray[np.bool_], gt: NDArray[np.bool_]) -> float
     skeletons are empty (no topology to preserve - documented cl_dice
     behaviour, not a raise).
 
+    .. note::
+
+        This metric and :func:`centerline_recall` both measure centreline
+        topology but handle the empty case oppositely: ``cl_dice_metric``
+        returns 0.0 on both-empty skeletons (upstream cl_dice semantics),
+        while ``centerline_recall`` raises :class:`ValueError` on empty GT
+        (no centreline to recall). A caller aggregating both must handle the
+        divergence — the orchestrator's ``try/except ValueError →
+        "vessel-free slice — metric undefined"`` path records
+        ``centerline_recall`` as undefined on empty GT while
+        ``cl_dice_metric`` contributes a 0.0. The divergence is intentional
+        (each follows its upstream convention) and documented in both
+        docstrings.
+
     Parameters
     ----------
     predicted : ArrayLike
