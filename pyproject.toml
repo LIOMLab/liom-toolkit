@@ -67,10 +67,31 @@ stats = [
 ai = [
     "torch>=2.13.0",
     "torchvision>=0.28.0",
-    "timm>=1.0.29",
+    # timm is a transitive constraint surface: nnU-Net v2's
+    # dynamic-network-architectures requires timm<1.0.23, so the upper bound
+    # here keeps the [ai] extra resolvable when nnunetv2 is added. timm is not
+    # imported anywhere in liom_toolkit/ source (it is carried only because
+    # dynamic-network-architectures and the broader torch ecosystem expect it
+    # to be present), so pinning to the 1.0.22 release has no behavioral
+    # impact on the package. 1.0.22 is the last release before the 1.0.23 API
+    # break that dynamic-network-architectures pins against.
+    "timm>=1.0.22,<1.0.23",
     "einops>=0.8.2",
     "wandb>=0.29.0",
     "scikit-learn>=1.9.0",
+    # nnU-Net v2 lives in [ai] so the same extra that provides torch also
+    # provides the network architecture the SSL pretraining loop and the
+    # warm-start path both build via get_network_from_plans. Importing it
+    # in-process (rather than via a subprocess venv) is what makes the
+    # warm-start state_dict key match guaranteed.
+    "nnunetv2>=2.8.1",
+]
+# MONAI is a separate [benchmark] extra (moved out of [ai] per the Phase 15
+# amendment). The SSL masking transforms use MONAI's RandCoarseDropoutd for
+# block masking; it is imported function-scope so ssl/ modules load with only
+# torch + skimage installed. Keeping MONAI out of [ai] avoids pulling its
+# heavy transitive deps for users who only need torch + nnU-Net.
+benchmark = [
     "monai>=1.6.0",
 ]
 antspy = [
@@ -86,9 +107,9 @@ antspy = [
 # the full conversion→registration→segmentation→stats dep set. Preserves the
 # project's core value ("other labs pip install and run the full pipeline")
 # after core was slimmed to the IO set (D-01/D-04).
-pipeline = ["liom-toolkit[io,seg,stats,ai,antspy,dask-cluster]"]
+pipeline = ["liom-toolkit[io,seg,stats,ai,benchmark,antspy,dask-cluster]"]
 all = [
-    "liom-toolkit[ai,antspy,seg,stats,dask-cluster]",
+    "liom-toolkit[ai,benchmark,antspy,seg,stats,dask-cluster]",
 ]
 dask-cluster = [
     "dask-jobqueue>=0.9.0",
