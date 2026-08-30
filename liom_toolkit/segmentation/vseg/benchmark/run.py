@@ -178,8 +178,15 @@ def run_benchmark(
         for name, _ in dict_metrics:
             dicts = [r[name] for r in per_slice_rows if isinstance(r[name], dict)]
             if dicts:
+                # Guard against a per-slice dict missing a key that dicts[0]
+                # has — a future metric variant that conditionally omits a key
+                # would otherwise raise KeyError mid-aggregation, killing the
+                # whole benchmark run with an opaque error. Mean over the
+                # slices where the key is present (skip slices missing it).
                 keys = dicts[0].keys()
-                agg[name] = {k: float(np.mean([d[k] for d in dicts])) for k in keys}
+                agg[name] = {
+                    k: float(np.mean([d[k] for d in dicts if k in d])) for k in keys
+                }
             else:
                 agg[name] = "vessel-free slice — metric undefined"
 
