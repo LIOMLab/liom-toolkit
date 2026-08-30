@@ -319,7 +319,7 @@ def _save_checkpoint_atomic(state: dict[str, Any], output_path: str) -> None:
 
 def masked_inpainting_pretrain(
     network: nn.Module,
-    dataset: Sequence[torch.Tensor],
+    dataset: Sequence[torch.Tensor] | None = None,
     *,
     epochs: int,
     output_path: str,
@@ -329,28 +329,45 @@ def masked_inpainting_pretrain(
     use_amp: bool = False,
     max_grad_norm: float = 1.0,
     ddp: bool = False,
+    batch_sampler: Callable[[], torch.Tensor] | None = None,
+    steps_per_epoch: int | None = None,
 ) -> list[float]:
     """Run the masked-inpainting pretraining loop and save the checkpoint.
 
-    For each epoch, for each batch in ``dataset``: apply the mask transform
-    (default: MONAI ``RandCoarseDropoutd`` 2D block masking), forward the
-    masked input, compute MSE on the masked regions vs the original
-    unmasked image (the D-02 masked-inpainting objective), and step the
-    optimizer with AMP + grad-clip scaler ordering. After all epochs the
-    network weights are saved as ``{'network_weights': network.state_dict()}``
-    -- the exact format ``load_pretrained_weights`` expects.
+    For each epoch, for each batch: apply the mask transform (default: MONAI
+    ``RandCoarseDropoutd`` 2D block masking), forward the masked input,
+    compute MSE on the masked regions vs the original unmasked image (the
+    D-02 masked-inpainting objective), and step the optimizer with AMP +
+    grad-clip scaler ordering. After all epochs the network weights are saved
+    as ``{'network_weights': network.state_dict()}`` -- the exact format
+    ``load_pretrained_weights`` expects.
+
+    Two batch-supply modes:
+
+    * **Pre-built sequence** (``dataset``): a sequence of ``(B, C, H, W)``
+      tensors iterated per epoch. The tracer tests use this. Under DDP the
+      sequence is sharded across ranks (rank r takes every ``world_size``-th
+      batch starting at r).
+    * **On-demand sampler** (``batch_sampler`` + ``steps_per_epoch``): a
+      callable that returns a fresh ``(B, C, H, W)`` tensor each call. The
+      real run uses this so CPU batch-prep (corpus patch sampling + Frangi
+      mask) interleaves with GPU forward/backward instead of pre-building
+      all batches upfront (which would be ~40 min of CPU work before the
+      first GPU step). Under DDP each rank calls the sampler independently
+      -- the gradients are synchronized by the DDP all-reduce, so the
+      effective batch throughput scales with world_size.
 
     Parameters
     ----------
     network : nn.Module
         The nnU-Net 2D ResEnc network (built via :func:`build_pretrain_network`).
-    dataset : Sequence[torch.Tensor]
-        A sequence of batched input tensors ``(B, C, H, W)``. Each entry is
-        one batch; the loop iterates over the sequence per epoch. An empty
-        sequence raises ``ValueError`` (no zero-fill / no silent pass). Under
-        DDP the dataset is sharded across ranks (rank r takes every
-        ``world_size``-th batch starting at r) so each rank sees a disjoint
-        subset and the effective batch throughput scales with world_size.
+    dataset : Sequence[torch.Tensor] | None
+        A sequence of batched input tensors ``(B, C, H, W)`` (the pre-built
+        mode). Ignored when ``batch_sampler`` is provided. An empty sequence
+        raises ``ValueError`` (no zero-fill / no silent pass). Under DDP the
+        dataset is sharded across ranks (rank r takes every ``world_size``-th
+        batch starting at r) so each rank sees a disjoint subset and the
+        effective batch throughput scales with world_size.
     epochs : int
         Number of epochs to run.
     output_path : str
@@ -392,10 +409,21 @@ def masked_inpainting_pretrain(
         If ``ddp=True`` but ``torch.distributed`` is not initialized (run
         under torchrun so the CLI can call ``init_process_group``).
     """
-    if not dataset:
+    if batch_sampler is None and not dataset:
         raise ValueError(
-            "masked_inpainting_pretrain: dataset is empty -- cannot pretrain on "
-            "an empty corpus. Supply at least one batch."
+            "masked_inpainting_pretrain: dataset is empty and no batch_sampler "
+            "was provided -- cannot pretrain on an empty corpus. Supply either "
+            "a non-empty dataset or a batch_sampler + steps_per_epoch."
+        )
+    if batch_sampler is not None and steps_per_epoch is None:
+        raise ValueError(
+            "masked_inpainting_pretrain: batch_sampler requires steps_per_epoch "
+            "(the number of sampler calls per epoch)"
+        )
+    if steps_per_epoch is not None and steps_per_epoch < 1:
+        raise ValueError(
+            f"masked_inpainting_pretrain: steps_per_epoch must be >= 1, "
+            f"got steps_per_epoch={steps_per_epoch}"
         )
     if epochs < 1:
         raise ValueError(f"masked_inpainting_pretrain: epochs must be >= 1, got epochs={epochs}")
@@ -444,12 +472,19 @@ def masked_inpainting_pretrain(
     for _epoch in range(epochs):
         loss_sum = 0.0
         loss_count = 0
-        # Shard the dataset across ranks: rank r takes every world_size-th
-        # batch starting at r. Each rank sees a disjoint subset, so the
-        # effective batch throughput scales with world_size. The DDP
-        # all-reduce synchronizes gradients across ranks each step.
-        for batch_idx in range(rank, len(dataset), world_size):
-            batch = dataset[batch_idx]
+        if batch_sampler is not None:
+            # On-demand sampler mode: each rank calls the sampler
+            # steps_per_epoch times per epoch. CPU batch-prep (corpus patch
+            # sampling + Frangi mask) interleaves with GPU forward/backward
+            # instead of pre-building all batches upfront. The DDP
+            # all-reduce synchronizes gradients across ranks each step.
+            batch_iter = (batch_sampler() for _ in range(steps_per_epoch))
+        else:
+            # Pre-built sequence mode: shard the dataset across ranks (rank r
+            # takes every world_size-th batch starting at r). Each rank sees
+            # a disjoint subset; effective throughput scales with world_size.
+            batch_iter = (dataset[batch_idx] for batch_idx in range(rank, len(dataset), world_size))
+        for batch in batch_iter:
             if not isinstance(batch, torch.Tensor) or batch.ndim != 4:
                 raise ValueError(
                     f"masked_inpainting_pretrain: each batch must be a 4D "

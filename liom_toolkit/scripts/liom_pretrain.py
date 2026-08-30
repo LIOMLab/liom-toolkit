@@ -281,8 +281,6 @@ def main() -> None:
         # "Input type (double) and bias type (float) should be the same".
         return torch.stack([torch.as_tensor(p, dtype=torch.float32) for p in patches]).to(device)
 
-    batches = [_sample_batch() for _ in range(args.steps_per_epoch)]
-
     def _mask_transform(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return vessel_aware_block_mask(
             batch,
@@ -291,9 +289,13 @@ def main() -> None:
             frangi_sigmas=tuple(args.frangi_sigmas),
         )
 
+    # Pass the batch sampler + steps_per_epoch so the loop calls _sample_batch
+    # on-demand each step -- CPU batch-prep (corpus patch sampling + Frangi
+    # mask) interleaves with GPU forward/backward instead of pre-building all
+    # batches upfront (which would be ~40 min of CPU work before the first
+    # GPU step on the real corpus).
     masked_inpainting_pretrain(
         network,
-        batches,
         epochs=args.epochs,
         output_path=args.pretrained_output,
         device=device,
@@ -301,6 +303,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         use_amp=args.amp,
         ddp=args.ddp,
+        batch_sampler=_sample_batch,
+        steps_per_epoch=args.steps_per_epoch,
     )
     # Under DDP only rank 0 writes the checkpoint + logs; suppress the log on
     # other ranks to avoid duplicate output.
