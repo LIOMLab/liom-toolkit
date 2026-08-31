@@ -321,12 +321,17 @@ class SSLCorpus(Dataset):
         # generator keeps flips/rot/jitter entirely on GPU. Lazily created on
         # first GPU use so CPU-only tracer/test paths never touch CUDA.
         self._gpu_rng: Any = None
+        # Bounded CuFile handle cache for the GDS fast-path (keyed by
+        # (volume, slice)). Initialized eagerly (like _zarr_meta_cache) so
+        # every access site can rely on the attribute existing without a
+        # hasattr guard. Drained by close() on teardown.
+        self._gds_cufile_cache: dict[tuple[int, int], Any] = {}
 
     def close(self) -> None:
         """Close any cached CuFile handles (GDS path resource cleanup).
 
         The GDS fast-path caches open ``kvikio.CuFile`` handles per
-        ``(volume, slice)`` and closes them only on LRU eviction. In a
+        ``(volume, slice)`` and closes them only on FIFO eviction. In a
         long-running process (e.g. a Jupyter notebook that constructs
         multiple corpus objects) the surviving handles leak file
         descriptors until the process exits. Call this when the corpus is
@@ -819,7 +824,12 @@ class SSLCorpus(Dataset):
                     "is_uncompressed": all(c.get("name") == "bytes" for c in codecs),
                     "chunk_dir": path / "s0" / "c" / "0",
                 }
-            except (OSError, ValueError, KeyError):
+            except (OSError, ValueError, KeyError, TypeError):
+                # TypeError covers np.dtype(m["data_type"]) on an
+                # unrecognized dtype string and torch.from_numpy on a dtype
+                # torch does not support -- a corrupted zarr.json with an
+                # invalid dtype would otherwise crash the GDS path instead
+                # of degrading to the dask fallback (result = None).
                 result = None
         self._zarr_meta_cache[vol_idx] = result
         return result
@@ -833,12 +843,13 @@ class SSLCorpus(Dataset):
         torch tensor on ``device`` via ``CuFile.pread`` (kvikio accepts torch
         tensors directly -- no cupy needed).
 
-        The ``CuFile`` handle is cached per (volume, slice) with an LRU bound
+        The ``CuFile`` handle is cached per (volume, slice) with a FIFO bound
         (``_GDS_CUFILE_CACHE_MAX``) so repeated reads of the same slice reuse
         the open handle without the per-read open/close overhead that made
         the linumpy ``read_zarr_via_kvikio`` slow (it opens a CuFile per
         chunk in a loop). The cache is bounded to avoid hitting the file-
-        descriptor limit on a 2001-slice volume.
+        descriptor limit on a 2001-slice volume. The cache does not reorder
+        on access (no move-to-end), so eviction is FIFO, not LRU.
 
         Returns
         -------
@@ -882,10 +893,8 @@ class SSLCorpus(Dataset):
                 f"-- the zarr store may be incomplete or corrupted. "
                 f"Run mip_qc / re-export the volume."
             )
-        # Bounded LRU CuFile cache. Without a bound, a 2001-slice volume
+        # Bounded FIFO CuFile cache. Without a bound, a 2001-slice volume
         # would open 2001 file descriptors -- risky against the ulimit.
-        if not hasattr(self, "_gds_cufile_cache"):
-            self._gds_cufile_cache: dict[tuple[int, int], Any] = {}
         cache_key = (vol_idx, slice_idx)
         if cache_key not in self._gds_cufile_cache:
             if len(self._gds_cufile_cache) >= _GDS_CUFILE_CACHE_MAX:
@@ -913,11 +922,8 @@ class SSLCorpus(Dataset):
         Computes mean/std per channel in float32 on GPU without a per-channel
         GPU->CPU scalar sync (the previous ``float(channel.std())`` /
         ``float(channel.mean())`` forced a sync per channel -- 2*C syncs per
-        patch). The zero-std guard is checked with a single ``torch.where``
-        on a tiny epsilon so a constant channel produces a finite (zero)
-        output instead of NaN; the caller's retry loop then rejects the
-        patch via the loss/NaN check rather than this raise. Stays fully on
-        GPU -- no host round-trip.
+        patch). Stays fully on GPU except for the single zero-std sync
+        described below.
 
         Returns
         -------
@@ -949,10 +955,10 @@ class SSLCorpus(Dataset):
     def _gpu_generator(self, device: Any) -> Any:
         """Lazily create a torch GPU generator (seeded from the numpy rng once).
 
-        The augmentation draws (rot count, flip flags, jitter) use this so no
-        CPU numpy RNG runs on the per-patch hot path and the jitter tensor is
-        generated directly on GPU (no H->D copy of a ~1M-element numpy array
-        per patch).
+        The jitter tensor is generated directly on GPU via this generator (no
+        H->D copy of a ~1M-element numpy array per patch). The rot/flip
+        scalar draws still use the CPU numpy rng -- 3 negligible scalar
+        draws per patch (see ``_apply_light_aug_gpu``).
 
         Returns
         -------
