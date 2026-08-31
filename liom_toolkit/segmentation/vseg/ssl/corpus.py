@@ -334,23 +334,16 @@ class SSLCorpus(Dataset):
         ``(volume, slice)`` and closes them only on FIFO eviction. In a
         long-running process (e.g. a Jupyter notebook that constructs
         multiple corpus objects) the surviving handles leak file
-        descriptors until the process exits. Call this when the corpus is
-        no longer needed; ``__del__`` also calls it as a best-effort
-        safety net during garbage collection.
+        descriptors until the process exits. The caller is responsible
+        for calling ``close()`` when the corpus is no longer needed
+        (``liom_pretrain.main`` wraps the pretraining loop in a
+        ``try/finally`` that calls this).
         """
         cache = getattr(self, "_gds_cufile_cache", None)
         if cache:
             for handle in cache.values():
                 handle.close()
             cache.clear()
-
-    def __del__(self) -> None:
-        # Best-effort CuFile handle cleanup during GC. Never raise from
-        # __del__ (CPython prints the traceback but does not propagate).
-        try:
-            self.close()
-        except Exception:
-            pass
 
     def __len__(self) -> int:
         """Return the per-slice dataset length along the dominant axis.
@@ -876,7 +869,6 @@ class SSLCorpus(Dataset):
                 f"SSLCorpus: no readable s0 zarr metadata for volume {vol_idx} "
                 f"({self.volume_paths[vol_idx]}) -- cannot GDS-read"
             )
-        shape = meta["shape"]
         chunks = meta["chunks"]
         torch_dtype = meta["torch_dtype"]
         np_dtype = meta["np_dtype"]
