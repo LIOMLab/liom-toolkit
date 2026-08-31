@@ -222,9 +222,7 @@ def test_masked_inpainting_pretrain_cosine_schedule_decays_lr(
 
         def _capture_print(msg: str, *a, **k) -> None:
             lrs.extend(
-                float(token.split("=")[1])
-                for token in str(msg).split()
-                if token.startswith("lr=")
+                float(token.split("=")[1]) for token in str(msg).split() if token.startswith("lr=")
             )
 
         # pretrain.py calls the builtin print, so patch builtins.print (not a
