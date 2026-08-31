@@ -535,8 +535,9 @@ def masked_inpainting_pretrain(
             original = batch  # the reconstruction target is the unmasked image
 
             masked_input, mask = mask_transform(batch)
-            masked_input = masked_input.to(device)
-            mask = mask.to(device)
+            # mask_transform returns tensors on the same device as batch
+            # (already moved to `device` above), so no further .to(device)
+            # is needed on masked_input / mask.
 
             optimizer.zero_grad()
             output = network(masked_input)
