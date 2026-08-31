@@ -846,7 +846,17 @@ class SSLCorpus(Dataset):
         np_dtype = meta["np_dtype"]
         chunk_path = meta["chunk_dir"] / str(slice_idx) / "0" / "0"
         if not chunk_path.exists():
-            return torch.zeros((shape[0], shape[2], shape[3]), dtype=torch_dtype, device=device)
+            # No silent zero-fill (AGENTS section 2 -- never return a
+            # zero-filled array as a fallback). A missing chunk file means
+            # the zarr store is incomplete or corrupted; raise so the caller
+            # sees the real root cause instead of a misleading "zero-std
+            # channel" error from the downstream z-score retry loop.
+            raise ValueError(
+                f"SSLCorpus: GDS chunk file not found: {chunk_path} "
+                f"(volume {vol_idx}={self.volume_paths[vol_idx]}, slice {slice_idx}) "
+                f"-- the zarr store may be incomplete or corrupted. "
+                f"Run mip_qc / re-export the volume."
+            )
         # Bounded LRU CuFile cache. Without a bound, a 2001-slice volume
         # would open 2001 file descriptors -- risky against the ulimit.
         if not hasattr(self, "_gds_cufile_cache"):
