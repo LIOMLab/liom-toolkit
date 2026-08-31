@@ -329,20 +329,25 @@ def main() -> None:
     # mask) interleaves with GPU forward/backward instead of pre-building all
     # batches upfront (which would be ~40 min of CPU work before the first
     # GPU step on the real corpus).
-    masked_inpainting_pretrain(
-        network,
-        epochs=args.epochs,
-        output_path=args.pretrained_output,
-        device=device,
-        mask_transform=_mask_transform,
-        learning_rate=args.learning_rate,
-        use_amp=args.amp,
-        ddp=args.ddp,
-        batch_sampler=_sample_batch,
-        steps_per_epoch=args.steps_per_epoch,
-        lr_schedule=args.lr_schedule,
-        lr_min=args.lr_min,
-    )
+    try:
+        masked_inpainting_pretrain(
+            network,
+            epochs=args.epochs,
+            output_path=args.pretrained_output,
+            device=device,
+            mask_transform=_mask_transform,
+            learning_rate=args.learning_rate,
+            use_amp=args.amp,
+            ddp=args.ddp,
+            batch_sampler=_sample_batch,
+            steps_per_epoch=args.steps_per_epoch,
+            lr_schedule=args.lr_schedule,
+            lr_min=args.lr_min,
+        )
+    finally:
+        # Close cached CuFile handles (GDS path) so a long-running process
+        # does not leak file descriptors after the pretraining loop ends.
+        corpus.close()
     # Under DDP only rank 0 writes the checkpoint + logs; suppress the log on
     # other ranks to avoid duplicate output.
     if not args.ddp or torch.distributed.get_rank() == 0:

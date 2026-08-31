@@ -322,6 +322,31 @@ class SSLCorpus(Dataset):
         # first GPU use so CPU-only tracer/test paths never touch CUDA.
         self._gpu_rng: Any = None
 
+    def close(self) -> None:
+        """Close any cached CuFile handles (GDS path resource cleanup).
+
+        The GDS fast-path caches open ``kvikio.CuFile`` handles per
+        ``(volume, slice)`` and closes them only on LRU eviction. In a
+        long-running process (e.g. a Jupyter notebook that constructs
+        multiple corpus objects) the surviving handles leak file
+        descriptors until the process exits. Call this when the corpus is
+        no longer needed; ``__del__`` also calls it as a best-effort
+        safety net during garbage collection.
+        """
+        cache = getattr(self, "_gds_cufile_cache", None)
+        if cache:
+            for handle in cache.values():
+                handle.close()
+            cache.clear()
+
+    def __del__(self) -> None:
+        # Best-effort CuFile handle cleanup during GC. Never raise from
+        # __del__ (CPython prints the traceback but does not propagate).
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __len__(self) -> int:
         """Return the per-slice dataset length along the dominant axis.
 
