@@ -517,7 +517,7 @@ def vessel_aware_block_mask(
         # on HxW applied identically across channels -- D-03b).
         mask = block[:, None].expand(b, c, h, w).contiguous()
     else:
-        from concurrent.futures import ThreadPoolExecutor
+        from liom_toolkit.utils.concurrency import get_thread_pool
 
         def _compute_prob_map(bi: int) -> NDArray[np.floating] | None:
             if not will_mask[bi]:
@@ -525,7 +525,11 @@ def vessel_aware_block_mask(
             image_2d = batch[bi, 0].detach().cpu().numpy().astype(np.float64, copy=False)
             return vesselness_probability_map(image_2d, sigmas=frangi_sigmas)
 
-        with ThreadPoolExecutor(max_workers=min(b, 8)) as pool:
+        # Use the sanctioned concurrency layer (SC-3): all stdlib pool
+        # construction must go through utils/concurrency.py so the spawn-
+        # context + cap wiring is applied. Direct ThreadPoolExecutor() here
+        # would trip test_no_uncapped_pools_outside_concurrency_module.
+        with get_thread_pool(max_workers=min(b, 8)) as pool:
             prob_maps = list(pool.map(_compute_prob_map, range(b)))
 
         # Per-batch, per-channel-group hole placement: the Frangi map is

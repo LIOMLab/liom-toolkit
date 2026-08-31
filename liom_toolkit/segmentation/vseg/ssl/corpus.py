@@ -944,9 +944,10 @@ class SSLCorpus(Dataset):
             out = torch.flip(out, dims=[-2])
         if self.intensity_jitter > 0.0:
             g = self._gpu_generator(out.device)
-            jitter = torch.randn(
-                out.shape, generator=g, dtype=out.dtype, device=out.device
-            ) * self.intensity_jitter
+            jitter = (
+                torch.randn(out.shape, generator=g, dtype=out.dtype, device=out.device)
+                * self.intensity_jitter
+            )
             out = out + jitter
         return out.contiguous()
 
