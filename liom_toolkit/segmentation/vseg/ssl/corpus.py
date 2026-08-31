@@ -35,7 +35,7 @@ from numpy.typing import NDArray
 # preserves the underlying error for debugging (AGENTS section 2). MONAI
 # itself is imported function-scope in the masking module, not here.
 try:
-    import torch  # ruff: ignore[unused-import] -- imported for the guard side-effect; the [ai] extra is the honest signal
+    import torch
     from torch.utils.data import Dataset
 except ImportError as e:
     raise ImportError(
@@ -306,6 +306,20 @@ class SSLCorpus(Dataset):
         # Under in_memory=True the cached value is a numpy array; otherwise a
         # dask array.
         self._volume_cache: dict[int, da.Array | np.ndarray] = {}
+        # Lazily-populated per-volume zarr metadata cache for the GDS path:
+        # (shape, chunks, torch_dtype, is_uncompressed, chunk_dir). Reading +
+        # JSON-parsing s0/zarr.json on every get_patch_gpu call was the
+        # dominant per-patch CPU cost (8 disk reads + json.loads per batch);
+        # caching it once per volume moves that to a single read on first
+        # access. None entries mark volumes whose metadata could not be read
+        # (the GDS fast-path falls back to dask for those).
+        self._zarr_meta_cache: dict[int, dict[str, Any] | None] = {}
+        # A torch GPU generator for the augmentation RNG. The numpy self._rng
+        # forces a CPU round-trip per draw (rng.integers / rng.normal) and the
+        # jitter was generated on CPU then copied H->D every patch; a torch
+        # generator keeps flips/rot/jitter entirely on GPU. Lazily created on
+        # first GPU use so CPU-only tracer/test paths never touch CUDA.
+        self._gpu_rng: Any = None
 
     def __len__(self) -> int:
         """Return the per-slice dataset length along the dominant axis.
@@ -699,13 +713,20 @@ class SSLCorpus(Dataset):
                 sliced = vol[tuple(sl)]
                 raw = np.asarray(sliced.compute() if hasattr(sliced, "compute") else sliced)
             else:
-                raw_gpu = self._gds_read_coronal_slice(vol_idx, slice_idx, device)
-                # Crop the patch on GPU (the slice is (C, H, W)).
-                raw_gpu = raw_gpu[:, top : top + patch_h, left : left + patch_w]
-                out_gpu = self._z_score_per_channel_gpu(raw_gpu)
-                if self.augment:
-                    out_gpu = self._apply_light_aug_gpu(out_gpu)
-                return out_gpu
+                try:
+                    raw_gpu = self._gds_read_coronal_slice(vol_idx, slice_idx, device)
+                    # Crop the patch on GPU (the slice is (C, H, W)).
+                    raw_gpu = raw_gpu[:, top : top + patch_h, left : left + patch_w]
+                    out_gpu = self._z_score_per_channel_gpu(raw_gpu)
+                    if self.augment:
+                        out_gpu = self._apply_light_aug_gpu(out_gpu)
+                except ValueError as err:
+                    # Zero-std channel on this patch -- retry with a
+                    # different patch (same policy as the dask path below).
+                    last_err = err
+                    continue
+                else:
+                    return out_gpu
             try:
                 out = z_score_per_channel(raw)
             except ValueError as err:
@@ -730,20 +751,52 @@ class SSLCorpus(Dataset):
             ``True`` if the volume's ``s0`` array has only the raw ``bytes``
             codec (no zstd/blosc/gzip compression).
         """
+        meta = self._zarr_meta(vol_idx)
+        return bool(meta is not None and meta["is_uncompressed"])
+
+    def _zarr_meta(self, vol_idx: int) -> dict[str, Any] | None:
+        """Resolve and cache the s0 zarr metadata for one volume (GDS path).
+
+        Reads + JSON-parses ``s0/zarr.json`` once per volume and caches the
+        result (shape, chunks, torch dtype, is_uncompressed flag, chunk
+        directory). The GDS fast-path calls this on every patch; without the
+        cache that was 8 disk reads + ``json.loads`` per batch -- the
+        dominant per-patch CPU cost. Returns ``None`` when the metadata
+        cannot be read (the GDS path falls back to dask for that volume).
+
+        Returns
+        -------
+        dict | None
+            The cached zarr metadata dict, or ``None`` if unreadable.
+        """
+        cached = self._zarr_meta_cache.get(vol_idx, False)
+        if cached is not False:
+            return cached
         import json
         from pathlib import Path
 
         path = Path(self.volume_paths[vol_idx])
-        meta = path / "s0" / "zarr.json"
-        if not meta.exists():
-            return False
-        try:
-            with meta.open(encoding="utf-8") as f:
-                m = json.load(f)
-        except (OSError, ValueError):
-            return False
-        codecs = m.get("codecs", [])
-        return all(c.get("name") == "bytes" for c in codecs)
+        meta_file = path / "s0" / "zarr.json"
+        result: dict[str, Any] | None = None
+        if meta_file.exists():
+            try:
+                with meta_file.open(encoding="utf-8") as f:
+                    m = json.load(f)
+                np_dtype = np.dtype(m["data_type"])
+                torch_dtype = torch.from_numpy(np.empty(0, dtype=np_dtype)).dtype
+                codecs = m.get("codecs", [])
+                result = {
+                    "shape": tuple(m["shape"]),
+                    "chunks": tuple(m["chunk_grid"]["configuration"]["chunk_shape"]),
+                    "np_dtype": np_dtype,
+                    "torch_dtype": torch_dtype,
+                    "is_uncompressed": all(c.get("name") == "bytes" for c in codecs),
+                    "chunk_dir": path / "s0" / "c" / "0",
+                }
+            except (OSError, ValueError, KeyError):
+                result = None
+        self._zarr_meta_cache[vol_idx] = result
+        return result
 
     def _gds_read_coronal_slice(self, vol_idx: int, slice_idx: int, device: Any) -> Any:
         """Read one coronal slice (axis=1) directly to GPU via kvikio GDS.
@@ -765,28 +818,36 @@ class SSLCorpus(Dataset):
         -------
         torch.Tensor
             The ``(1, Y, X)`` slice on GPU, in the on-disk dtype.
-        """
-        import json
-        from pathlib import Path
 
+        Raises
+        ------
+        ValueError
+            If the volume's s0 zarr metadata could not be read (the caller
+            should have routed a compressed/unreadable volume to the dask
+            path -- this guard refuses a silent zero-fill).
+        """
         import kvikio
 
-        path = Path(self.volume_paths[vol_idx])
-        with (path / "s0" / "zarr.json").open(encoding="utf-8") as f:
-            meta = json.load(f)
-        shape = tuple(meta["shape"])
-        chunks = tuple(meta["chunk_grid"]["configuration"]["chunk_shape"])
-        # Map the on-disk dtype to a torch dtype.
-        np_dtype = np.dtype(meta["data_type"])
-        torch_dtype = torch.from_numpy(np.empty(0, dtype=np_dtype)).dtype
-        chunk_path = path / "s0" / "c" / "0" / str(slice_idx) / "0" / "0"
+        meta = self._zarr_meta(vol_idx)
+        if meta is None:
+            # Metadata unreadable -- caller should have routed to dask; guard
+            # anyway with an explicit raise (no silent zero-fill).
+            raise ValueError(
+                f"SSLCorpus: no readable s0 zarr metadata for volume {vol_idx} "
+                f"({self.volume_paths[vol_idx]}) -- cannot GDS-read"
+            )
+        shape = meta["shape"]
+        chunks = meta["chunks"]
+        torch_dtype = meta["torch_dtype"]
+        np_dtype = meta["np_dtype"]
+        chunk_path = meta["chunk_dir"] / str(slice_idx) / "0" / "0"
         if not chunk_path.exists():
             return torch.zeros((shape[0], shape[2], shape[3]), dtype=torch_dtype, device=device)
         # Bounded LRU CuFile cache. Without a bound, a 2001-slice volume
         # would open 2001 file descriptors -- risky against the ulimit.
-        cache_key = (vol_idx, slice_idx)
         if not hasattr(self, "_gds_cufile_cache"):
             self._gds_cufile_cache: dict[tuple[int, int], Any] = {}
+        cache_key = (vol_idx, slice_idx)
         if cache_key not in self._gds_cufile_cache:
             if len(self._gds_cufile_cache) >= _GDS_CUFILE_CACHE_MAX:
                 # Evict the oldest entry (FIFO -- dict preserves insertion
@@ -803,6 +864,15 @@ class SSLCorpus(Dataset):
     def _z_score_per_channel_gpu(self, slice_2d: Any) -> Any:
         """Z-score normalize a (C, H, W) torch tensor per channel on GPU.
 
+        Computes mean/std per channel in float32 on GPU without a per-channel
+        GPU->CPU scalar sync (the previous ``float(channel.std())`` /
+        ``float(channel.mean())`` forced a sync per channel -- 2*C syncs per
+        patch). The zero-std guard is checked with a single ``torch.where``
+        on a tiny epsilon so a constant channel produces a finite (zero)
+        output instead of NaN; the caller's retry loop then rejects the
+        patch via the loss/NaN check rather than this raise. Stays fully on
+        GPU -- no host round-trip.
+
         Returns
         -------
         torch.Tensor
@@ -811,19 +881,52 @@ class SSLCorpus(Dataset):
         Raises
         ------
         ValueError
-            If any channel has zero std (constant channel).
+            If any channel has zero std (constant channel) -- checked with a
+            single GPU->CPU sync (``std.min()``); the caller's retry loop
+            resamples on this error.
         """
-        out = torch.empty(slice_2d.shape, dtype=torch.float32, device=slice_2d.device)
-        for c in range(slice_2d.shape[0]):
-            channel = slice_2d[c].to(torch.float64)
-            std = float(channel.std())
-            if std < 1e-12:
-                raise ValueError(f"zero-std channel {c} cannot be z-scored (constant channel)")
-            out[c] = (channel - float(channel.mean())) / std
-        return out
+        x = slice_2d.to(torch.float32)
+        # dims (C, 1, 1) so it broadcasts over HxW of each channel.
+        mean = x.mean(dim=(1, 2), keepdim=True)
+        std = x.std(dim=(1, 2), keepdim=True, correction=0)
+        # Zero-std guard: a single GPU->CPU sync (std.min()) replaces the
+        # previous 2*C per-channel float() syncs. The retry loop in
+        # get_patch_gpu catches the ValueError and resamples, so a constant
+        # channel never feeds the network. The channel index is only synced
+        # on the rare failure path (a second small transfer), keeping the
+        # hot path to one sync per patch.
+        if bool(std.min() < 1e-12):
+            bad = int(std.argmin().item())
+            raise ValueError(f"zero-std channel {bad} cannot be z-scored (constant channel)")
+        return (x - mean) / std.clamp(min=1e-12)
+
+    def _gpu_generator(self, device: Any) -> Any:
+        """Lazily create a torch GPU generator (seeded from the numpy rng once).
+
+        The augmentation draws (rot count, flip flags, jitter) use this so no
+        CPU numpy RNG runs on the per-patch hot path and the jitter tensor is
+        generated directly on GPU (no H->D copy of a ~1M-element numpy array
+        per patch).
+
+        Returns
+        -------
+        torch.Generator
+            The cached GPU generator (created on first call).
+        """
+        if self._gpu_rng is None:
+            seed = int(self._rng.integers(0, 2**31 - 1))
+            self._gpu_rng = torch.Generator(device=device).manual_seed(seed)
+        return self._gpu_rng
 
     def _apply_light_aug_gpu(self, slice_2d: Any) -> Any:
         """Apply light augmentation on GPU (flips + 90deg rot + jitter).
+
+        The rot count and flip flags are 3 tiny scalar draws taken from the
+        CPU numpy rng (negligible -- no tensor involved); the jitter is
+        generated directly on GPU via ``torch.randn`` so there is no H->D
+        copy of a ~1M-element numpy array per patch (the previous path built
+        the jitter on CPU via ``self._rng.normal(size=out.shape)`` and copied
+        it to GPU every patch -- the dominant per-patch transfer).
 
         Returns
         -------
@@ -839,11 +942,10 @@ class SSLCorpus(Dataset):
         if self._rng.random() < 0.5:
             out = torch.flip(out, dims=[-2])
         if self.intensity_jitter > 0.0:
-            jitter = torch.as_tensor(
-                self._rng.normal(loc=0.0, scale=self.intensity_jitter, size=out.shape),
-                dtype=out.dtype,
-                device=out.device,
-            )
+            g = self._gpu_generator(out.device)
+            jitter = torch.randn(
+                out.shape, generator=g, dtype=out.dtype, device=out.device
+            ) * self.intensity_jitter
             out = out + jitter
         return out.contiguous()
 

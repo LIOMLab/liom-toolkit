@@ -100,12 +100,21 @@ def test_masked_inpainting_pretrain_runs_and_saves_checkpoint(
     volume = torch.randn(1, 2, 16, 16, dtype=torch.float32)
     out_path = tmp_path / "pretrained.pth"
 
+    # Deterministic mask: prob=1.0 guarantees every batch is masked (the
+    # default _default_block_mask uses prob=0.5, so a 1-batch epoch has a
+    # 50% chance of skipping the only batch -> loss_count==0 -> flaky raise).
+    from liom_toolkit.segmentation.vseg.ssl.masking import vessel_aware_block_mask
+
+    def _always_mask(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return vessel_aware_block_mask(batch, mask_ratio=0.25, block_size=(8, 8), prob=1.0)
+
     masked_inpainting_pretrain(
         net,
         [volume],
         epochs=1,
         output_path=str(out_path),
         device=torch.device("cpu"),
+        mask_transform=_always_mask,
     )
 
     assert out_path.is_file(), f"checkpoint not saved at {out_path}"
@@ -148,12 +157,21 @@ def test_masked_inpainting_pretrain_loss_is_finite(
     volume = torch.randn(1, 2, 16, 16, dtype=torch.float32)
     out_path = tmp_path / "pretrained_finite.pth"
 
+    # Deterministic mask: prob=1.0 guarantees every batch is masked (the
+    # default _default_block_mask uses prob=0.5, so a 1-batch epoch has a
+    # 50% chance of skipping the only batch -> loss_count==0 -> flaky raise).
+    from liom_toolkit.segmentation.vseg.ssl.masking import vessel_aware_block_mask
+
+    def _always_mask(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return vessel_aware_block_mask(batch, mask_ratio=0.25, block_size=(8, 8), prob=1.0)
+
     losses = masked_inpainting_pretrain(
         net,
         [volume],
         epochs=2,
         output_path=str(out_path),
         device=torch.device("cpu"),
+        mask_transform=_always_mask,
     )
     assert losses, "pretrain must return at least one per-epoch loss"
     for loss in losses:

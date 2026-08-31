@@ -479,7 +479,10 @@ def masked_inpainting_pretrain(
 
     epoch_losses: list[float] = []
     for _epoch in range(epochs):
-        loss_sum = 0.0
+        # Accumulate the epoch loss as a GPU scalar and sync once at epoch end
+        # (the previous ``float(loss.item())`` per step forced a GPU->CPU sync
+        # every step -- 100 syncs/epoch -- and stalled the GPU pipeline).
+        loss_sum = torch.zeros((), device=device)
         loss_count = 0
         if batch_sampler is not None:
             # On-demand sampler mode: each rank calls the sampler
@@ -554,7 +557,7 @@ def masked_inpainting_pretrain(
             scaler.step(optimizer)
             scaler.update()
 
-            loss_sum += float(loss.item())
+            loss_sum = loss_sum + loss.detach()
             loss_count += 1
 
         if loss_count == 0:
@@ -563,7 +566,7 @@ def masked_inpainting_pretrain(
                 "epoch -- every batch's mask transform dropped zero elements "
                 "(check mask_transform prob / block size vs the input size)."
             )
-        epoch_losses.append(loss_sum / loss_count)
+        epoch_losses.append(float(loss_sum.item()) / loss_count)
         # Per-epoch progress log (rank 0 only under DDP). The real run is
         # multi-hour, so without this there is no visibility into whether the
         # loop is progressing or stuck -- the only other log is the final

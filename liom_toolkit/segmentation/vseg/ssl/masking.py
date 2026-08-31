@@ -208,8 +208,12 @@ def _frangi2d_gpu(
         r_b = lam1.abs() / lam2
         s = torch.sqrt(lam1**2 + lam2**2)
         gamma = s.max() / 2
-        if float(gamma) == 0:
-            gamma = torch.tensor(1.0, device=img.device, dtype=img.dtype)
+        # Background-only batch: gamma == 0 would make the second exp == 1
+        # (vals -> 0) and divide by 0. Use a safe gamma floor without a
+        # GPU->CPU sync (the previous ``if float(gamma) == 0`` forced a sync
+        # per sigma). where(gamma > 0, gamma, 1) keeps the real value on
+        # vessel-bearing batches and floors to 1 on degenerate ones.
+        gamma = torch.where(gamma > 0, gamma, torch.ones_like(gamma))
         vals = torch.exp(-(r_b**2) / (2 * beta**2)) * (1 - torch.exp(-(s**2) / (2 * gamma**2)))
         filtered_max = torch.maximum(filtered_max, vals)
     return filtered_max
