@@ -1035,6 +1035,30 @@ nvtx = [
 ]
 
 [[package]]
+name = "cupy-cuda13x"
+version = "14.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-pathfinder" },
+    { name = "numpy" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/c8/68e07ff959f6a9f93169e37a64a4c24223487102b8625191e4a566cab465/cupy_cuda13x-14.2.0-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:0a9b6538079c5151dcd99cf44b94cc3f1242315b7de0498b4619cef9b2a7c2c8", size = 73382974, upload-time = "2026-08-20T02:41:13.648Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/bf/c4c25e97552320451afdcd459d4b6e0b715459594e998b23051c06db64c3/cupy_cuda13x-14.2.0-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:9aafadbe29db3d4285026044aafeb28f2a3de4bd0df70718ec6892b7d27a4ded", size = 69439247, upload-time = "2026-08-20T02:41:17.375Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/02/3cb39774c71a16275c50b5d1e92ddcefa948ff1e69f464249b70a79b0abe/cupy_cuda13x-14.2.0-cp313-cp313-manylinux2014_aarch64.whl", hash = "sha256:449af7f608dc70ce64e8c45cf5a6ea0bbef51623e7c806b1a43445ae3c76e1e0", size = 72969322, upload-time = "2026-08-20T02:41:23.311Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/27/216370ae8c39fa9835645be3c27513ab72f52cf4f51faf58d799fba981b6/cupy_cuda13x-14.2.0-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:5b79a606f6639d9bed74ef7072f36756a95a804c86d7adb367b39307ac771600", size = 69048238, upload-time = "2026-08-20T02:41:26.831Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/70/8c80c9e7010193afed8ccb7110d6173aa23bf3a6ce2fc2450244b0fa50a1/cupy_cuda13x-14.2.0-cp314-cp314-manylinux2014_aarch64.whl", hash = "sha256:7ac57c4e16c62f265b5ecc2b45d6bbafe9dc70a99b849ed6cfb8d16f32204589", size = 72840193, upload-time = "2026-08-20T02:41:33.146Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/b8/4f4c4f34fc31ab8d136ed965a919505297974629d9852c50e15bfd616281/cupy_cuda13x-14.2.0-cp314-cp314-manylinux2014_x86_64.whl", hash = "sha256:ff0bdebd1b43c0c6db53095784c787c4e4eae671356cf521c4b7482ed78a1a7e", size = 68422828, upload-time = "2026-08-20T02:41:36.527Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/54/a582ac70e9e75d3fad7ae073051bcd50dd128a1f66dd275291dc5f48d997/cupy_cuda13x-14.2.0-cp314-cp314t-manylinux2014_aarch64.whl", hash = "sha256:e8bb453551deced08ec5c4576da61ebf1e2b4a45aeff48e09f47ec332f7cad3d", size = 73336756, upload-time = "2026-08-20T02:41:42.718Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/aa/222151ba5061d7a01efe4009efad9f9a7164e15bb2a494d9aa86efc97d4f/cupy_cuda13x-14.2.0-cp314-cp314t-manylinux2014_x86_64.whl", hash = "sha256:313500c5d415f65d388e84a9d2eb7f07f97c23c85dc5785f986e75d46d9c9693", size = 68792663, upload-time = "2026-08-20T02:41:46.079Z" },
+]
+
+[package.optional-dependencies]
+ctk = [
+    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "curand", "cusolver", "cusparse", "nvrtc"] },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2051,6 +2075,21 @@ wheels = [
 ]
 
 [[package]]
+name = "kvikio-cu13"
+version = "26.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cupy-cuda13x", extra = ["ctk"] },
+    { name = "libkvikio-cu13" },
+    { name = "numpy" },
+    { name = "packaging" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/b6/5611c66ce2bca33553766a562aaee085386d3e9837783301b0b50355a6c7/kvikio_cu13-26.8.0-cp311-abi3-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8aad1d1c5919fd33d1ab7bd4ff2d2b9576df59baff807a422023e6eb2550ed06", size = 595754, upload-time = "2026-08-06T18:03:44.787Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/91/232f0afaeb8dc708d87d24e180eb22ad7175052e8da9debe8611ec06d0f7/kvikio_cu13-26.8.0-cp311-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a2077f87c747e1ea8f5a99144f2ef7a757deb0ef6c2271ae4d89ab0c62cb464d", size = 636286, upload-time = "2026-08-06T18:04:11.682Z" },
+]
+
+[[package]]
 name = "lazy-loader"
 version = "0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -2060,6 +2099,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/49/ac/21a1f8aa3777f5658576777ea76bfb124b702c520bbe90edf4ae9915eafa/lazy_loader-0.5.tar.gz", hash = "sha256:717f9179a0dbed357012ddad50a5ad3d5e4d9a0b8712680d4e687f5e6e6ed9b3", size = 15294, upload-time = "2026-03-06T15:45:09.054Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/a1/8d812e53a5da1687abb10445275d41a8b13adb781bbf7196ddbcf8d88505/lazy_loader-0.5-py3-none-any.whl", hash = "sha256:ab0ea149e9c554d4ffeeb21105ac60bed7f3b4fd69b1d2360a4add51b170b005", size = 8044, upload-time = "2026-03-06T15:45:07.668Z" },
+]
+
+[[package]]
+name = "libkvikio-cu13"
+version = "26.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-pathfinder" },
+    { name = "cuda-toolkit", extra = ["cufile"] },
+    { name = "rapids-logger" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/28/964f8a76cab2717a3261d2722a49a4f4d6630bc8a314bdf037c9378f72a8/libkvikio_cu13-26.8.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:1393805440c73913a2ed2ade359c36d930943a3c2b274cc540a94fd5b2e63793", size = 2714739, upload-time = "2026-08-06T18:04:11.403Z" },
+    { url = "https://files.pythonhosted.org/packages/29/71/d724f4c4125feda81350550aeb401bf999f9bd29b7466f1ff241e8441520/libkvikio_cu13-26.8.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:6356b6c624086817e067eef25a961667951f85c594449aad7053aaa4be9dc3b9", size = 2903503, upload-time = "2026-08-06T18:04:37.857Z" },
 ]
 
 [[package]]
@@ -2131,6 +2184,9 @@ benchmark = [
 ]
 dask-cluster = [
     { name = "dask-jobqueue" },
+]
+gds = [
+    { name = "kvikio-cu13", marker = "sys_platform == 'linux'" },
 ]
 pipeline = [
     { name = "antspyx", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -2208,6 +2264,7 @@ requires-dist = [
     { name = "einops", marker = "extra == 'ai'", specifier = ">=0.8.2" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "imageio", specifier = ">=2.30" },
+    { name = "kvikio-cu13", marker = "sys_platform == 'linux' and extra == 'gds'", specifier = ">=26.8.0" },
     { name = "liom-toolkit", extras = ["ai", "antspy", "benchmark", "dask-cluster", "io", "seg", "stats"], marker = "extra == 'pipeline'" },
     { name = "liom-toolkit", extras = ["ai", "antspy", "benchmark", "dask-cluster", "seg", "stats"], marker = "extra == 'all'" },
     { name = "monai", marker = "extra == 'benchmark'", specifier = ">=1.6.0" },
@@ -2236,7 +2293,7 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'ai'", specifier = ">=0.29.0" },
     { name = "zarr", specifier = ">=3.0" },
 ]
-provides-extras = ["io", "seg", "stats", "ai", "benchmark", "antspy", "pipeline", "all", "dask-cluster"]
+provides-extras = ["io", "seg", "stats", "ai", "benchmark", "gds", "antspy", "pipeline", "all", "dask-cluster"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3992,6 +4049,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/36/3b/1ec139d6028c6e5eb10301f040d6eee5c5427a4b1b4d614a2f78d3bba1bd/rangehttpserver-1.4.0.tar.gz", hash = "sha256:d5ddccee219b359598e41da0c5fbf30a2579297094f5a682755e2586388a5306", size = 6993, upload-time = "2024-08-27T18:08:43.418Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/43/d7e2b9ad768c07b5473bea3ac7db9ca4d995c09399cbea3d4df1c0bd4955/rangehttpserver-1.4.0-py2.py3-none-any.whl", hash = "sha256:2a0c6926e4341de4cc19ec861292b005e4194ff497b1eefdeccb2992a5045452", size = 7773, upload-time = "2024-08-27T18:08:41.861Z" },
+]
+
+[[package]]
+name = "rapids-logger"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/ed/ba6a37af075e6c65addaaa5b9cd9668d818f738ae30493d63965713ab54a/rapids_logger-0.2.3-py3-none-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:119a0391a6965b773dc0e48c35e3872585e69418aedbc8b618ac2bf63ae12e28", size = 191718, upload-time = "2025-12-12T14:41:13.059Z" },
+    { url = "https://files.pythonhosted.org/packages/69/b6/139d9df6d0f7bd289a9a6286cecfff999e41c36865515d7fdb56b7b32a14/rapids_logger-0.2.3-py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7fe67ef4049c5d8ba6154746325dcf7cc0f327f0efa8f2611fc8f64e67510f60", size = 202028, upload-time = "2025-12-12T14:41:14.171Z" },
 ]
 
 [[package]]

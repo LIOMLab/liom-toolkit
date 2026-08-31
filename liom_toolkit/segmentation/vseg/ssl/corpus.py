@@ -53,10 +53,11 @@ __all__ = [
 
 # Bound on the GDS CuFile handle cache. Without a limit, a 2001-slice volume
 # would open 2001 file descriptors -- risky against the per-process ulimit
-# (typically 1024). 512 is well under the default ulimit and large enough
-# that the working set of a 100-step epoch (800 random slice reads) mostly
-# hits the cache.
-_GDS_CUFILE_CACHE_MAX = 512
+# (typically 1024 soft). 256 per rank keeps 2 DDP ranks under the default
+# 1024 soft ulimit (2 * 256 = 512) even without raising it; the run script
+# raises the soft limit to 8192 so the cache rarely evicts. A 100-step epoch
+# reads 800 random slices, so a 256-entry cache hits ~75%+ on average.
+_GDS_CUFILE_CACHE_MAX = 256
 
 
 def extract_plane_slice(volume: da.Array, axis: int, index: int) -> NDArray[np.generic]:

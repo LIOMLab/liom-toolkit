@@ -94,6 +94,22 @@ ai = [
 benchmark = [
     "monai>=1.6.0",
 ]
+# GPUDirect Storage fast-path for the SSL pretraining corpus reader. kvikio is
+# CUDA-only: it is published as the kvikio-cu12 / kvikio-cu13 meta-packages and
+# pulls cupy-cuda12x + libkvikio, so it does NOT resolve on macOS or CPU-only
+# CI. Install it only on the CUDA lab box (`uv sync --extra gds`); the corpus
+# reader's `try: import kvikio` guard falls back to the dask + page-cache path
+# when it is absent (so `uv sync` with only core/[ai] deps still works). Pin a
+# lower bound on a release >=7 days old; the cu13 variant matches torch+cu130.
+gds = [
+    # Linux + CUDA only: kvikio-cu13 ships manylinux wheels (no macOS/CPU
+    # wheels), so gate on sys_platform == "linux" -- the same marker the
+    # nvidia-cudnn-cu13 override below uses. This lets `uv sync --all-extras`
+    # resolve on macOS (the extra is skipped) while installing on the CUDA
+    # lab box. The corpus reader's `try: import kvikio` guard falls back to
+    # the dask + page-cache path when it is absent.
+    "kvikio-cu13>=26.8.0; sys_platform == 'linux'",
+]
 antspy = [
     # antspyx 0.6.4 (built from ANTsX/ANTsPy main) removed the scipy<1.16 cap
     # that was in 0.6.3. On 3.12 it installs from PyPI (0.6.3 has cp312 wheels);
