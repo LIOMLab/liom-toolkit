@@ -1010,3 +1010,39 @@ def test_load_zarr_zip_label_without_multiscales_raises(tmp_path):
     zip_path = finalise_zarr_to_zip(zdir)
     with pytest.raises(ValueError, match="label group 'mask' has no 'multiscales'"):
         load_zarr(zip_path)
+
+
+def test_load_node_by_name_on_zip_uses_visible(tmp_path):
+    """load_node_by_name on a zip node reads ``.visible`` (a property backed
+    by the name-mangled ``_Node__visible`` set in ``Node.__init__``). The
+    ``_ZipNode`` subclass bypasses ``Node.__init__`` and must set
+    ``_Node__visible`` explicitly, or ``load_node_by_name`` raises
+    ``AttributeError: '_ZipNode' object has no attribute '_Node__visible'``.
+    """
+    data = np.zeros((8, 8, 8), dtype=np.uint16)
+    label = np.zeros((8, 8, 8), dtype=np.int8)
+    label[2:6, 2:6, 2:6] = 1
+    dir_path = str(tmp_path / "vol.ome.zarr")
+    save_zarr(data, dir_path, scales=(6.5, 6.5, 6.5), chunks=(8, 8, 8))
+    save_label_to_zarr(
+        label=label,
+        zarr_file=dir_path,
+        color_dict=generate_label_color_dict_mask(),
+        name="mask",
+        scales=(6.5, 6.5, 6.5),
+        chunks=(8, 8, 8),
+        resolution_level=0,
+        unit="micrometer",
+    )
+    zip_path = finalise_zarr_to_zip(dir_path)
+
+    nodes = load_zarr(zip_path)
+    # load_node_by_name reads .visible on each node -- this would raise
+    # AttributeError if _ZipNode did not set _Node__visible.
+    mask_node = load_node_by_name(nodes, "mask")
+    assert mask_node is not None
+    assert np.array_equal(np.asarray(mask_node.data[0]), label)
+    # The image node is nodes[0] (named "/"); confirm .visible is readable
+    # on it too (the property backed by _Node__visible).
+    assert nodes[0].visible is True
+    assert np.array_equal(np.asarray(nodes[0].data[0]), data)

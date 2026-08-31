@@ -84,6 +84,11 @@ class _ZipNode(Node):
         self.post_nodes: list[Node] = []
         self.root: Node | Reader | list[Any] = self
         self.seen: list[Any] = []
+        # Node.__init__ sets the name-mangled ``_Node__visible`` from its
+        # ``visibility`` arg; ``load_node_by_name`` reads ``.visible`` (a
+        # property backed by ``_Node__visible``). We bypass ``__init__`` so
+        # set it explicitly -- zip nodes are always visible.
+        self._Node__visible = True  # name-mangled private from Node.__init__
         # No ZarrLocation backs a zip node; the toolkit never reads .zarr.
         self.zarr: Any = None
         # Keep the backing ZipStore alive for the nodes' lifetime. The
