@@ -181,6 +181,102 @@ def test_masked_inpainting_pretrain_loss_is_finite(
 
 
 @pytest.mark.ai
+def test_masked_inpainting_pretrain_cosine_schedule_decays_lr(
+    tiny_2d_resenc_plans, tiny_2d_resenc_dataset_json, tmp_path
+):
+    """The cosine LR schedule anneals learning_rate down to lr_min over the epochs.
+
+    With lr_schedule='cosine', T_max=epochs, eta_min=lr_min, the
+    CosineAnnealingLR reaches lr_min at the end of the last epoch. This test
+    runs a tiny multi-epoch loop, captures the per-epoch logged LR, and
+    asserts the final LR is close to lr_min and the schedule is
+    non-increasing. The constant schedule (default) is asserted to hold the
+    LR flat, so the two schedules are distinguished behaviorally.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("nnunetv2")
+    import itertools
+    import math
+
+    import torch
+
+    from liom_toolkit.segmentation.vseg.ssl.masking import vessel_aware_block_mask
+    from liom_toolkit.segmentation.vseg.ssl.pretrain import (
+        build_pretrain_network,
+        masked_inpainting_pretrain,
+    )
+
+    def _always_mask(batch: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return vessel_aware_block_mask(batch, mask_ratio=0.25, block_size=(8, 8), prob=1.0)
+
+    def _run_with_lr_capture(epochs: int, lr_schedule: str, lr_min: float = 1e-4) -> list[float]:
+        """Run a tiny pretrain loop and return the per-epoch logged LRs."""
+        net = build_pretrain_network(
+            tiny_2d_resenc_plans,
+            tiny_2d_resenc_dataset_json,
+            configuration="2d",
+            device=torch.device("cpu"),
+        )
+        volume = torch.randn(1, 2, 16, 16, dtype=torch.float32)
+        lrs: list[float] = []
+
+        def _capture_print(msg: str, *a, **k) -> None:
+            lrs.extend(
+                float(token.split("=")[1])
+                for token in str(msg).split()
+                if token.startswith("lr=")
+            )
+
+        # pretrain.py calls the builtin print, so patch builtins.print (not a
+        # module attribute) to capture the per-epoch LR token.
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("builtins.print", _capture_print)
+            masked_inpainting_pretrain(
+                net,
+                [volume],
+                epochs=epochs,
+                output_path=str(tmp_path / f"pretrained_{lr_schedule}.pth"),
+                device=torch.device("cpu"),
+                mask_transform=_always_mask,
+                learning_rate=1e-3,
+                lr_schedule=lr_schedule,
+                lr_min=lr_min,
+            )
+        return lrs
+
+    # Cosine: 4 epochs, 1e-3 -> 1e-4. The LR is logged at the start of each
+    # epoch (before that epoch's scheduler.step()), so the logged value at
+    # epoch k (0-indexed) is the LR after k scheduler.step() calls.
+    # CosineAnnealingLR: lr(k) = eta_min + (lr0 - eta_min)*(1 + cos(k*pi/T))/2
+    # with T=T_max=epochs. The final logged LR (k=epochs-1) is therefore NOT
+    # eta_min -- eta_min is reached after `epochs` steps (one past the last
+    # logged epoch). Assert against the closed-form value instead.
+    epochs = 4
+    lr0, eta_min = 1e-3, 1e-4
+    cosine_lrs = _run_with_lr_capture(epochs=epochs, lr_schedule="cosine", lr_min=eta_min)
+    assert len(cosine_lrs) == epochs, f"expected one LR log per epoch, got {len(cosine_lrs)}"
+    # First-epoch LR (k=0) is at the initial learning_rate.
+    assert cosine_lrs[0] == pytest.approx(lr0, rel=1e-4)
+    # Each logged LR matches the CosineAnnealingLR closed form for k steps.
+    # The log format is lr={:.2e} (6 significant digits), so use abs=1e-6 to
+    # tolerate the rounding.
+    for k, logged in enumerate(cosine_lrs):
+        expected = eta_min + (lr0 - eta_min) * (1 + math.cos(k * math.pi / epochs)) / 2
+        assert logged == pytest.approx(expected, abs=1e-6), (
+            f"cosine LR at step {k}: expected {expected}, got {logged}"
+        )
+    # Monotonic non-increase across epochs (cosine is non-increasing on [0,T]).
+    for prev, cur in itertools.pairwise(cosine_lrs):
+        assert cur <= prev + 1e-12, f"cosine LR must be non-increasing; saw {prev} -> {cur}"
+
+    # Constant: LR held flat at 1e-3 for contrast.
+    const_lrs = _run_with_lr_capture(epochs=2, lr_schedule="constant")
+    assert all(lr == pytest.approx(1e-3, rel=1e-6) for lr in const_lrs), (
+        f"constant schedule must hold LR flat at 1e-3, got {const_lrs}"
+    )
+
+
+@pytest.mark.ai
 def test_masked_inpainting_pretrain_raises_on_empty_corpus(
     tiny_2d_resenc_plans, tiny_2d_resenc_dataset_json, tmp_path
 ):

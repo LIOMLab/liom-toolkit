@@ -145,6 +145,21 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Optimizer learning rate (default: %(default)s)",
     )
     p.add_argument(
+        "--lr-schedule",
+        choices=["constant", "cosine"],
+        default="constant",
+        help="LR schedule: 'constant' (default) holds --learning-rate for all "
+        "epochs; 'cosine' anneals from --learning-rate down to --lr-min over "
+        "the full epoch count (smooths the post-plateau loss oscillation)",
+    )
+    p.add_argument(
+        "--lr-min",
+        type=float,
+        default=1e-4,
+        help="Cosine schedule floor (final LR); ignored when --lr-schedule=constant "
+        "(default: %(default)s)",
+    )
+    p.add_argument(
         "--ddp",
         action="store_true",
         default=False,
@@ -325,6 +340,8 @@ def main() -> None:
         ddp=args.ddp,
         batch_sampler=_sample_batch,
         steps_per_epoch=args.steps_per_epoch,
+        lr_schedule=args.lr_schedule,
+        lr_min=args.lr_min,
     )
     # Under DDP only rank 0 writes the checkpoint + logs; suppress the log on
     # other ranks to avoid duplicate output.

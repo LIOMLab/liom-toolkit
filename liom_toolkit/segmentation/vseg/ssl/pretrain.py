@@ -35,7 +35,7 @@ import os
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # torch is in the [ai] extra. The upfront ImportError here is the honest
 # signal on an io-only install -- the message names [ai,benchmark] (the
@@ -331,6 +331,8 @@ def masked_inpainting_pretrain(
     ddp: bool = False,
     batch_sampler: Callable[[], torch.Tensor] | None = None,
     steps_per_epoch: int | None = None,
+    lr_schedule: Literal["constant", "cosine"] = "constant",
+    lr_min: float = 1e-4,
 ) -> list[float]:
     """Run the masked-inpainting pretraining loop and save the checkpoint.
 
@@ -383,6 +385,18 @@ def masked_inpainting_pretrain(
         plan biases hole placement without editing this loop.
     learning_rate : float, optional
         The optimizer learning rate. Defaults to ``1e-3``.
+    lr_schedule : {"constant", "cosine"}, optional
+        Learning-rate schedule. ``"constant"`` (default) holds ``learning_rate``
+        for all epochs -- the original behavior, preserved for the tracer tests.
+        ``"cosine"`` anneals the LR from ``learning_rate`` down to ``lr_min``
+        over the full epoch count via ``CosineAnnealingLR`` -- useful for the
+        real run, where a flat 1e-3 Adam leaves the masked-inpainting loss
+        oscillating around its floor once the easy vessel signal is learned
+        (epochs 5+); decaying the LR smooths the oscillation and lets the
+        model settle into a lower reconstruction floor.
+    lr_min : float, optional
+        The cosine schedule floor (final LR). Defaults to ``1e-4`` (10x below
+        the default ``learning_rate``). Ignored when ``lr_schedule="constant"``.
     use_amp : bool, optional
         Whether to use AMP mixed precision. AMP is no-op on CPU (the scaler
         disables itself when CUDA is unavailable) so the same code path
@@ -470,6 +484,20 @@ def masked_inpainting_pretrain(
             find_unused_parameters=True,
         )
     optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
+    # Optional cosine LR annealing: decays learning_rate -> lr_min over the
+    # full epoch count. None means a flat (constant) schedule -- the original
+    # behavior, preserved for the tracer tests which assert on exact loss
+    # values under a fixed LR.
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
+    if lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=lr_min
+        )
+    elif lr_schedule != "constant":
+        raise ValueError(
+            f"masked_inpainting_pretrain: unknown lr_schedule "
+            f"{lr_schedule!r} (expected 'constant' or 'cosine')"
+        )
     # AMP GradScaler -- no-ops on CPU (enabled=use_amp and
     # torch.cuda.is_available()) so the same code path serves the CPU tracer
     # and the CUDA real run. When use_amp=False, scaler.scale(loss).backward()
@@ -570,14 +598,22 @@ def masked_inpainting_pretrain(
         # Per-epoch progress log (rank 0 only under DDP). The real run is
         # multi-hour, so without this there is no visibility into whether the
         # loop is progressing or stuck -- the only other log is the final
-        # "Wrote pretrained checkpoint" line after all epochs.
+        # "Wrote pretrained checkpoint" line after all epochs. Include the
+        # current LR so the cosine schedule is visible in the log.
         if not ddp or rank == 0:
+            cur_lr = optimizer.param_groups[0]["lr"]
             print(
                 f"  epoch {len(epoch_losses)}/{epochs} "
                 f"mean_loss={epoch_losses[-1]:.6f} "
+                f"lr={cur_lr:.2e} "
                 f"steps={loss_count}",
                 flush=True,
             )
+        # Step the LR scheduler once per epoch (after the optimizer steps for
+        # that epoch). CosineAnnealingLR with T_max=epochs reaches eta_min at
+        # the end of the last epoch. No-op when scheduler is None (constant).
+        if scheduler is not None:
+            scheduler.step()
 
     # Save the checkpoint as {'network_weights': state_dict} -- the exact
     # format load_pretrained_weights expects. Atomic temp-file write so a
