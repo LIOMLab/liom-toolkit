@@ -818,14 +818,17 @@ class SSLCorpus(Dataset):
         Returns
         -------
         torch.Tensor
-            The ``(1, Y, X)`` slice on GPU, in the on-disk dtype.
+            The ``(C, Y, X)`` slice on GPU (all channels, one Z-slice), in
+            the on-disk dtype. Matches the dask ``get_patch`` path's
+            ``(C, H, W)`` channel contract.
 
         Raises
         ------
         ValueError
             If the volume's s0 zarr metadata could not be read (the caller
             should have routed a compressed/unreadable volume to the dask
-            path -- this guard refuses a silent zero-fill).
+            path -- this guard refuses a silent zero-fill), or the chunk
+            file is missing on disk (no silent zero-fill -- AGENTS section 2).
         """
         import kvikio
 
@@ -860,7 +863,14 @@ class SSLCorpus(Dataset):
         buf = torch.empty(chunks, dtype=torch_dtype, device=device)
         chunk_nbytes = int(np.prod(chunks)) * np_dtype.itemsize
         cf.pread(buf, chunk_nbytes, file_offset=0).get()
-        return buf[0]  # (1, Y, X) -- keep the channel dim
+        # The chunk is (C, 1, Y, X) when chunks cover all channels (the
+        # corpus layout: chunks[0] == shape[0]), or (1, 1, Y, X) when chunks
+        # are per-channel. Indexing the Z axis (dim 1) preserves the channel
+        # dim: buf[:, 0] -> (C, Y, X). For C=1 this is identical to the old
+        # buf[0]; for C>=2 it correctly keeps every channel (matches the
+        # dask get_patch path's (C, H, W) contract). The previous buf[0]
+        # indexed the channel dim and silently dropped channel 1+.
+        return buf[:, 0]  # (C, Y, X) -- all channels, one Z-slice
 
     def _z_score_per_channel_gpu(self, slice_2d: Any) -> Any:
         """Z-score normalize a (C, H, W) torch tensor per channel on GPU.
