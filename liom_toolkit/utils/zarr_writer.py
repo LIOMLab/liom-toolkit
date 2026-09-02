@@ -459,7 +459,12 @@ class OmeZarrWriter:
 
         # Anisotropic on-disk downsample loop: Y/X only (Z stays at base).
         # Index convention: 4D (c, z, y, x) -> Y=2, X=3; 3D (z, y, x) -> Y=1, X=2.
-        src = da.from_zarr(self.root.store_path / "0")
+        # Use the plain filesystem path (self.store_path_str), NOT
+        # self.root.store_path — on Windows the StorePath stringifies to
+        # ``file://C:/...`` which fsspec misparses (``C`` treated as host,
+        # ``/Users/...`` as a relative path), creating an orphan ``Users/``
+        # directory in the CWD instead of writing inside the store.
+        src = da.from_zarr(self.store_path_str, component="0")
         y_idx, x_idx = (2, 3) if self.ndim == 4 else (1, 2)
         for i in range(1, n_levels_clamped + 1):
             new_shape = list(src.shape)
@@ -468,7 +473,7 @@ class OmeZarrWriter:
             down = da_resize(src, tuple(new_shape), preserve_range=True, anti_aliasing=False)
             da.to_zarr(
                 arr=down,
-                url=str(self.root.store_path),
+                url=self.store_path_str,
                 component=str(i),
                 zarr_format=self.fmt.zarr_format,
                 chunk_key_encoding=self.fmt.chunk_key_encoding,
@@ -671,7 +676,12 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             valid_targets = [float(t) for t in target_resolutions_um if t >= min_base]
 
         # L0 stays raw (untouched). Downsample each target FROM L0.
-        src = da.from_zarr(self.root.store_path / "0")
+        # Use the plain filesystem path (self.store_path_str), NOT
+        # str(self.root.store_path) — on Windows the StorePath stringifies to
+        # ``file://C:/...`` which fsspec misparses (``C`` treated as host,
+        # ``/Users/...`` as a relative path), creating an orphan ``Users/``
+        # directory in the CWD instead of writing inside the store.
+        src = da.from_zarr(self.store_path_str, component="0")
         # shape[1:] drops the channel axis for 4D; for 3D shape is already (z,y,x).
         spatial_shape = self.shape[1:] if self.ndim == 4 else self.shape
 
@@ -700,7 +710,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             down = da_resize(src, full_target_shape, preserve_range=True, anti_aliasing=True)
             da.to_zarr(
                 arr=down,
-                url=str(self.root.store_path),
+                url=self.store_path_str,
                 component=str(i),
                 zarr_format=self.fmt.zarr_format,
                 chunk_key_encoding=self.fmt.chunk_key_encoding,
