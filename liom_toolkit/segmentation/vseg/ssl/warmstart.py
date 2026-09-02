@@ -243,6 +243,17 @@ def warm_start(
     )
     if not validation_only:
         trainer.run_training()
-    trainer.perform_actual_validation(
-        export_validation_probabilities=export_validation_probabilities
-    )
+    # nnU-Net v2 versions differ on the parameter name for validation softmax
+    # export (save_probabilities vs export_validation_probabilities). Pass the
+    # value under the name the installed trainer accepts.
+    import inspect
+
+    sig = inspect.signature(trainer.perform_actual_validation)
+    if "save_probabilities" in sig.parameters:
+        trainer.perform_actual_validation(save_probabilities=export_validation_probabilities)
+    elif "export_validation_probabilities" in sig.parameters:
+        trainer.perform_actual_validation(
+            export_validation_probabilities=export_validation_probabilities
+        )
+    else:
+        trainer.perform_actual_validation()
