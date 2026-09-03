@@ -27,6 +27,7 @@ validation, never a silent partial-load fallback).
 
 from __future__ import annotations
 
+import inspect
 import os
 from pathlib import Path
 
@@ -76,7 +77,7 @@ def validate_nnunet_env() -> dict[str, str]:
         If any of the three ``nnUNet_*`` env vars is unset. The message
         names the missing vars.
     """
-    missing = [v for v in _NNUNET_ENV_VARS if v not in os.environ]
+    missing = [v for v in _NNUNET_ENV_VARS if not os.environ.get(v, "").strip()]
     if missing:
         raise RuntimeError(
             f"nnU-Net v2 environment variables must be set before instantiating "
@@ -205,6 +206,9 @@ def warm_start(
     ------
     ValueError
         If ``pretrained_weights_file`` does not point to an existing file.
+    RuntimeError
+        If ``perform_actual_validation`` does not accept ``save_probabilities``
+        or ``export_validation_probabilities``.
 
     Notes
     -----
@@ -245,9 +249,9 @@ def warm_start(
         trainer.run_training()
     # nnU-Net v2 versions differ on the parameter name for validation softmax
     # export (save_probabilities vs export_validation_probabilities). Pass the
-    # value under the name the installed trainer accepts.
-    import inspect
-
+    # value under the name the installed trainer accepts; fail closed if the
+    # installed signature uses neither, so the export flag is never silently
+    # ignored.
     sig = inspect.signature(trainer.perform_actual_validation)
     if "save_probabilities" in sig.parameters:
         trainer.perform_actual_validation(save_probabilities=export_validation_probabilities)
@@ -256,4 +260,9 @@ def warm_start(
             export_validation_probabilities=export_validation_probabilities
         )
     else:
-        trainer.perform_actual_validation()
+        raise RuntimeError(
+            f"Cannot map export_validation_probabilities to "
+            f"{trainer.__class__.__qualname__}.perform_actual_validation; "
+            f"signature parameters: {list(sig.parameters)}. Update warmstart.py "
+            f"for this nnU-Net version."
+        )
