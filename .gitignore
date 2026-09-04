@@ -167,9 +167,6 @@ cython_debug/
 
 # === OpenGSD (gsd-core) — keep ALL GSD-produced files out of git ===
 .cursor/
-.windsurf/
-.windsurf/gsd-local-patches/
-.windsurf/gsd-pristine/
 .devin/
 .planning/
 .planning/tmp/
