@@ -722,14 +722,15 @@ class SSLCorpus(Dataset):
             top = int(self._rng.integers(0, h_size - patch_h + 1))
             left = int(self._rng.integers(0, w_size - patch_w + 1))
             # GDS fast path: coronal plane (axis=1) on an uncompressed v3
-            # zarr. The chunk is (1, 1, 2048, 2048) -- one slice per chunk --
-            # so a coronal patch reads exactly one chunk. Sagittal/axial
-            # patches span multiple chunks along one spatial axis; fall back
-            # to dask for those (the multi-plane mix still applies, only the
-            # GDS fast-path is coronal-biased).
-            if axis != 1 or not self._is_uncompressed(vol_idx):
-                # Fall back to dask read + H->D copy for non-coronal or
-                # compressed volumes.
+            # zarr whose chunks each cover one full (C, 1, Y, X) slice
+            # (verified by _is_gds_eligible -- one chunk per coronal read).
+            # Sagittal/axial patches span multiple chunks along one spatial
+            # axis; fall back to dask for those (the multi-plane mix still
+            # applies, only the GDS fast-path is coronal-biased).
+            if axis != 1 or not self._is_gds_eligible(vol_idx):
+                # Fall back to dask read + H->D copy for non-coronal planes,
+                # compressed volumes, or chunk layouts a single-chunk read
+                # cannot satisfy (per-channel / spatially-tiled stores).
                 sl = [slice(None)] * vol.ndim
                 sl[axis] = slice_idx
                 sl[h_axis] = slice(top, top + patch_h)
@@ -766,17 +767,25 @@ class SSLCorpus(Dataset):
             f"zero-std channel (constant patch). Last error: {last_err}"
         )
 
-    def _is_uncompressed(self, vol_idx: int) -> bool:
-        """Check whether the volume's on-disk zarr is uncompressed (kvikio-compatible).
+    def _is_gds_eligible(self, vol_idx: int) -> bool:
+        """Check whether the volume's on-disk zarr can use the GDS fast-path.
 
         Returns
         -------
         bool
             ``True`` if the volume's ``s0`` array has only the raw ``bytes``
-            codec (no zstd/blosc/gzip compression).
+            codec (no zstd/blosc/gzip compression) AND its chunk grid stores
+            one full ``(C, 1, Y, X)`` coronal slice per chunk. The
+            single-chunk read in ``_gds_read_coronal_slice`` is only correct
+            under that layout -- a per-channel or spatially-tiled store
+            would silently return a channel-dropped or partial slice, so
+            those layouts (and unreadable/compressed metadata) route to the
+            dask fallback.
         """
         meta = self._zarr_meta(vol_idx)
-        return bool(meta is not None and meta["is_uncompressed"])
+        return bool(
+            meta is not None and meta["is_uncompressed"] and meta["single_chunk_slice"]
+        )
 
     def _zarr_meta(self, vol_idx: int) -> dict[str, Any] | None:
         """Resolve and cache the s0 zarr metadata for one volume (GDS path).
@@ -809,12 +818,32 @@ class SSLCorpus(Dataset):
                 np_dtype = np.dtype(m["data_type"])
                 torch_dtype = torch.from_numpy(np.empty(0, dtype=np_dtype)).dtype
                 codecs = m.get("codecs", [])
+                shape = tuple(int(d) for d in m["shape"])
+                chunks = tuple(
+                    int(d) for d in m["chunk_grid"]["configuration"]["chunk_shape"]
+                )
                 result = {
-                    "shape": tuple(m["shape"]),
-                    "chunks": tuple(m["chunk_grid"]["configuration"]["chunk_shape"]),
+                    "shape": shape,
+                    "chunks": chunks,
                     "np_dtype": np_dtype,
                     "torch_dtype": torch_dtype,
                     "is_uncompressed": all(c.get("name") == "bytes" for c in codecs),
+                    # The GDS read loads exactly one chunk file per coronal
+                    # slice (s0/c/0/{z}/0/0), so it is only correct when a
+                    # single chunk covers ALL channels and the full Y x X
+                    # extent with one Z per chunk. A per-channel store
+                    # (chunks=(1, ...)) reads only channel 0's file and
+                    # silently drops channel 1+; a spatially-tiled store
+                    # returns only the (0,0) tile. Both route to the dask
+                    # fallback instead of returning a partial slice.
+                    "single_chunk_slice": (
+                        len(chunks) == 4
+                        and len(shape) == 4
+                        and chunks[0] == shape[0]
+                        and chunks[1] == 1
+                        and chunks[2] == shape[2]
+                        and chunks[3] == shape[3]
+                    ),
                     "chunk_dir": path / "s0" / "c" / "0",
                 }
             except (OSError, ValueError, KeyError, TypeError):
@@ -910,13 +939,12 @@ class SSLCorpus(Dataset):
                 f"(read {n_read} of {chunk_nbytes} bytes) -- the zarr chunk is "
                 f"truncated; re-export the volume"
             )
-        # The chunk is (C, 1, Y, X) when chunks cover all channels (the
-        # corpus layout: chunks[0] == shape[0]), or (1, 1, Y, X) when chunks
-        # are per-channel. Indexing the Z axis (dim 1) preserves the channel
-        # dim: buf[:, 0] -> (C, Y, X). For C=1 this is identical to the old
-        # buf[0]; for C>=2 it correctly keeps every channel (matches the
-        # dask get_patch path's (C, H, W) contract). The previous buf[0]
-        # indexed the channel dim and silently dropped channel 1+.
+        # The layout gate (_is_gds_eligible) guarantees the chunk covers all
+        # channels and the full Y x X extent: buf is (C, 1, Y, X). Indexing
+        # the Z axis (dim 1) preserves the channel dim: buf[:, 0] ->
+        # (C, Y, X), matching the dask get_patch path's (C, H, W) contract.
+        # Per-channel chunk layouts never reach this line (they fall back to
+        # dask), so channel 1+ cannot be silently dropped here.
         return buf[:, 0]  # (C, Y, X) -- all channels, one Z-slice
 
     def _z_score_per_channel_gpu(self, slice_2d: Any) -> Any:
