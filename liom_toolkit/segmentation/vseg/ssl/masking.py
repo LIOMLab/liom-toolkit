@@ -438,19 +438,6 @@ def vessel_aware_block_mask(
         If ``batch`` is not a 4D ``(B, C, H, W)`` tensor, ``mask_ratio`` is
         outside ``(0, 1]``, or ``block_size`` is not positive in either dim.
     """
-    # MONAI is in the [benchmark] extra -- import function-scope so this
-    # module loads with only torch + skimage installed. MONAI's
-    # RandCoarseDropoutd is the reference block-masking transform; this
-    # function implements the vessel-aware variant (MONAI's API does not
-    # accept custom hole centers, so the Frangi-biased placement + block
-    # fill is implemented directly here, matching the RandCoarseDropoutd
-    # output contract: zero-filled masked regions + a boolean mask). The
-    # import below is exercised on the uniform-fallback path so the
-    # [benchmark] dep contract is honored (MONAI is composed for the fill
-    # step on background-only slices where its random placement is
-    # equivalent to the uniform fallback).
-    from monai.transforms import RandCoarseDropoutd
-
     if batch.ndim != 4:
         raise ValueError(
             f"vessel_aware_block_mask expects a (B, C, H, W) 4D tensor, got ndim={batch.ndim}"
@@ -570,6 +557,17 @@ def vessel_aware_block_mask(
             # Frangi-biased placement is implemented here).
             is_uniform = float(prob_map.max() - prob_map.min()) < 1e-12
             if is_uniform:
+                # MONAI is in the [benchmark] extra -- import here (inside
+                # the only branch that uses it) so the GPU path and the
+                # vessel-biased CPU path run on a torch + skimage install
+                # without MONAI. MONAI's RandCoarseDropoutd is the reference
+                # block-masking transform; its API does not accept custom
+                # hole centers, so the Frangi-biased placement + block fill
+                # is implemented directly in the else-branch, matching the
+                # RandCoarseDropoutd output contract (zero-filled masked
+                # regions + a boolean mask).
+                from monai.transforms import RandCoarseDropoutd
+
                 monai_transform = RandCoarseDropoutd(
                     keys=["image"],
                     holes=n_holes,
