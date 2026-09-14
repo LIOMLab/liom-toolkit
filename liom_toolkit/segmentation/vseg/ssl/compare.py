@@ -258,6 +258,7 @@ def run_comparison(
                         # Vessel-free slice -- metric undefined. Record as a
                         # row, NOT a NaN (no silent NaN escape into the table).
                         row[name] = "vessel-free slice -- metric undefined"
+                        logger.debug("%s undefined on a vessel-free slice: %s", name, e)
                     else:
                         # A ValueError that does not match the documented
                         # emptiness condition (shape mismatch, patch grid
@@ -265,6 +266,7 @@ def run_comparison(
                         # defect -- label it distinctly so a config/data bug
                         # is not indistinguishable from a vessel-free slice.
                         row[name] = f"metric error: {e}"
+                        logger.warning("%s raised on a non-empty slice: %s", name, e)
             for name, fn in dict_metrics:
                 kwargs = (
                     {
@@ -279,8 +281,10 @@ def run_comparison(
                 except ValueError as e:
                     if _is_undefined_condition(name, pred, gt_bool):
                         row[name] = "vessel-free slice -- metric undefined"
+                        logger.debug("%s undefined on a vessel-free slice: %s", name, e)
                     else:
                         row[name] = f"metric error: {e}"
+                        logger.warning("%s raised on a non-empty slice: %s", name, e)
             per_slice_rows.append(row)
 
         # Aggregate: mean over slices where the metric is defined.
