@@ -52,6 +52,25 @@ __all__ = ["run_comparison"]
 logger = logging.getLogger(__name__)
 
 
+def _is_undefined_condition(name: str, pred: NDArray, gt: NDArray) -> bool:
+    """Return True when a metric's ValueError matches its documented emptiness condition.
+
+    The per-slice ``"vessel-free slice -- metric undefined"`` marker is only
+    honest when the metric was undefined BECAUSE the slice was vessel-free
+    (or the paired prediction empty). A ValueError raised for any other
+    reason -- a pred/GT shape mismatch, a boundary patch grid that does not
+    fit the slice, a non-2D/3D input -- is a real defect and must be
+    labeled distinctly, not masked as a vessel-free slice.
+    """
+    if name in ("centerline_recall", "caliber_stratified_recall", "fpr_on_empty"):
+        return not bool(gt.any())
+    if name == "spurious_thin_vessel_rate":
+        return not bool(pred.any())
+    if name in ("reported_dice", "boundary_artifact_regression"):
+        return not bool(pred.any()) and not bool(gt.any())
+    return False
+
+
 def run_comparison(
     brain_paths: dict[str, list[str]],
     train_brains: list[str],
@@ -189,10 +208,9 @@ def run_comparison(
     voxel_size_um = eval_cfg.get("voxel_size_um", 6.5)
     capillary_radius_um = eval_cfg.get("capillary_radius_um", 5.0)
     # Default the boundary patch size from a 256x256 grid (the Phase-14
-    # patch size); an explicit override wins. A hardcoded default that does
-    # not fit the image would silently produce ny=0/nx=0 and a misleading
-    # "vessel-free slice -- metric undefined" row, masking the boundary
-    # metric.
+    # patch size); an explicit override wins. A patch grid that does not
+    # fit the image surfaces as a distinct "metric error" row (not the
+    # vessel-free marker) via _is_undefined_condition.
     boundary_patch_size = eval_cfg.get("boundary_patch_size", (256, 256))
 
     # (metric_name, callable) pairs -- the ship-gate matrix + reported_dice.
@@ -235,10 +253,18 @@ def run_comparison(
             for name, fn in scalar_metrics:
                 try:
                     row[name] = fn(pred, gt_bool)
-                except ValueError:
-                    # Vessel-free slice -- metric undefined. Record as a
-                    # row, NOT a NaN (no silent NaN escape into the table).
-                    row[name] = "vessel-free slice -- metric undefined"
+                except ValueError as e:
+                    if _is_undefined_condition(name, pred, gt_bool):
+                        # Vessel-free slice -- metric undefined. Record as a
+                        # row, NOT a NaN (no silent NaN escape into the table).
+                        row[name] = "vessel-free slice -- metric undefined"
+                    else:
+                        # A ValueError that does not match the documented
+                        # emptiness condition (shape mismatch, patch grid
+                        # that does not fit, bad input rank) is a real
+                        # defect -- label it distinctly so a config/data bug
+                        # is not indistinguishable from a vessel-free slice.
+                        row[name] = f"metric error: {e}"
             for name, fn in dict_metrics:
                 kwargs = (
                     {
@@ -250,8 +276,11 @@ def run_comparison(
                 )
                 try:
                     row[name] = fn(pred, gt_bool, **kwargs)
-                except ValueError:
-                    row[name] = "vessel-free slice -- metric undefined"
+                except ValueError as e:
+                    if _is_undefined_condition(name, pred, gt_bool):
+                        row[name] = "vessel-free slice -- metric undefined"
+                    else:
+                        row[name] = f"metric error: {e}"
             per_slice_rows.append(row)
 
         # Aggregate: mean over slices where the metric is defined.
