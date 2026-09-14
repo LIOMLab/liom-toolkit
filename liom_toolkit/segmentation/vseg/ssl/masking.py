@@ -420,9 +420,11 @@ def vessel_aware_block_mask(
         When ``prob < 1`` and the draw skips masking, the returned mask is
         all-False and ``masked_input`` equals the input. Defaults to ``1.0``.
     rng : np.random.Generator | None, optional
-        The random generator for hole-center sampling. Defaults to a fresh
-        ``default_rng()`` (non-deterministic; pass a seeded generator for
-        reproducible tests).
+        The random generator for hole-center sampling and the prob gate.
+        On the GPU path it seeds a per-call ``torch.Generator`` driving
+        ``torch.multinomial``, so a seeded rng makes both paths
+        reproducible. Defaults to a fresh ``default_rng()``
+        (non-deterministic; pass a seeded generator for reproducible runs).
 
     Returns
     -------
@@ -495,8 +497,13 @@ def vessel_aware_block_mask(
         # sparse (duplicate centers collapse into overlapping blocks; the
         # achieved coverage falls below mask_ratio, matching the CPU clamp).
         n_positive_min = int((flat > 0).sum(dim=1).min().item())
+        # Drive multinomial with a torch generator seeded from the numpy rng
+        # so a caller-passed seeded rng also makes the GPU path reproducible
+        # (the default generator would ignore rng entirely).
+        gpu_gen = torch.Generator(device=flat.device)
+        gpu_gen.manual_seed(int(rng.integers(0, 2**31 - 1)))
         centers = torch.multinomial(
-            flat, n_holes, replacement=n_positive_min < n_holes
+            flat, n_holes, replacement=n_positive_min < n_holes, generator=gpu_gen
         )  # (B, n_holes)
         # Scatter a 1 at each center into a (B, H, W) canvas.
         canvas = torch.zeros(b, spatial_pixels, device=batch.device, dtype=batch.dtype)
