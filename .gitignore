@@ -184,7 +184,6 @@ specs/
 .agents/
 .bg-shell/
 skills-lock.json
-.gsd-graph/
 .mcp.json
 AGENTS.local.md
 .windsurf/
