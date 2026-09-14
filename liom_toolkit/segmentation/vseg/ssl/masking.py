@@ -304,7 +304,14 @@ def _sample_hole_centers(
         flat_prob = np.ones_like(flat_prob) / float(flat_prob.size)
     else:
         flat_prob = flat_prob / total
-    indices = rng.choice(n_pixels, size=n_holes, replace=False, p=flat_prob)
+    # A sparse map (fewer positive-probability pixels than requested holes)
+    # cannot support a without-replacement draw of size n_holes --
+    # rng.choice raises "Fewer non-zero entries in p than size". Clamp the
+    # draw; the achieved mask coverage simply falls below mask_ratio on
+    # sparse-vessel slices instead of crashing the training run.
+    n_positive = int((flat_prob > 0).sum())
+    n_draw = min(n_holes, n_positive)
+    indices = rng.choice(n_pixels, size=n_draw, replace=False, p=flat_prob)
     return np.stack(np.unravel_index(indices, prob_map.shape), axis=1).astype(int)
 
 
@@ -494,7 +501,16 @@ def vessel_aware_block_mask(
         # weighted by the Frangi prob map. On a uniform prob map (background-
         # only slice) this degrades to uniform-random placement -- the same
         # contract as the CPU MONAI fallback, with no special-casing needed.
-        centers = torch.multinomial(flat, n_holes, replacement=False)  # (B, n_holes)
+        # A sparse map (fewer positive-probability pixels than n_holes on any
+        # row) cannot support a without-replacement draw -- multinomial
+        # raises "not enough non-negative category entries to sample". Fall
+        # back to with-replacement draws for the whole batch when any row is
+        # sparse (duplicate centers collapse into overlapping blocks; the
+        # achieved coverage falls below mask_ratio, matching the CPU clamp).
+        n_positive_min = int((flat > 0).sum(dim=1).min().item())
+        centers = torch.multinomial(
+            flat, n_holes, replacement=n_positive_min < n_holes
+        )  # (B, n_holes)
         # Scatter a 1 at each center into a (B, H, W) canvas.
         canvas = torch.zeros(b, spatial_pixels, device=batch.device, dtype=batch.dtype)
         canvas.scatter_(1, centers, 1.0)
