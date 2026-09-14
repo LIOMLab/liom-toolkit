@@ -441,6 +441,12 @@ def masked_inpainting_pretrain(
             "masked_inpainting_pretrain: batch_sampler requires steps_per_epoch "
             "(the number of sampler calls per epoch)"
         )
+    if batch_sampler is None and steps_per_epoch is not None:
+        raise ValueError(
+            "masked_inpainting_pretrain: steps_per_epoch has no effect without "
+            "batch_sampler -- the pre-built dataset mode iterates the dataset. "
+            "Pass a batch_sampler or drop steps_per_epoch."
+        )
     if steps_per_epoch is not None and steps_per_epoch < 1:
         raise ValueError(
             f"masked_inpainting_pretrain: steps_per_epoch must be >= 1, "
