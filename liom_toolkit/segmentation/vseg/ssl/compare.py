@@ -61,6 +61,26 @@ def _is_undefined_condition(name: str, pred: NDArray, gt: NDArray) -> bool:
     reason -- a pred/GT shape mismatch, a boundary patch grid that does not
     fit the slice, a non-2D/3D input -- is a real defect and must be
     labeled distinctly, not masked as a vessel-free slice.
+
+    Parameters
+    ----------
+    name : str
+        The eval-metric name (one of the ``scalar_metrics`` /
+        ``dict_metrics`` entries in :func:`run_comparison`).
+    pred : NDArray
+        The boolean predicted mask for the slice.
+    gt : NDArray
+        The boolean ground-truth mask for the slice.
+
+    Returns
+    -------
+    bool
+        ``True`` when the metric's documented undefined-on-empty condition
+        holds (empty GT for the recall/FPR family, empty prediction for
+        ``spurious_thin_vessel_rate``, both empty for ``reported_dice`` and
+        ``boundary_artifact_regression``); ``False`` otherwise, including
+        for ``cl_dice_metric`` whose ValueError is never an emptiness
+        condition.
     """
     if name in ("centerline_recall", "caliber_stratified_recall", "fpr_on_empty"):
         return not bool(gt.any())

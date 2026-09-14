@@ -792,9 +792,7 @@ class SSLCorpus(Dataset):
             dask fallback.
         """
         meta = self._zarr_meta(vol_idx)
-        return bool(
-            meta is not None and meta["is_uncompressed"] and meta["single_chunk_slice"]
-        )
+        return bool(meta is not None and meta["is_uncompressed"] and meta["single_chunk_slice"])
 
     def _zarr_meta(self, vol_idx: int) -> dict[str, Any] | None:
         """Resolve and cache the s0 zarr metadata for one volume (GDS path).
@@ -828,9 +826,7 @@ class SSLCorpus(Dataset):
                 torch_dtype = torch.from_numpy(np.empty(0, dtype=np_dtype)).dtype
                 codecs = m.get("codecs", [])
                 shape = tuple(int(d) for d in m["shape"])
-                chunks = tuple(
-                    int(d) for d in m["chunk_grid"]["configuration"]["chunk_shape"]
-                )
+                chunks = tuple(int(d) for d in m["chunk_grid"]["configuration"]["chunk_shape"])
                 result = {
                     "shape": shape,
                     "chunks": chunks,
