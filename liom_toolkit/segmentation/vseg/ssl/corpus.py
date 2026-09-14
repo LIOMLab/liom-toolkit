@@ -452,7 +452,16 @@ class SSLCorpus(Dataset):
         if axis_size < 1:
             raise ValueError(f"axis_size must be >= 1, got axis_size={axis_size}")
         center = axis_size // 2
-        half_window = max(1, round(axis_size * self.periphery_margin / 2.0))
+        if self.periphery_margin <= 0.0:
+            return center
+        # periphery_margin is the PER-SIDE fraction of the axis extent
+        # included around the center: margin=0.5 covers the full range
+        # (center +/- axis_size/2 clamps to [0, axis_size)); margin=1.0 is
+        # full range with slack. The previous margin/2 formula treated it as
+        # the TOTAL window fraction, so the 0.5 default only sampled the
+        # middle ~50% of the volume and excluded the periphery slices the
+        # contract requires (the deepest background lives at the edges).
+        half_window = max(1, round(axis_size * self.periphery_margin))
         lo = max(0, center - half_window)
         hi = min(axis_size, center + half_window + 1)
         if hi <= lo:
