@@ -464,7 +464,6 @@ def vessel_aware_block_mask(
     # pixels without replacement).
     n_holes = min(n_holes, spatial_pixels)
 
-    masked_input = batch.clone()
     mask = torch.zeros((b, c, h, w), dtype=torch.bool, device=batch.device)
 
     # Decide which batch elements will be masked (prob gate) up front.
