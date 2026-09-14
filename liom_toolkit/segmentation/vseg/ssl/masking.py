@@ -438,7 +438,8 @@ def vessel_aware_block_mask(
     ------
     ValueError
         If ``batch`` is not a 4D ``(B, C, H, W)`` tensor, ``mask_ratio`` is
-        outside ``(0, 1]``, or ``block_size`` is not positive in either dim.
+        outside ``(0, 1]``, ``block_size`` is not positive in either dim, or
+        ``prob`` is outside ``[0, 1]``.
     """
     if batch.ndim != 4:
         raise ValueError(
@@ -449,6 +450,8 @@ def vessel_aware_block_mask(
     bh, bw = block_size
     if bh < 1 or bw < 1:
         raise ValueError(f"block_size must be positive in both dims, got block_size={block_size}")
+    if not (0.0 <= prob <= 1.0):
+        raise ValueError(f"prob must be in [0, 1], got prob={prob}")
     if rng is None:
         rng = np.random.default_rng()
 
