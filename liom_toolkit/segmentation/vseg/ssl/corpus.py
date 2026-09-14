@@ -898,7 +898,18 @@ class SSLCorpus(Dataset):
         cf = self._gds_cufile_cache[cache_key]
         buf = torch.empty(chunks, dtype=torch_dtype, device=device)
         chunk_nbytes = int(np.prod(chunks)) * np_dtype.itemsize
-        cf.pread(buf, chunk_nbytes, file_offset=0).get()
+        # pread's IOFuture.get() returns the bytes actually read. A truncated
+        # chunk file (partial store write, corrupted transfer) short-reads and
+        # leaves the tail of buf as uninitialized GPU memory -- a silent
+        # wrong-data path (the patch is then z-scored into plausible-looking
+        # garbage). Check the byte count like the missing-chunk guard above.
+        n_read = cf.pread(buf, chunk_nbytes, file_offset=0).get()
+        if n_read != chunk_nbytes:
+            raise ValueError(
+                f"SSLCorpus: GDS short read on {chunk_path} "
+                f"(read {n_read} of {chunk_nbytes} bytes) -- the zarr chunk is "
+                f"truncated; re-export the volume"
+            )
         # The chunk is (C, 1, Y, X) when chunks cover all channels (the
         # corpus layout: chunks[0] == shape[0]), or (1, 1, Y, X) when chunks
         # are per-channel. Indexing the Z axis (dim 1) preserves the channel
