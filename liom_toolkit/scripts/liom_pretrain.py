@@ -136,7 +136,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--seed",
         type=int,
         default=42,
-        help="Random seed for patch sampling (reproducibility; default: %(default)s)",
+        help="Random seed for network init + patch/mask sampling "
+        "(reproducibility; each DDP rank offsets it so ranks draw disjoint "
+        "streams; default: %(default)s)",
     )
     p.add_argument(
         "--learning-rate",
@@ -230,6 +232,7 @@ def main() -> None:
     # message naming the extra if it is absent.
     import json
 
+    import numpy as np
     import torch
 
     from liom_toolkit.segmentation.vseg.ssl.corpus import SSLCorpus
@@ -245,6 +248,7 @@ def main() -> None:
         dataset_json = json.load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ddp_rank = 0
     # DDP setup: when --ddp is passed, torchrun injects
     # RANK/WORLD_SIZE/LOCAL_RANK/MASTER_ADDR/MASTER_PORT. Init the process
     # group (nccl on CUDA, gloo on CPU) and pin the device to LOCAL_RANK so
@@ -264,6 +268,7 @@ def main() -> None:
         if torch.cuda.is_available():
             torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
             device = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+        ddp_rank = dist.get_rank()
 
     # Build the network with output_channels == input_channels so the
     # masked-inpainting reconstruction objective is well-formed (the network
@@ -271,6 +276,11 @@ def main() -> None:
     # decoder weights transfer to the production segmentation network
     # unchanged; only the seg_layers (the final classifier head) differ, and
     # load_pretrained_weights skips shape-mismatched keys.
+    # Seed torch BEFORE network construction so the allow_init weight init
+    # is reproducible. The base seed (no rank offset) is used so every DDP
+    # rank initializes identical weights -- DDP requires identical initial
+    # parameters across ranks.
+    torch.manual_seed(args.seed)
     n_input_channels = len(dataset_json["channel_names"])
     network = build_pretrain_network(
         plans,
@@ -280,10 +290,18 @@ def main() -> None:
         output_channels=n_input_channels,
     )
 
+    # Seed the data-sampling streams from --seed with a per-rank offset so
+    # DDP ranks draw disjoint patch/mask streams (identical seeds on every
+    # rank would make all ranks sample the same patches -- wasted compute).
+    # SeedSequence.spawn gives the corpus sampler and the mask transform
+    # independent streams derived from the same seed.
+    seed_seq = np.random.SeedSequence([args.seed, ddp_rank])
+    corpus_rng, mask_rng = (np.random.default_rng(s) for s in seed_seq.spawn(2))
     corpus = SSLCorpus(
         volume_paths=args.volume_paths,
         plane_mix=tuple(args.plane_mix),
         in_memory=args.in_memory,
+        rng=corpus_rng,
     )
     n_corpus = len(corpus)
     if n_corpus == 0:
@@ -322,6 +340,7 @@ def main() -> None:
             mask_ratio=args.mask_ratio,
             block_size=tuple(args.block_size),
             frangi_sigmas=tuple(args.frangi_sigmas),
+            rng=mask_rng,
         )
 
     # Pass the batch sampler + steps_per_epoch so the loop calls _sample_batch
