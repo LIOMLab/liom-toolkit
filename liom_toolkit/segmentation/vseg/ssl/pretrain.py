@@ -201,9 +201,16 @@ def build_pretrain_network(
     if output_channels is not None:
         num_classes = output_channels
 
+    arch_kwargs = arch.get("arch_kwargs")
+    if arch_kwargs is None:
+        raise ValueError(
+            f"architecture block must contain 'arch_kwargs' (the network "
+            f"constructor kwargs), got keys {sorted(arch.keys())}"
+        )
+
     network = get_network_from_plans(
         arch_class_name=arch_class_name,
-        arch_kwargs=arch["arch_kwargs"],
+        arch_kwargs=arch_kwargs,
         arch_kwargs_req_import=arch_kwargs_req_import,
         input_channels=input_channels,
         output_channels=int(num_classes),
