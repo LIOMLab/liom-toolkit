@@ -374,9 +374,11 @@ def main() -> None:
     if args.ddp:
         import torch.distributed as dist
 
+        # All ranks tear down the process group -- gating destroy on rank 0
+        # leaves the group initialized on non-zero ranks (asymmetric
+        # teardown can hang notebook/subprocess reuse).
         dist.barrier()
-        if dist.get_rank() == 0:
-            dist.destroy_process_group()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
