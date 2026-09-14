@@ -173,7 +173,13 @@ def test_pretrain_real_ssh_run():
     home_probe = _ssh(host, user, "echo $HOME", timeout=15)
     if home_probe.returncode != 0:
         pytest.skip(f"$HOME probe failed on {host} (exit {home_probe.returncode})")
-    remote_home = home_probe.stdout.decode(errors="replace").strip().splitlines()[-1].strip()
+    home_lines = home_probe.stdout.decode(errors="replace").strip().splitlines()
+    if not home_lines:
+        # Exit 0 with empty stdout (sshd banner quirk, broken shell rc) is an
+        # environment condition -- skip per the documented skip policy
+        # instead of crashing on splitlines()[-1].
+        pytest.skip(f"empty $HOME probe output on {host}")
+    remote_home = home_lines[-1].strip()
     if repo.startswith(("~", "$HOME")):
         repo = remote_home + repo[repo.find("/") :]
     elif not os.path.isabs(repo):
@@ -183,7 +189,10 @@ def test_pretrain_real_ssh_run():
     gpu_probe = _ssh(host, user, "nvidia-smi -L | grep -c 'GPU ' || echo 0", timeout=20)
     if gpu_probe.returncode != 0:
         pytest.skip(f"nvidia-smi probe failed on {host} (exit {gpu_probe.returncode})")
-    gpu_count = gpu_probe.stdout.decode(errors="replace").strip().splitlines()[-1].strip()
+    gpu_lines = gpu_probe.stdout.decode(errors="replace").strip().splitlines()
+    if not gpu_lines:
+        pytest.skip(f"empty nvidia-smi probe output on {host}")
+    gpu_count = gpu_lines[-1].strip()
     if not gpu_count.isdigit() or int(gpu_count) < 1:
         pytest.skip(f"no CUDA GPUs reported by nvidia-smi on {host} (got {gpu_count!r})")
 
