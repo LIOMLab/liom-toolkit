@@ -104,7 +104,9 @@ def test_liom_predict_volume_parse_args_captures_surface(tmp_path) -> None:
     assert args.device == "cpu"
     assert args.channel == 1
     assert args.z_chunk_size == 4
-    assert list(args.folds) == [0, 1]
+    # --folds parses as raw strings; main() validates and converts to
+    # ints (or 'all') before constructing the model.
+    assert list(args.folds) == ["0", "1"]
     assert args.checkpoint_name == "checkpoint_best.pth"
     assert args.tile_step_size == 0.3
 
@@ -276,6 +278,53 @@ def test_main_exits_2_on_nonpositive_spacing(tmp_path) -> None:
                 "6.5",
                 "0",
                 "6.5",
+            ]
+        )
+    assert exc.value.code == 2
+
+
+def test_main_exits_2_on_invalid_fold_token(tmp_path) -> None:
+    """--folds with a non-numeric token exits 2 naming the token."""
+    from liom_toolkit.scripts.liom_predict_volume import main
+
+    input_dir = tmp_path / "in.zarr"
+    input_dir.mkdir()
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(input_dir),
+                "--model-dir",
+                str(model_dir),
+                "--output",
+                str(tmp_path / "out.zarr"),
+                "--folds",
+                "foo",
+            ]
+        )
+    assert exc.value.code == 2
+
+
+def test_main_exits_2_on_fold_all_mixed_with_indices(tmp_path) -> None:
+    """--folds all 0 exits 2 -- 'all' already ensembles the fold_all checkpoint."""
+    from liom_toolkit.scripts.liom_predict_volume import main
+
+    input_dir = tmp_path / "in.zarr"
+    input_dir.mkdir()
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(input_dir),
+                "--model-dir",
+                str(model_dir),
+                "--output",
+                str(tmp_path / "out.zarr"),
+                "--folds",
+                "all",
+                "0",
             ]
         )
     assert exc.value.code == 2
@@ -512,6 +561,59 @@ def test_main_end_to_end_fake_predictor_ngff_spacing(
     result_np = np.asarray(result[:])
     assert set(np.unique(result_np)).issubset({0, 255})
     assert result_np.max() == 255  # non-trivial mask, not all-background
+
+
+@pytest.mark.ai
+def test_main_folds_tokens_reach_nnunet_init(
+    tmp_path, fake_nnunet_predictor, stub_nnunet_model_dir, tiny_ome_zarr
+) -> None:
+    """--folds converts tokens before NnUnetV2Model: ints stay ints, 'all' stays 'all'.
+
+    nnU-Net's initialize_from_trained_model_folder treats the literal 'all'
+    token specially (loads fold_all/); the CLI must pass it through
+    unchanged while numeric tokens become ints.
+    """
+    pytest.importorskip("torch")
+
+    from liom_toolkit.scripts.liom_predict_volume import main
+
+    # The wrapper validates fold_<f>/<checkpoint> existence per requested
+    # fold ('all' -> fold_all), so the stub dir needs them on disk.
+    for fold_dir in ("fold_1", "fold_all"):
+        d = stub_nnunet_model_dir / fold_dir
+        d.mkdir()
+        (d / "checkpoint_final.pth").write_bytes(b"stub checkpoint bytes")
+
+    main(
+        [
+            tiny_ome_zarr,
+            "--model-dir",
+            str(stub_nnunet_model_dir),
+            "--output",
+            str(tmp_path / "pred_ints.zarr"),
+            "--device",
+            "cpu",
+            "--folds",
+            "0",
+            "1",
+        ]
+    )
+    assert fake_nnunet_predictor.calls["init_calls"][0]["use_folds"] == (0, 1)
+
+    main(
+        [
+            tiny_ome_zarr,
+            "--model-dir",
+            str(stub_nnunet_model_dir),
+            "--output",
+            str(tmp_path / "pred_all.zarr"),
+            "--device",
+            "cpu",
+            "--folds",
+            "all",
+        ]
+    )
+    assert fake_nnunet_predictor.calls["init_calls"][1]["use_folds"] == ("all",)
 
 
 @pytest.mark.ai

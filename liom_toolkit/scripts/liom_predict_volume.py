@@ -109,12 +109,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--folds",
-        type=int,
+        type=str,
         nargs="+",
         default=None,
-        help="Fold indices to ensemble (e.g. '--folds 0 1'). When omitted, "
-        "every fold_<n> directory containing the checkpoint is used "
-        "(fold_all excluded).",
+        metavar="FOLD",
+        help="Fold selection: non-negative fold indices (e.g. '--folds 0 1'), "
+        "or 'all' as the only token for nnU-Net's fold_all checkpoint. When "
+        "omitted, every fold_<n> directory containing the checkpoint is "
+        "used (fold_all excluded).",
     )
     p.add_argument(
         "--checkpoint-name",
@@ -172,8 +174,27 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(f"--channel must be a non-negative int, got {args.channel}")
     if args.z_chunk_size is not None and args.z_chunk_size < 1:
         parser.error(f"--z-chunk-size must be a positive int, got {args.z_chunk_size}")
-    if args.folds is not None and any(f < 0 for f in args.folds):
-        parser.error(f"--folds must be non-negative ints, got {args.folds}")
+    folds: tuple[int | str, ...] | None = None
+    if args.folds is not None:
+        if "all" in args.folds:
+            # 'all' selects nnU-Net's fold_all checkpoint, which already
+            # ensembles every fold -- combining it with indices would load
+            # fold_all AND fold_<n> into one ensemble.
+            if args.folds != ["all"]:
+                parser.error(
+                    f"--folds: 'all' cannot be combined with fold indices, got {args.folds}"
+                )
+            folds = ("all",)
+        else:
+            parsed_folds: list[int] = []
+            for token in args.folds:
+                if not token.isdigit():
+                    parser.error(
+                        f"--folds: invalid fold {token!r} -- expected a "
+                        "non-negative integer or 'all'"
+                    )
+                parsed_folds.append(int(token))
+            folds = tuple(parsed_folds)
     if not 0 < args.tile_step_size <= 1:
         parser.error(
             f"--tile-step-size must be in the interval (0, 1], got "
@@ -202,7 +223,7 @@ def main(argv: list[str] | None = None) -> None:
     model = NnUnetV2Model(
         args.model_dir,
         device=args.device,
-        use_folds=tuple(args.folds) if args.folds else None,
+        use_folds=folds,
         checkpoint_name=args.checkpoint_name,
         tile_step_size=args.tile_step_size,
         allow_tqdm=True,
