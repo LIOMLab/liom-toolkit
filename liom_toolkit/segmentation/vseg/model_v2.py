@@ -283,8 +283,9 @@ class NnUnetV2Model:
         ------
         ValueError
             If ``arr`` is not an ndarray, ``arr.ndim`` is not 4, a channel
-            or spatial dim is empty, ``len(spacing)`` is not 3, or a
-            spacing value is non-finite or <= 0.
+            or spatial dim is empty, ``arr`` contains NaN or infinite
+            values, ``len(spacing)`` is not 3, or a spacing value is
+            non-finite or <= 0.
         """
         if not isinstance(arr, np.ndarray):
             # ValueError, not TypeError: the wrapper's contract is that every
@@ -322,6 +323,15 @@ class NnUnetV2Model:
                     f"spacing values must be finite and > 0; got {value} in spacing={spacing}"
                 )
         arr_f32 = np.asarray(arr, dtype=np.float32)
+        # Screen on the float32 array actually fed to the model: this also
+        # catches float64 -> float32 overflow to inf. nnU-Net's normalization
+        # propagates NaN/inf through the network into a plausible
+        # all-background mask -- a silent wrong-result path, so fail here.
+        if not np.isfinite(arr_f32).all():
+            raise ValueError(
+                "arr contains NaN or infinite values -- drop or replace "
+                "non-finite voxels before calling predict_proba"
+            )
         _, probs = self.predictor.predict_single_npy_array(
             arr_f32,
             {"spacing": list(spacing)},

@@ -367,6 +367,35 @@ def test_predict_proba_rejects_bad_spacing(fake_nnunet_predictor, stub_nnunet_mo
     assert fake_nnunet_predictor.calls["predict_calls"] == []
 
 
+@pytest.mark.ai
+def test_predict_proba_rejects_non_finite_input(
+    fake_nnunet_predictor, stub_nnunet_model_dir
+) -> None:
+    """A NaN or inf voxel raises ValueError before the predictor is invoked.
+
+    nnU-Net's normalization propagates non-finite values through the network
+    into a plausible all-background mask -- the AGENTS no-silent-wrong-data
+    rule requires failing at the wrapper boundary.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
+
+    model = NnUnetV2Model(stub_nnunet_model_dir)
+    spacing = (6.5, 6.5, 6.5)
+
+    arr_nan = np.zeros((1, 2, 4, 4), dtype=np.float32)
+    arr_nan[0, 0, 1, 2] = np.nan
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        model.predict_proba(arr_nan, spacing)
+
+    arr_inf = np.zeros((1, 2, 4, 4), dtype=np.float32)
+    arr_inf[0, 1, 0, 0] = np.inf
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        model.predict_proba(arr_inf, spacing)
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
 # ---------------------------------------------------------------------------
 # Probability -> mask contract
 # ---------------------------------------------------------------------------
