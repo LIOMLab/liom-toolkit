@@ -73,7 +73,18 @@ def test_import_visualization():
 # gives a false green by returning a fake module instead of raising.
 # ---------------------------------------------------------------------------
 
-_MASKED_DEPS = ("skimage", "simpleitk", "scipy", "cv2", "pandas", "requests")
+# Only deps that are genuinely absent on a core-only install may be masked.
+# skimage, scipy, and requests are all transitively PRESENT via core deps:
+# ome-zarr 0.18.0 declares scikit-image (which itself requires scipy) and
+# requests, and also imports ``scipy``/``skimage`` at package-__init__ time
+# (scipy itself is undeclared upstream — an ome-zarr packaging wart that is
+# harmless only because scipy arrives via scikit-image). Masking any of the
+# three simulates a state that cannot exist and made this test pass or fail
+# on xdist worker-placement luck (green iff liom_toolkit.conversion happened
+# to be pre-cached in the same worker). The remaining moved deps —
+# simpleitk/cv2 ([seg]) and pandas ([stats]/[antspy]) — are truly absent on
+# core-only and stay masked.
+_MASKED_DEPS = ("simpleitk", "cv2", "pandas")
 
 
 class _ImportRaisingLoader:
@@ -234,4 +245,186 @@ def test_segmentation_raises_honest_importerror_under_masking(io_only_sentinels)
     assert "liom-toolkit[seg]" in message or "liom-toolkit[ai]" in message, (
         "segmentation ImportError must name the extra to install "
         f"(liom-toolkit[seg] or liom-toolkit[ai]), got: {message!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Optional-extra split contract (config-as-data)
+#
+# The extras split is load-bearing: `nnunetv2` lives in [ai] (the torch extra
+# — the SSL pretraining loop and the warm-start path build nnU-Net networks
+# in-process) and `monai` lives in [benchmark] (the architecture-decision
+# contenders + SSL masking transforms). Parsing pyproject.toml as data — not
+# reading it as text — locks the split so a later edit that re-adds monai to
+# [ai] (or drops nnunetv2 from it) fails this test instead of silently
+# re-fattening the segmentation install.
+# ---------------------------------------------------------------------------
+
+
+def test_optional_extra_split_is_config_as_data():
+    """pyproject.toml extras: nnunetv2 in [ai], monai in [benchmark], monai NOT in [ai].
+
+    Config-as-data test: parses ``pyproject.toml`` with ``tomllib`` and
+    asserts on the parsed ``[project.optional-dependencies]`` structure.
+    The guard is real, not a tautology — it fails if ``monai`` re-enters
+    ``[ai]``, if ``nnunetv2`` leaves it, or if the ``benchmark`` extra
+    disappears.
+    """
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    extras = pyproject["project"]["optional-dependencies"]
+
+    assert "benchmark" in extras, "the [benchmark] optional extra must exist"
+
+    def _dist_names(deps: list[str]) -> list[str]:
+        # PEP 508 requirement strings: the dist name is the leading run of
+        # name characters before any version specifier / marker / extras.
+        import re
+
+        return [re.match(r"[A-Za-z0-9._-]+", dep).group(0).lower() for dep in deps]
+
+    ai_dists = _dist_names(extras["ai"])
+    benchmark_dists = _dist_names(extras["benchmark"])
+
+    assert "nnunetv2" in ai_dists, (
+        f"nnunetv2 must be in [ai] (the torch extra provides the nnU-Net "
+        f"architecture); [ai] contains: {ai_dists}"
+    )
+    assert "monai" in benchmark_dists, (
+        f"monai must be in [benchmark]; [benchmark] contains: {benchmark_dists}"
+    )
+    assert "monai" not in ai_dists, (
+        f"monai must NOT be in [ai] — it is benchmark/SSL-only, not on the "
+        f"production inference path; [ai] contains: {ai_dists}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# vseg barrel laziness under masked heavy deps
+#
+# Masks torch/nnunetv2/monai with RAISE-sentinels so any module-top eager
+# import of them in the vseg + benchmark barrels raises ImportError. The
+# barrels must still import (the lazy __getattr__ exports defer the heavy
+# deps to attribute access), while the contenders module — which genuinely
+# needs torch — raises the honest ImportError naming the extra to install.
+# ---------------------------------------------------------------------------
+
+
+def test_vseg_barrels_import_under_masked_heavy_deps():
+    """vseg + vseg.benchmark barrels import with torch/nnunetv2/monai masked; contenders raises.
+
+    Under sentinel masking of ``torch``/``nnunetv2``/``monai``,
+    ``import liom_toolkit.segmentation.vseg`` and
+    ``import liom_toolkit.segmentation.vseg.benchmark`` must succeed (the
+    lazy ``__getattr__`` barrels never eager-import the heavy deps), while
+    ``import liom_toolkit.segmentation.vseg.benchmark.contenders`` must
+    raise ``ImportError`` (not ``ModuleNotFoundError``) whose message names
+    a ``liom-toolkit[...]`` extra — the honest-signal contract.
+
+    The sentinels RAISE rather than mock, so this proves laziness even on
+    ``--all-extras`` CI legs where the deps are installed. The module-level
+    ``_MASKED_DEPS`` is intentionally NOT widened — the ``io_only_sentinels``
+    fixture stays scoped to the ``[seg]``/``[stats]`` deps; this test
+    instantiates its own ``_SentinelFinder`` for the ``[ai]``/``[benchmark]``
+    deps.
+    """
+    pytest.importorskip("skimage")
+
+    masked = ("torch", "nnunetv2", "monai")
+    finder = _SentinelFinder(masked)
+    saved_deps = {name: sys.modules.get(name) for name in masked}
+    sys.meta_path.insert(0, finder)
+    for name in masked:
+        sys.modules.pop(name, None)
+
+    # Purge cached liom_toolkit.* entries so the masked imports re-fire
+    # through the sentinel finder (same save/restore discipline as
+    # test_segmentation_raises_honest_importerror_under_masking — a bare
+    # pop without restore leaks a partially-purged package to later tests
+    # on the same xdist worker).
+    purged = {}
+    for name in list(sys.modules):
+        if name == "liom_toolkit" or name.startswith("liom_toolkit."):
+            purged[name] = sys.modules.pop(name)
+
+    try:
+        import liom_toolkit.segmentation.vseg  # ruff: ignore[unused-import]
+        import liom_toolkit.segmentation.vseg.benchmark  # ruff: ignore[unused-import]
+
+        with pytest.raises(ImportError) as excinfo:
+            import liom_toolkit.segmentation.vseg.benchmark.contenders  # ruff: ignore[unused-import]
+    finally:
+        sys.meta_path.remove(finder)
+        for name, orig in saved_deps.items():
+            if orig is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = orig
+        for name, module in purged.items():
+            sys.modules[name] = module
+        # Drop anything the masked imports created that was not pre-cached.
+        for name in list(sys.modules):
+            if (name == "liom_toolkit" or name.startswith("liom_toolkit.")) and name not in purged:
+                sys.modules.pop(name, None)
+
+    message = str(excinfo.value)
+    assert "liom-toolkit[" in message, (
+        "contenders ImportError must name the extra to install "
+        f"(a liom-toolkit[...] extra), got: {message!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# MONAI placement scan
+#
+# MONAI is a [benchmark]-only dep (the architecture-decision contenders and
+# the SSL masking transforms). It must never leak onto the production
+# inference path — a monai import outside vseg/benchmark/, vseg/ssl/, and
+# the eval_metrics.py graceful-fallback site means the production surface
+# gained a [benchmark] dependency. Mirrors the import-line scan precedent
+# in test_warmstart_does_not_import_nnunet_bridge (matches import
+# statements, not bare substrings — docstring mentions are fine).
+# ---------------------------------------------------------------------------
+
+
+def test_monai_imports_only_in_benchmark_modules():
+    """Every ``import monai``/``from monai`` line lives under the allowed paths.
+
+    Allowed: ``liom_toolkit/segmentation/vseg/benchmark/``,
+    ``liom_toolkit/segmentation/vseg/ssl/``, and
+    ``liom_toolkit/segmentation/vseg/eval_metrics.py`` (the
+    ``reported_dice`` graceful-fallback site). Any other module importing
+    monai means the production path gained a ``[benchmark]`` dependency —
+    a silent install-footprint regression.
+    """
+    import re
+    from pathlib import Path
+
+    import liom_toolkit
+
+    pkg_root = Path(liom_toolkit.__file__).parent
+    import_re = re.compile(r"^\s*(import monai|from monai)")
+    allowed_parts = (
+        ("segmentation", "vseg", "benchmark"),
+        ("segmentation", "vseg", "ssl"),
+    )
+    allowed_files = {("segmentation", "vseg", "eval_metrics.py")}
+
+    violations = []
+    for py_file in pkg_root.rglob("*.py"):
+        for lineno, line in enumerate(py_file.read_text().splitlines(), start=1):
+            if not import_re.match(line):
+                continue
+            rel = py_file.relative_to(pkg_root)
+            if rel.parts[:3] in allowed_parts:
+                continue
+            if tuple(rel.parts) in allowed_files:
+                continue
+            violations.append(f"{rel}:{lineno}: {line.strip()}")
+
+    assert not violations, (
+        "monai imports are only allowed under vseg/benchmark/, vseg/ssl/, "
+        f"and vseg/eval_metrics.py — found: {violations}"
     )
