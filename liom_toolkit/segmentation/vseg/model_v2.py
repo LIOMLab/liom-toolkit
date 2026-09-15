@@ -230,12 +230,22 @@ class NnUnetV2Model:
         Parameters
         ----------
         arr : np.ndarray
-            Input array, ``(C, H, W)`` or ``(C, Z, H, W)`` -- channel first,
-            spatial axes in their own order.
+            Input array, ``(C, Z, H, W)`` -- channel first, spatial axes in
+            z,y,x order. A single 2D slice must be promoted to
+            ``(1, 1, H, W)`` by the caller: every nnunetv2 preprocessor
+            applies ``plans_manager.transpose_forward``, which is always
+            length 3 (``ExperimentPlanner.determine_transpose`` is hardcoded
+            to ``range(3)`` -- even 2D readers emit ``(c, 1, X, Y)`` with
+            3-element spacing), so ``run_case_npy``'s 4-element transpose
+            permutation crashes on a 3D input deep inside the dependency.
         spacing : tuple[float, ...]
-            Per-spatial-axis spacing; ``len(spacing) == arr.ndim - 1``.
+            Per-spatial-axis spacing in z,y,x order; ``len(spacing) == 3``.
             Required (no default) because a silently-defaulted spacing
-            mis-resamples the volume.
+            mis-resamples the volume. For a promoted 2D slice the
+            through-plane value is a pass-through for a ``'2d'``
+            configuration (``default_preprocessor`` keeps
+            ``original_spacing[0]`` verbatim); nnU-Net's own
+            ``NaturalImage2DIO`` reports 999 for it.
 
         Returns
         -------
@@ -246,9 +256,9 @@ class NnUnetV2Model:
         Raises
         ------
         ValueError
-            If ``arr`` is not an ndarray, ``arr.ndim`` is not 3 or 4, a
-            channel or spatial dim is empty, ``len(spacing)`` mismatches
-            ``arr.ndim - 1``, or a spacing value is non-finite or <= 0.
+            If ``arr`` is not an ndarray, ``arr.ndim`` is not 4, a channel
+            or spatial dim is empty, ``len(spacing)`` is not 3, or a
+            spacing value is non-finite or <= 0.
         """
         if not isinstance(arr, np.ndarray):
             # ValueError, not TypeError: the wrapper's contract is that every
@@ -256,10 +266,11 @@ class NnUnetV2Model:
             raise ValueError(  # ruff: ignore[type-check-without-type-error]
                 f"arr must be a numpy ndarray, got {type(arr).__name__}"
             )
-        if arr.ndim not in (3, 4):
+        if arr.ndim != 4:
             raise ValueError(
-                f"arr.ndim must be 3 (C,H,W) or 4 (C,Z,H,W); got "
-                f"ndim={arr.ndim} with shape {arr.shape}"
+                f"arr.ndim must be 4 (C,Z,H,W); got ndim={arr.ndim} with "
+                f"shape {arr.shape} -- promote a single 2D slice to "
+                f"(1, 1, H, W) before calling"
             )
         if arr.shape[0] < 1:
             raise ValueError(f"arr must have at least one channel; got shape {arr.shape}")
@@ -272,9 +283,11 @@ class NnUnetV2Model:
             raise ValueError(
                 f"spacing must be a sequence of per-axis values; got {spacing!r}"
             ) from None
-        if len(spacing) != arr.ndim - 1:
+        if len(spacing) != 3:
             raise ValueError(
-                f"len(spacing) must be arr.ndim - 1 = {arr.ndim - 1}; got "
+                f"len(spacing) must be 3 (one per z,y,x spatial axis of the "
+                f"(C,Z,H,W) input -- the always-length-3 transpose_forward "
+                f"permutation indexes spacing[0..2]); got "
                 f"len(spacing)={len(spacing)} ({spacing})"
             )
         for value in spacing:
@@ -301,9 +314,11 @@ class NnUnetV2Model:
         Parameters
         ----------
         arr : np.ndarray
-            Input array, ``(C, H, W)`` or ``(C, Z, H, W)``.
+            Input array, ``(C, Z, H, W)`` -- a single 2D slice is passed as
+            ``(1, 1, H, W)`` and its ``(1, H, W)`` output squeezed back by
+            the caller.
         spacing : tuple[float, ...]
-            Per-spatial-axis spacing; ``len(spacing) == arr.ndim - 1``.
+            Per-spatial-axis spacing in z,y,x order; ``len(spacing) == 3``.
 
         Returns
         -------

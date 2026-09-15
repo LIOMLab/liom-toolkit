@@ -693,8 +693,11 @@ class NnUnetContender:
             for a fair comparison.
         spacing : tuple[float, float]
             In-plane ``(row, col)`` spacing forwarded to the predictor's
-            ``predict_proba``. Benchmark PNGs are pixel-space — pass the
-            real in-plane spacing if the dataset carries physical units.
+            ``predict_proba`` (promoted internally to the 3-element spacing
+            nnunetv2 requires; the through-plane entry is a pass-through
+            for ``'2d'`` configurations). Benchmark PNGs are pixel-space —
+            pass the real in-plane spacing if the dataset carries physical
+            units.
         num_processes : int
             Worker processes for fingerprint extraction and preprocessing.
             Default 8 (nnU-Net's own default).
@@ -868,9 +871,12 @@ class NnUnetContender:
     ) -> list[NDArray[np.bool_]]:
         """Predict one boolean mask per slice through the shared wrapper.
 
-        Each slice is read via imageio, cast to float32 with a leading
-        channel dim, and passed to the wrapper's ``predict_proba``; the
-        vessel channel (index 1) is thresholded at a strict ``> 0.5``.
+        Each slice is read via imageio, cast to float32, promoted to
+        ``(1, 1, H, W)`` (channel + dummy z-axis -- the only input rank a
+        real nnunetv2 preprocessor accepts, since ``transpose_forward`` is
+        always length 3), and passed to the wrapper's ``predict_proba``;
+        the vessel channel (index 1) is thresholded at a strict ``> 0.5``
+        after dropping the dummy z-axis.
 
         Parameters
         ----------
@@ -899,7 +905,15 @@ class NnUnetContender:
         masks: list[NDArray[np.bool_]] = []
         for slice_path in slices:
             img = np.asarray(iio.imread(slice_path))
-            probs = model.predict_proba(img.astype(np.float32)[None], spacing=self.spacing)
+            # Promote to (1, 1, H, W) + 3-element spacing -- a real nnunetv2
+            # preprocessor's transpose_forward is always length 3, so a
+            # (1,H,W) input crashes on the 4-element transpose permutation.
+            # The through-plane spacing is a pass-through for a '2d'
+            # configuration, so the in-plane value doubles as placeholder.
+            probs = model.predict_proba(
+                img.astype(np.float32)[None, None],
+                spacing=(self.spacing[0], *self.spacing),
+            )
             if probs.shape[0] < 2:
                 raise ValueError(
                     f"NnUnetContender: predict_proba returned "
@@ -907,7 +921,9 @@ class NnUnetContender:
                     f"{slice_path}; the binary vessel contract requires "
                     f"at least 2 (channel 1 is the vessel probability)"
                 )
-            mask = probs[1] > 0.5
+            # probs is (2, 1, H, W) for the (1,1,H,W) input -- drop the
+            # dummy z-axis so the mask matches the (H, W) input slice.
+            mask = probs[1, 0] > 0.5
             if mask.shape != img.shape:
                 raise RuntimeError(
                     f"NnUnetContender: prediction shape {mask.shape} does "

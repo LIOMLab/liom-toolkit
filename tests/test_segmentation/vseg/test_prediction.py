@@ -172,12 +172,16 @@ def test_predict_one_nnunet_calls_predictor_once_with_raw_input(
     """predict_one routes an NnUnetV2Model to model.predict with raw input + spacing.
 
     The nnU-Net path must call ``predict_single_npy_array`` exactly once via
-    the wrapper, with a ``(1, H, W)`` float32 array byte-equal to the raw PNG
-    contents (no CLAHE / min-max / gaussian — nnU-Net owns normalization per
-    its plans) and ``image_properties == {"spacing": [6.5, 6.5]}``. The
-    persistence contract is shared with the legacy path:
-    ``{stem}_segmented.png`` written under ``save_path`` and the returned
-    mask is uint8 {0, 255}.
+    the wrapper, with a ``(1, 1, H, W)`` float32 array byte-equal to the raw
+    PNG contents under the channel + dummy-z dims (no CLAHE / min-max /
+    gaussian — nnU-Net owns normalization per its plans) and
+    ``image_properties == {"spacing": [6.5, 6.5, 6.5]}`` — the 3-element
+    spacing every real nnunetv2 preprocessor requires (transpose_forward is
+    always length 3); the through-plane entry is a pass-through placeholder
+    for ``'2d'`` configurations. The persistence contract is shared with the
+    legacy path: ``{stem}_segmented.png`` written under ``save_path`` and
+    the returned mask is uint8 {0, 255} with the dummy z-axis squeezed back
+    to ``(H, W)``.
     """
     img_path = tmp_path / "nnunet.png"
     raw = _write_synthetic_image(str(img_path), shape=(16, 16))
@@ -194,10 +198,10 @@ def test_predict_one_nnunet_calls_predictor_once_with_raw_input(
     calls = fake_nnunet_predictor.calls["predict_calls"]
     assert len(calls) == 1
     input_image = calls[0]["input_image"]
-    assert input_image.shape == (1, 16, 16)
+    assert input_image.shape == (1, 1, 16, 16)
     assert input_image.dtype == np.float32
-    np.testing.assert_array_equal(input_image[0], raw.astype(np.float32))
-    assert calls[0]["image_properties"] == {"spacing": [6.5, 6.5]}
+    np.testing.assert_array_equal(input_image[0, 0], raw.astype(np.float32))
+    assert calls[0]["image_properties"] == {"spacing": [6.5, 6.5, 6.5]}
 
     segmented = save_path / "nnunet_segmented.png"
     assert segmented.exists()
@@ -234,7 +238,7 @@ def test_predict_one_nnunet_ignores_legacy_norm_and_dev(
 
     calls = fake_nnunet_predictor.calls["predict_calls"]
     assert len(calls) == 1
-    np.testing.assert_array_equal(calls[0]["input_image"][0], raw.astype(np.float32))
+    np.testing.assert_array_equal(calls[0]["input_image"][0, 0], raw.astype(np.float32))
 
 
 def test_predict_one_nnunet_requires_spacing(
@@ -393,6 +397,16 @@ def _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor):
         output_file_truncated=None,
         save_or_return_probabilities=False,
     ):
+        # Keep the replaced method honest: the real preprocessor requires a
+        # (C,Z,H,W) input + 3-element spacing (transpose_forward is always
+        # length 3), so the replacement enforces the same contract the
+        # conftest fake does.
+        if input_image.ndim != 4 or len(image_properties["spacing"]) != 3:
+            raise ValueError(
+                f"fake nnUNetPredictor: expected (C,Z,H,W) input + 3-element "
+                f"spacing; got ndim={input_image.ndim}, "
+                f"spacing={image_properties.get('spacing')!r}"
+            )
         fake_nnunet_predictor.calls["predict_calls"].append(
             {
                 "input_image": input_image,

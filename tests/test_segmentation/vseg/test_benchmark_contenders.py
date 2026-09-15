@@ -475,9 +475,11 @@ def test_nnunet_contender_predict_on_slices_in_process(
 
     The real ``NnUnetV2Model`` validates the stub trained-model dir, the
     fake predictor records each call, and the contender returns bool masks
-    in input order. Asserts the predictor saw a ``(1, H, W)`` float32 array
-    and the ctor ``spacing`` in ``image_properties`` — and that an empty
-    slice list still raises ValueError before touching the model.
+    in input order. Asserts the predictor saw a ``(1, 1, H, W)`` float32
+    array (channel + dummy-z promotion — the only rank a real nnunetv2
+    preprocessor accepts) and the ctor ``spacing`` promoted to 3 elements in
+    ``image_properties`` — and that an empty slice list still raises
+    ValueError before touching the model.
     """
     pytest.importorskip("torch")
     import imageio.v3 as iio
@@ -497,8 +499,9 @@ def test_nnunet_contender_predict_on_slices_in_process(
         slices.append(str(p))
 
     # Stage a fixed above-threshold probability so the mask content is
-    # deterministic (vessel channel 1 → 0.8 everywhere).
-    probs = np.zeros((2, 8, 6), dtype=np.float32)
+    # deterministic (vessel channel 1 → 0.8 everywhere). The shape mirrors
+    # the real contract for a (1,1,H,W) input: (num_classes, 1, H, W).
+    probs = np.zeros((2, 1, 8, 6), dtype=np.float32)
     probs[0] = 0.2
     probs[1] = 0.8
     fake_nnunet_predictor.state["probs"] = probs
@@ -513,9 +516,9 @@ def test_nnunet_contender_predict_on_slices_in_process(
     predict_calls = fake_nnunet_predictor.calls["predict_calls"]
     assert len(predict_calls) == 2
     for rec in predict_calls:
-        assert rec["input_image"].shape == (1, 8, 6)
+        assert rec["input_image"].shape == (1, 1, 8, 6)
         assert rec["input_image"].dtype == np.float32
-        assert rec["image_properties"]["spacing"] == [1.0, 1.0]
+        assert rec["image_properties"]["spacing"] == [1.0, 1.0, 1.0]
 
 
 def test_nnunet_contender_train_pipeline_call_order(

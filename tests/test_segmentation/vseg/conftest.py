@@ -93,6 +93,25 @@ def fake_nnunet_predictor() -> Any:
             output_file_truncated: Any = None,
             save_or_return_probabilities: bool = False,
         ) -> tuple[np.ndarray, np.ndarray]:
+            # Enforce the real nnunetv2 preprocessor contract: every
+            # configuration's transpose_forward is length 3, so
+            # run_case_npy requires a (C,Z,H,W) input and a 3-element
+            # spacing -- a (1,H,W) input + 2-element spacing crashes the
+            # real DefaultPreprocessor with 'axes don't match array'. The
+            # fake must reject the same shapes, or it green-locks whatever
+            # wrong contract a caller sends.
+            if input_image.ndim != 4:
+                raise ValueError(
+                    f"fake nnUNetPredictor: input_image.ndim must be 4 "
+                    f"(C,Z,H,W); got ndim={input_image.ndim} "
+                    f"shape={input_image.shape}"
+                )
+            spacing = image_properties["spacing"]
+            if len(spacing) != 3:
+                raise ValueError(
+                    f"fake nnUNetPredictor: image_properties['spacing'] must "
+                    f"have 3 elements; got {spacing!r}"
+                )
             calls["predict_calls"].append(
                 {
                     "input_image": input_image,

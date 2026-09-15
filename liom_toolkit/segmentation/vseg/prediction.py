@@ -83,10 +83,13 @@ def predict_one(
         plausible-shaped-but-wrong single-pass output when tiled inference
         was requested. Applies to BOTH model paths.
     spacing : tuple[float, float] | None
-        ``(sy, sx)`` pixel spacing. REQUIRED when ``model`` is an
+        ``(sy, sx)`` in-plane pixel spacing. REQUIRED when ``model`` is an
         ``NnUnetV2Model`` -- a PNG carries no spacing metadata and nnU-Net
         needs real spacing for its resampling plan (silently defaulting to
-        isotropic would mis-resample). Passing ``spacing`` with a legacy
+        isotropic would mis-resample). Internally promoted to the
+        3-element ``(sz, sy, sx)`` spacing a real nnunetv2 preprocessor
+        requires, with the through-plane entry a pass-through placeholder
+        for ``'2d'`` configurations. Passing ``spacing`` with a legacy
         model raises ValueError -- it is an nnU-Net-only parameter.
 
     Returns
@@ -142,7 +145,20 @@ def predict_one(
                 "predict_one: input image is all-zero; cannot normalize. "
                 "Check the input image path."
             )
-        mask = model.predict(image.astype(np.float32)[None], spacing)
+        # Promote the 2D slice to the only contract a real nnunetv2 model
+        # accepts: (C, Z, H, W) input + 3-element spacing. Every nnunetv2
+        # preprocessor applies plans_manager.transpose_forward, which is
+        # always length 3 (ExperimentPlanner.determine_transpose is
+        # hardcoded to range(3) -- even 2D readers emit (c,1,X,Y) with
+        # 3-element spacing), so run_case_npy's 4-element transpose
+        # permutation and its spacing[0..2] indexing crash on a (1,H,W)
+        # input + 2-element spacing. The through-plane spacing value is a
+        # pass-through for a '2d' configuration (default_preprocessor keeps
+        # original_spacing[0] verbatim), so the in-plane row spacing doubles
+        # as the placeholder -- the same role the 999 that nnU-Net's own
+        # NaturalImage2DIO reports for a single PNG plays. predict returns
+        # (1, H, W); [0] drops the dummy z-axis.
+        mask = model.predict(image.astype(np.float32)[None, None], (spacing[0], *spacing))[0]
         create_dir(f"{save_path}")
         save_inf = f"{save_path}/{Path(img_path).stem}_segmented.png"
         iio.imwrite(save_inf, mask)

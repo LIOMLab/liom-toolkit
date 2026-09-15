@@ -251,11 +251,13 @@ def test_init_excludes_fold_all_unless_requested(fake_nnunet_predictor, tmp_path
 def test_predict_proba_rejects_non_ndarray_and_bad_ndim(
     fake_nnunet_predictor, stub_nnunet_model_dir
 ) -> None:
-    """predict_proba rejects non-ndarray input and ndim outside {3, 4} with ValueError.
+    """predict_proba rejects non-ndarray input and ndim != 4 with ValueError.
 
-    nnU-Net's slicer assumes a channel-first npy array; anything else fails
-    opaquely or mis-shapes the output. The wrapper fails fast naming the
-    offending value, and the predictor is never called on bad input.
+    Every nnunetv2 preprocessor applies the always-length-3
+    ``transpose_forward`` permutation, so a (C,H,W) input crashes deep in
+    ``run_case_npy`` -- the wrapper requires exactly (C,Z,H,W) and fails
+    fast naming the offending shape; the predictor is never called on bad
+    input.
     """
     pytest.importorskip("torch")
     from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
@@ -265,7 +267,7 @@ def test_predict_proba_rejects_non_ndarray_and_bad_ndim(
     with pytest.raises(ValueError, match="ndarray"):
         model.predict_proba([[0.0]], (1.0,))
 
-    for bad in (np.zeros((4, 4)), np.zeros((1, 1, 2, 4, 4))):
+    for bad in (np.zeros((4, 4)), np.zeros((1, 4, 4)), np.zeros((1, 1, 2, 4, 4))):
         with pytest.raises(ValueError, match="ndim"):
             model.predict_proba(bad, (1.0,) * (bad.ndim - 1))
 
