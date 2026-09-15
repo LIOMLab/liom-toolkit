@@ -24,12 +24,14 @@ per worker that needs it, so torch is imported lazily where it is used.
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from unittest.mock import patch
 
 import imageio.v3 as iio
 import numpy as np
 import pytest
+import zarr
 
 
 @pytest.fixture(scope="module")
@@ -327,3 +329,275 @@ def test_predict_one_legacy_model_rejects_spacing_kwarg(tmp_path, predict_one):
             dev="cpu",
             spacing=(6.5, 6.5),
         )
+
+
+# ---------------------------------------------------------------------------
+# predict_volume nnU-Net routing
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def tiny_ome_zarr(tmp_path) -> str:
+    """Write a tiny (1, 5, 32, 32) float32 OME-Zarr with 6.5um scales.
+
+    Mirrors the ``synthetic_ome_zarr`` idiom from the ssl conftest (which is
+    dir-scoped and not importable here): a real ``save_zarr`` write so the
+    NGFF ``coordinateTransformations`` metadata the spacing parser reads is
+    genuinely on disk. A seeded RNG keeps the volume deterministic.
+    """
+    from liom_toolkit.conversion.conversion import save_zarr
+
+    vol = np.random.default_rng(0).random((1, 5, 32, 32)).astype(np.float32)
+    zarr_path = str(tmp_path / "tiny.zarr")
+    save_zarr(vol, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(1, 1, 32, 32))
+    return zarr_path
+
+
+@pytest.fixture
+def tiny_dataset(tiny_ome_zarr):
+    """An OmeZarrDataset over ``tiny_ome_zarr`` with channel 0 selected.
+
+    ``patch_size=(1, H, W)`` matches the documented predict_volume contract;
+    ``pre_process``/``normalise`` are off so ``dataset.data`` is the raw
+    volume the nnU-Net path feeds through unchanged.
+    """
+    pytest.importorskip("torch")  # dataset.py carries a module-top torch guard
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
+
+    return OmeZarrDataset(
+        tiny_ome_zarr,
+        patch_size=(1, 32, 32),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        channel=0,
+    )
+
+
+def _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor):
+    """Make the fake predictor return input-derived probabilities.
+
+    The default canned probs are all-background, which makes chunked-vs-
+    whole comparisons vacuous (all-zero masks are trivially equal). This
+    replaces ``predict_single_npy_array`` with a deterministic function of
+    the input (vessel prob = above-mean) while still recording each call in
+    ``calls["predict_calls"]`` so call-count and input-shape assertions
+    keep working.
+    """
+
+    def _deterministic(
+        input_image,
+        image_properties,
+        segmentation_previous_stage=None,
+        output_file_truncated=None,
+        save_or_return_probabilities=False,
+    ):
+        fake_nnunet_predictor.calls["predict_calls"].append(
+            {
+                "input_image": input_image,
+                "image_properties": image_properties,
+                "save_or_return_probabilities": save_or_return_probabilities,
+            }
+        )
+        probs = np.zeros((2, *input_image.shape[1:]), dtype=np.float32)
+        probs[1] = (input_image[0] > input_image[0].mean()).astype(np.float32)
+        probs[0] = 1.0 - probs[1]
+        seg = np.zeros(input_image.shape[1:], dtype=np.uint8)
+        return seg, probs
+
+    nnunet_model.predictor.predict_single_npy_array = _deterministic
+
+
+def test_predict_volume_nnunet_whole_volume_with_ngff_spacing(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """predict_volume routes NnUnetV2Model to one whole-volume predict call.
+
+    With ``z_chunk_size=None`` the (Z,H,W) dask array materializes once as
+    ``(1,Z,H,W)`` float32 and spacing comes from the NGFF metadata by axis
+    name (z,y,x = 6.5um each -- the c-axis entry at position 0 must NOT leak
+    into the spacing triple). The output zarr is (Z,H,W) uint8 {0,255},
+    positionally aligned with the input.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor)
+    out = str(tmp_path / "out.zarr")
+
+    predict_volume(nnunet_model, tiny_dataset, out)
+
+    calls = fake_nnunet_predictor.calls["predict_calls"]
+    assert len(calls) == 1
+    input_image = calls[0]["input_image"]
+    assert input_image.shape == (1, 5, 32, 32)
+    assert input_image.dtype == np.float32
+    assert calls[0]["image_properties"] == {"spacing": [6.5, 6.5, 6.5]}
+
+    result = zarr.open(out, mode="r")
+    assert result.shape == (5, 32, 32)
+    assert result.dtype == np.uint8
+    result_np = np.asarray(result[:])
+    assert set(np.unique(result_np)).issubset({0, 255})
+    assert result_np.max() == 255  # non-trivial mask, not all-background
+
+
+def test_predict_volume_nnunet_explicit_spacing_overrides_ngff(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """An explicit spacing tuple wins over the NGFF metadata.
+
+    The predictor must see exactly ``[3.0, 2.0, 1.0]`` in z,y,x array order
+    -- an explicit caller-supplied spacing is authoritative for stores whose
+    metadata is absent or untrusted.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    predict_volume(
+        nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), spacing=(3.0, 2.0, 1.0)
+    )
+
+    calls = fake_nnunet_predictor.calls["predict_calls"]
+    assert len(calls) == 1
+    assert calls[0]["image_properties"] == {"spacing": [3.0, 2.0, 1.0]}
+
+
+def test_predict_volume_nnunet_missing_ngff_spacing_raises(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_ome_zarr, tiny_dataset
+):
+    """A zarr without scale metadata + spacing=None raises ValueError.
+
+    Spacing is never silently defaulted to isotropic: the error must tell
+    the caller to pass ``spacing`` explicitly and fire before any model
+    invocation.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    # Strip coordinateTransformations from every multiscales dataset so the
+    # NGFF reader exposes no scale vector.
+    root = zarr.open_group(tiny_ome_zarr, mode="a")
+    ome = copy.deepcopy(dict(root.attrs["ome"]))
+    for dataset_entry in ome["multiscales"][0]["datasets"]:
+        dataset_entry.pop("coordinateTransformations", None)
+    root.attrs["ome"] = ome
+
+    with pytest.raises(ValueError, match="spacing"):
+        predict_volume(nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"))
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
+def test_predict_volume_nnunet_z_chunking_matches_whole(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """z_chunk_size=2 on Z=5 produces 3 slab calls identical to whole-volume output.
+
+    The only Python loop on the nnU-Net volume path is over Z-CHUNKS (RAM
+    bounding), never per-slice: each call carries ``(1, slab, H, W)`` and the
+    positional ``new_volume[z0:z1]`` writes must assemble the same result a
+    single whole-volume call produces.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor)
+
+    whole_out = str(tmp_path / "whole.zarr")
+    predict_volume(nnunet_model, tiny_dataset, whole_out)
+    whole = np.asarray(zarr.open(whole_out, mode="r")[:])
+
+    fake_nnunet_predictor.calls["predict_calls"].clear()
+    chunked_out = str(tmp_path / "chunked.zarr")
+    predict_volume(nnunet_model, tiny_dataset, chunked_out, z_chunk_size=2)
+
+    calls = fake_nnunet_predictor.calls["predict_calls"]
+    assert len(calls) == 3  # ceil(5 / 2): slabs of 2, 2, 1
+    slab_sizes = [c["input_image"].shape[1] for c in calls]
+    assert slab_sizes == [2, 2, 1]
+    for c in calls:
+        assert c["input_image"].ndim == 4
+        assert c["input_image"].shape[0] == 1
+
+    chunked = np.asarray(zarr.open(chunked_out, mode="r")[:])
+    np.testing.assert_array_equal(chunked, whole)
+
+
+def test_predict_volume_legacy_rejects_nnunet_kwargs(tmp_path):
+    """spacing/z_chunk_size on a legacy (non-NnUnetV2) model raise ValueError.
+
+    Asymmetric kwargs are never silently ignored: each error names the
+    offending kwarg so the caller knows it only applies to nnU-Net models.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    with pytest.raises(ValueError, match="spacing"):
+        predict_volume(None, None, str(tmp_path / "a.zarr"), spacing=(6.5, 6.5, 6.5))
+    with pytest.raises(ValueError, match="z_chunk_size"):
+        predict_volume(None, None, str(tmp_path / "b.zarr"), z_chunk_size=2)
+
+
+def test_predict_volume_nnunet_zero_dim_raises(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """A dataset whose data has a zero spatial dim raises ValueError before inference.
+
+    An empty axis cannot produce a meaningful mask -- the explicit raise
+    prevents a silently empty (plausible-shaped) output store.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    tiny_dataset.data = tiny_dataset.data[:0]  # (0, 32, 32)
+
+    with pytest.raises(ValueError, match="empty|shape"):
+        predict_volume(nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"))
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
+def test_predict_volume_nnunet_existing_output_raises(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """An existing zarr_location raises FileExistsError before any model call.
+
+    The nnU-Net path refuses to overwrite an existing store -- unlike the
+    legacy ``zarr.open(mode='w')`` semantics -- so an existing path must
+    fail fast BEFORE inference, not truncate.
+    """
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    existing = tmp_path / "existing.zarr"
+    existing.mkdir()
+
+    with pytest.raises(FileExistsError, match="existing.zarr"):
+        predict_volume(nnunet_model, tiny_dataset, str(existing))
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
+def test_predict_volume_nnunet_not_gated_by_legacy_dataset_guards(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_ome_zarr
+):
+    """rotate_patches/filter_empty/patch_size guards do not gate the nnU-Net path.
+
+    Those guards protect the legacy patch loop's index-to-grid mapping
+    (``get_patch_coordinates``); the nnU-Net path reads ``dataset.data``
+    whole and never iterates the patch index, so a dataset built with
+    rotate_patches=True and a 3D patch_size must still run.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    dataset = OmeZarrDataset(
+        tiny_ome_zarr,
+        patch_size=(32, 32, 32),  # 3D patch_size would fail the legacy guard
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=True,  # would fail the legacy guard
+        channel=0,
+    )
+
+    predict_volume(nnunet_model, dataset, str(tmp_path / "out.zarr"))
+
+    assert len(fake_nnunet_predictor.calls["predict_calls"]) == 1
