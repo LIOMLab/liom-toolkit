@@ -70,13 +70,16 @@ class NnUnetV2Model:
         nnU-Net's constructor defaults to ``cuda`` unconditionally, so the
         wrapper always resolves and passes the device explicitly.
         ``perform_everything_on_device`` tracks ``device.type == "cuda"``.
-    use_folds : tuple[int | str] | None, optional
+    use_folds : tuple[int | str, ...] | None, optional
         Folds to ensemble. ``None`` defers to nnU-Net's auto-detection
         (every ``fold_<n>`` containing the checkpoint, excluding
         ``fold_all``). When given, exactly those fold directories are
         validated up front; ``"all"`` selects ``fold_all``. The annotation
-        mirrors the upstream ``initialize_from_trained_model_folder``
-        signature verbatim.
+        is the public contract -- a variadic tuple of fold ints and/or the
+        literal ``"all"``; at runtime a bare scalar or list is normalized
+        to a tuple for convenience (upstream's
+        ``initialize_from_trained_model_folder`` likewise wraps a bare
+        ``str`` in a list).
     checkpoint_name : str, optional
         Checkpoint filename inside each fold directory. Defaults to
         ``"checkpoint_final.pth"``.
@@ -121,7 +124,7 @@ class NnUnetV2Model:
         model_dir: str | Path,
         *,
         device: torch.device | str | None = None,
-        use_folds: tuple[int | str] | None = None,
+        use_folds: tuple[int | str, ...] | None = None,
         checkpoint_name: str = "checkpoint_final.pth",
         tile_step_size: float = 0.5,
         use_gaussian: bool = True,
