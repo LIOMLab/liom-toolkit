@@ -232,9 +232,7 @@ def test_predict_one_nnunet_ignores_legacy_norm_and_dev(
 
     calls = fake_nnunet_predictor.calls["predict_calls"]
     assert len(calls) == 1
-    np.testing.assert_array_equal(
-        calls[0]["input_image"][0], raw.astype(np.float32)
-    )
+    np.testing.assert_array_equal(calls[0]["input_image"][0], raw.astype(np.float32))
 
 
 def test_predict_one_nnunet_requires_spacing(

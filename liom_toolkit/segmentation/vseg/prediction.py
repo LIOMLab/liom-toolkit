@@ -30,37 +30,48 @@ if TYPE_CHECKING:
 
     from .dataset import OmeZarrDataset
     from .model import VsegModel
+    from .model_v2 import NnUnetV2Model
 
 
 def predict_one(
-    model: VsegModel,
+    model: VsegModel | NnUnetV2Model,
     img_path: str,
     save_path: str,
     dev: str = "cuda",
     norm_param: tuple[float, float] = (10, 0.05),
     norm: bool = True,
     patching: bool = False,
+    *,
+    spacing: tuple[float, float] | None = None,
 ) -> NDArray[np.uint8]:
     """Predict one image.
 
     Parameters
     ----------
-    model : VsegModel
-        The model to use for prediction.
+    model : VsegModel | NnUnetV2Model
+        The model to use for prediction. Routing is by instance type: an
+        ``NnUnetV2Model`` takes the nnU-Net path (raw image, explicit
+        ``spacing``, ``model.predict``), any other object takes the legacy
+        ``VsegModel`` path unchanged.
     img_path : str
         The path to the image to predict.
     save_path : str
         The path to save the results.
     dev : str
-        The device to use for prediction.
+        The device to use for prediction. Legacy-path only -- ignored on the
+        nnU-Net path (the device was bound at ``NnUnetV2Model``
+        construction).
     norm_param : tuple[float, float]
         The parameters for the normalization: ``(kernel_size, clip_limit)``.
+        Legacy-path only -- ignored on the nnU-Net path.
     norm : bool
         When True (default), apply CLAHE via cv2.createCLAHE before
         inference -- this preserves the shipped always-CLAHE behavior. When
         False, skip CLAHE and use only the min-max-scaled uint8 image. The
         default of True means callers that omit ``norm`` see no behavior
-        change.
+        change. Legacy-path only -- ignored on the nnU-Net path (nnU-Net
+        owns normalization per its plans, so the raw image is fed to the
+        model).
     patching : bool
         When False (default), run the existing single full-image pass (the
         only implemented path: stride equals the image height, one patch
@@ -68,7 +79,13 @@ def predict_one(
         inference is not implemented; use predict_volume for tiled
         prediction. The explicit raise avoids silently returning
         plausible-shaped-but-wrong single-pass output when tiled inference
-        was requested.
+        was requested. Applies to BOTH model paths.
+    spacing : tuple[float, float] | None
+        ``(sy, sx)`` pixel spacing. REQUIRED when ``model`` is an
+        ``NnUnetV2Model`` -- a PNG carries no spacing metadata and nnU-Net
+        needs real spacing for its resampling plan (silently defaulting to
+        isotropic would mis-resample). Passing ``spacing`` with a legacy
+        model raises ValueError -- it is an nnU-Net-only parameter.
 
     Returns
     -------
@@ -82,7 +99,9 @@ def predict_one(
     NotImplementedError
         If ``patching=True`` (2D tiled inference is not implemented).
     ValueError
-        If the input image is all-zero (cannot normalise).
+        If the input image is all-zero (cannot normalise), if ``spacing``
+        is None on the nnU-Net path, or if ``spacing`` is passed with a
+        legacy model.
     """
     try:
         import torch
@@ -95,6 +114,45 @@ def predict_one(
             "2D tiled inference is not implemented; use predict_volume for tiled prediction"
         )
     image = iio.imread(img_path)
+
+    # Type dispatch: nnU-Net wrapper vs legacy VsegModel. model_v2 is
+    # [ai]-gated, so the import stays function-scope -- this module must
+    # remain importable with only [seg] installed. The dispatch runs BEFORE
+    # the legacy preprocessing block so the nnU-Net path feeds the RAW image
+    # (nnU-Net owns normalization per its plans) and BEFORE torch.device /
+    # patch-dir setup, which are legacy-only concerns.
+    from .model_v2 import NnUnetV2Model
+
+    if isinstance(model, NnUnetV2Model):
+        if spacing is None:
+            raise ValueError(
+                "predict_one: spacing=(sy, sx) is required for nnU-Net models "
+                "-- a PNG carries no spacing metadata and silently defaulting "
+                "to isotropic spacing would mis-resample the prediction. Pass "
+                "spacing explicitly."
+            )
+        # The all-zero guard fires on the RAW image before nnU-Net sees it:
+        # crop_to_nonzero's full-bbox fallback would otherwise let an
+        # all-zero input sail through and emit a plausible all-background
+        # mask on garbage (silent wrong-data).
+        if image.max() == 0:
+            raise ValueError(
+                "predict_one: input image is all-zero; cannot normalize. "
+                "Check the input image path."
+            )
+        mask = model.predict(image.astype(np.float32)[None], spacing)
+        create_dir(f"{save_path}")
+        save_inf = f"{save_path}/{Path(img_path).stem}_segmented.png"
+        iio.imwrite(save_inf, mask)
+        return mask
+
+    if spacing is not None:
+        raise ValueError(
+            "predict_one: spacing is only used by nnU-Net models "
+            "(NnUnetV2Model); it has no effect on the legacy VsegModel path. "
+            "Drop the spacing argument for legacy models."
+        )
+
     H = image.shape[0]
     W = image.shape[1]
     size = (H, W)
