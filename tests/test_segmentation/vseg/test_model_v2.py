@@ -619,3 +619,60 @@ def test_real_nnunet_predictor_roundtrip_cpu(tmp_path, monkeypatch) -> None:
     assert mask.dtype == np.uint8
     assert mask.shape == (2, 32, 48)
     assert set(np.unique(mask).tolist()) <= {0, 255}
+
+
+# ---------------------------------------------------------------------------
+# Barrel contract: lazy export, no eager heavy deps
+# ---------------------------------------------------------------------------
+
+
+def test_vseg_barrel_imports_without_torch_or_nnunetv2() -> None:
+    """``import liom_toolkit.segmentation.vseg`` pulls neither torch nor nnunetv2.
+
+    Ungated (no importorskip): the barrel must import on a core-only
+    install. ``liom_toolkit.*`` is purged so the import re-runs fresh, and
+    ``torch`` / ``nnunetv2`` entries are purged too -- otherwise a stale
+    import by an earlier test in the same xdist worker would either mask an
+    eager import inside the barrel or fake a pass. Everything is restored
+    in ``finally`` (the test_imports.py purge/restore discipline). The
+    ``__all__`` assertion pins the curated barrel: ``NnUnetV2Model`` is
+    deliberately absent so star-import stays safe on core-only installs.
+    """
+    prefixes = ("liom_toolkit", "torch", "nnunetv2")
+    saved = {
+        name: mod
+        for name, mod in sys.modules.items()
+        if any(name == p or name.startswith(p + ".") for p in prefixes)
+    }
+    for name in saved:
+        sys.modules.pop(name)
+    try:
+        import liom_toolkit.segmentation.vseg as vseg
+
+        assert "torch" not in sys.modules
+        assert "nnunetv2" not in sys.modules
+        assert vseg.__all__ == ["predict_one", "predict_volume"]
+        assert "NnUnetV2Model" not in vseg.__all__
+    finally:
+        for name in list(sys.modules):
+            if any(name == p or name.startswith(p + ".") for p in prefixes):
+                sys.modules.pop(name)
+        sys.modules.update(saved)
+
+
+@pytest.mark.ai
+def test_vseg_nnunetv2model_resolves_lazily() -> None:
+    """``vseg.NnUnetV2Model`` resolves via ``__getattr__`` to the same class object.
+
+    The lazy export must return the identical class a direct
+    ``from ...model_v2 import NnUnetV2Model`` yields (the module is cached,
+    so attribute access is cheap on repeat), and an unknown attribute raises
+    ``AttributeError`` naming it.
+    """
+    pytest.importorskip("torch")
+    import liom_toolkit.segmentation.vseg as vseg
+    from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
+
+    assert vseg.NnUnetV2Model is NnUnetV2Model
+    with pytest.raises(AttributeError, match="bogus_attribute"):
+        vseg.bogus_attribute
