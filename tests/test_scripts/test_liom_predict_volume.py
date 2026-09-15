@@ -150,7 +150,7 @@ def test_liom_predict_volume_help_never_imports_heavy_deps() -> None:
     )
     # --help exits 0 with usage on stdout; a heavy import at module top or
     # parser-build time would still exit 0, so check sys.modules afterwards.
-    result = subprocess.run(
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed interpreter + fixed code string
         [
             sys.executable,
             "-c",
@@ -159,10 +159,9 @@ def test_liom_predict_volume_help_never_imports_heavy_deps() -> None:
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
-    assert result.returncode == 0, (
-        f"--help exited {result.returncode}: {result.stderr[-2000:]}"
-    )
+    assert result.returncode == 0, f"--help exited {result.returncode}: {result.stderr[-2000:]}"
     assert "usage:" in result.stdout
 
 
