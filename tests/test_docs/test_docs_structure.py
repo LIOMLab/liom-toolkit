@@ -236,27 +236,32 @@ NARRATIVE_PAGES = (
     "package_structure.rst",
 )
 
-CLI_SCRIPT_MODULES = (
-    "liom_convert_hdf5_to_zarr",
-    "liom_create_mask",
-    "liom_segment_2d",
-    "liom_align_annotations",
-    "liom_build_template",
-    "liom_compute_slice_metrics",
-    "liom_train_model",
-)
+
+def _cli_script_modules() -> list[str]:
+    """Return the script module paths registered in pyproject ``[project.scripts]``.
+
+    The roster is parsed from pyproject.toml (config-as-data) rather than
+    hardcoded, so adding a ``liom-*`` entry point automatically extends the
+    expectation here — the docs-structure tests can never lag the registry.
+    """
+    scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "scripts"
+    ]
+    return sorted(
+        target.split(":", 1)[0] for name, target in scripts.items() if name.startswith("liom-")
+    )
 
 
 class TestNarrativePagesAndCli:
-    """DOCS-04: 6 narrative pages + 7 sphinx-argparse CLI blocks."""
+    """DOCS-04: 6 narrative pages + a sphinx-argparse block per registered CLI."""
 
     def test_all_narrative_pages_exist(self):
         for name in NARRATIVE_PAGES:
             assert (DOCS_SOURCE / name).is_file(), f"{name} missing"
 
-    def test_cli_rst_has_exactly_7_argparse_directives(self):
+    def test_cli_rst_has_one_argparse_directive_per_registered_script(self):
         text = (DOCS_SOURCE / "cli.rst").read_text(encoding="utf-8")
-        assert text.count(".. argparse::") == 7
+        assert text.count(".. argparse::") == len(_cli_script_modules())
 
     def test_cli_rst_uses_full_build_argument_parser_name(self):
         text = (DOCS_SOURCE / "cli.rst").read_text(encoding="utf-8")
@@ -266,10 +271,10 @@ class TestNarrativePagesAndCli:
     def test_all_cli_scripts_define_build_argument_parser(self):
         import importlib
 
-        for mod_name in CLI_SCRIPT_MODULES:
-            mod = importlib.import_module(f"liom_toolkit.scripts.{mod_name}")
+        for mod_path in _cli_script_modules():
+            mod = importlib.import_module(mod_path)
             fn = getattr(mod, "_build_argument_parser", None)
-            assert callable(fn), f"{mod_name}._build_argument_parser is not callable"
+            assert callable(fn), f"{mod_path}._build_argument_parser is not callable"
 
     def test_index_rst_uses_grid_cards(self):
         text = (DOCS_SOURCE / "index.rst").read_text(encoding="utf-8")
