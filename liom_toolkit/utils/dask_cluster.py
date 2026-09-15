@@ -84,6 +84,10 @@ def create_slurm_cluster(
     ImportError
         If ``dask_jobqueue`` is not installed (the ``[dask-cluster]`` extra).
         The message names the install command.
+    OSError
+        If the scheduler is unreachable while connecting the ``Client``.
+    TimeoutError
+        If the cluster does not reach ``n_workers`` within ``timeout``.
 
     Notes
     -----

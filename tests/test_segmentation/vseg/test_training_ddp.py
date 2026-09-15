@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import socket
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - torchrun smoke legitimately spawns a subprocess
+import subprocess  # torchrun smoke legitimately spawns a subprocess
 import sys
 from unittest.mock import MagicMock
 

@@ -40,7 +40,7 @@ import getpass
 import os
 import shlex
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - SSH-driven NCCL run legitimately spawns subprocess
+import subprocess  # SSH-driven NCCL run legitimately spawns subprocess
 import textwrap
 
 import pytest

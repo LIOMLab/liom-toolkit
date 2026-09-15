@@ -24,7 +24,7 @@ Covers REL-01 release-config invariants:
 
 from __future__ import annotations
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]  # subprocess is required to invoke git check-ignore
+import subprocess  # subprocess is required to invoke git check-ignore
 import tomllib
 from pathlib import Path
 

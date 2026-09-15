@@ -40,9 +40,7 @@ class ConvBlock(nn.Module):
         # Residual connection: 1x1 conv to match channels when in_c != out_c,
         # identity skip when channels match.
         self.skip = (
-            nn.Conv2d(in_c, out_c, kernel_size=1, padding=0)
-            if in_c != out_c
-            else nn.Identity()
+            nn.Conv2d(in_c, out_c, kernel_size=1, padding=0) if in_c != out_c else nn.Identity()
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
