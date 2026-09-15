@@ -23,6 +23,8 @@ except ImportError as e:
         "Please install liom-toolkit[seg] to use the vessel segmentation prediction module."
     ) from e
 
+from liom_toolkit.utils import load_zarr
+
 from .utils import add_patch_to_empty_array, create_dir, numeric_filesort, process_image
 
 if TYPE_CHECKING:
@@ -263,17 +265,40 @@ def predict_one(
     return inference
 
 
-def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str) -> None:
+def predict_volume(
+    model: VsegModel | NnUnetV2Model,
+    dataset: OmeZarrDataset,
+    zarr_location: str,
+    *,
+    spacing: tuple[float, float, float] | None = None,
+    z_chunk_size: int | None = None,
+) -> None:
     """Predict the volume.
 
     Parameters
     ----------
-    model : VsegModel
-        The model to use for prediction.
+    model : VsegModel | NnUnetV2Model
+        The model to use for prediction. Routing is by instance type: an
+        ``NnUnetV2Model`` takes the nnU-Net path (whole-volume or Z-chunked
+        ``model.predict`` calls on the raw volume), any other object takes
+        the legacy ``VsegModel`` patch loop unchanged.
     dataset : OmeZarrDataset
         The dataset to use for prediction.
     zarr_location : str
         The location of the zarr file.
+    spacing : tuple[float, float, float] | None
+        ``(sz, sy, sx)`` voxel spacing, in the array's z,y,x axis order.
+        nnU-Net-path only: when None it is read from the dataset's NGFF
+        ``coordinateTransformations`` metadata (by axis name, not
+        positionally); when the metadata carries no usable scale the call
+        raises ValueError rather than assuming isotropic spacing. Passing
+        it with a legacy model raises ValueError.
+    z_chunk_size : int | None
+        nnU-Net-path only: when None the whole ``(1,Z,H,W)`` volume goes
+        through a single ``model.predict`` call (a 2D-config predictor
+        iterates slices internally); when set, Z is processed in
+        ``z_chunk_size`` slabs to bound resident memory. Passing it with a
+        legacy model raises ValueError.
 
     Raises
     ------
@@ -298,6 +323,16 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         dimension, so a 3D patch produces a confusing channel-count
         ``RuntimeError`` deep in the forward pass instead of an
         actionable error.
+
+        These three dataset guards gate ONLY the legacy patch loop: the
+        nnU-Net path reads ``dataset.data`` whole and never iterates the
+        patch index, so ``rotate_patches``/``filter_empty``/``patch_size``
+        do not apply to it. The nnU-Net path instead raises ValueError when
+        ``spacing``/``z_chunk_size`` reach a legacy model, when
+        ``dataset.data`` is not a non-empty 3D volume, when NGFF spacing
+        metadata is missing or malformed (and no explicit ``spacing`` was
+        given), or when an explicit ``spacing`` is not three finite,
+        positive values.
     """
     try:
         import torch  # ruff: ignore[unused-import] -- do_predict uses torch; guard gives actionable error
@@ -305,6 +340,32 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         raise ImportError(
             "Please install PyTorch to use the vessel segmentation module of the LIOM toolkit."
         ) from e
+
+    # Type dispatch runs BEFORE the legacy dataset guards: rotate_patches /
+    # filter_empty / patch_size only protect the patch loop's index-to-grid
+    # mapping (get_patch_coordinates), which the whole-array nnU-Net path
+    # never invokes. model_v2 is [ai]-gated, so the import stays
+    # function-scope -- this module must remain importable with only [seg].
+    from .model_v2 import NnUnetV2Model
+
+    if isinstance(model, NnUnetV2Model):
+        _predict_volume_nnunet(
+            model, dataset, zarr_location, spacing=spacing, z_chunk_size=z_chunk_size
+        )
+        return
+
+    nnunet_only_kwargs = [
+        name
+        for name, value in (("spacing", spacing), ("z_chunk_size", z_chunk_size))
+        if value is not None
+    ]
+    if nnunet_only_kwargs:
+        raise ValueError(
+            f"predict_volume: {', '.join(nnunet_only_kwargs)} only apply to nnU-Net "
+            "models (NnUnetV2Model); they have no effect on the legacy VsegModel "
+            "path. Drop them for legacy models."
+        )
+
     if getattr(dataset, "rotate_patches", False):
         raise ValueError(
             "predict_volume requires rotate_patches=False on the dataset "
@@ -379,6 +440,172 @@ def predict_volume(model: VsegModel, dataset: OmeZarrDataset, zarr_location: str
         # vessel pixels (value 1) in the volume are indistinguishable from
         # near-background noise in an 8-bit display range.
         new_volume[z1:z2, y1:y2, x1:x2] = pred_y.astype(np.uint8) * 255
+
+
+def _read_ngff_zyx_spacing(zarr_path: str) -> tuple[float, float, float]:
+    """Read the (z, y, x) voxel spacing from an OME-Zarr store's NGFF metadata.
+
+    ``load_zarr`` returns ``list[Node]`` whose ``nodes[0].metadata`` is the
+    FLAT multiscales dict -- ``metadata["axes"]`` is the axis list and
+    ``metadata["coordinateTransformations"][level]`` is that resolution
+    level's transform list (no ``ome``/``multiscales`` nesting on the Node).
+    The level-0 ``scale`` vector is indexed BY AXIS NAME -- never
+    positionally: a 4D store leads with the channel axis, so ``scale[:3]``
+    would silently read ``(c, z, y)`` instead of ``(z, y, x)``.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr store.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        The ``(sz, sy, sx)`` spacing in the array's z,y,x axis order.
+
+    Raises
+    ------
+    ValueError
+        If the metadata carries no usable z/y/x spacing -- missing
+        ``coordinateTransformations``, no ``type == "scale"`` entry, axis
+        names not covering z/y/x, or a scale/axes length mismatch. The
+        caller must pass ``spacing`` explicitly in that case; spacing is
+        never silently defaulted to isotropic.
+    """
+    try:
+        nodes = load_zarr(zarr_path)
+        metadata = nodes[0].metadata
+        axes = metadata["axes"]
+        level0_transforms = metadata["coordinateTransformations"][0]
+        scale = next(t["scale"] for t in level0_transforms if t.get("type") == "scale")
+        scale_by_axis = {
+            axis["name"]: float(value) for axis, value in zip(axes, scale, strict=True)
+        }
+        spacing = tuple(scale_by_axis[name] for name in ("z", "y", "x"))
+    except (KeyError, TypeError, StopIteration, IndexError, AttributeError, ValueError) as e:
+        raise ValueError(
+            f"OME-Zarr at {zarr_path} carries no usable z/y/x spacing in its "
+            f"NGFF metadata -- pass spacing=(sz, sy, sx) explicitly."
+        ) from e
+    if len(spacing) != 3 or any(not np.isfinite(s) or s <= 0 for s in spacing):
+        raise ValueError(
+            f"NGFF spacing for {zarr_path} is not three finite positive "
+            f"values: {spacing} -- pass spacing=(sz, sy, sx) explicitly."
+        )
+    return spacing
+
+
+def _predict_volume_nnunet(
+    model: NnUnetV2Model,
+    dataset: OmeZarrDataset,
+    zarr_location: str,
+    *,
+    spacing: tuple[float, float, float] | None,
+    z_chunk_size: int | None,
+) -> None:
+    """Run nnU-Net inference over ``dataset.data`` and write a 0/255 uint8 zarr.
+
+    The dataset's patch-index machinery is bypassed entirely: the nnU-Net
+    path reads the ``(Z, Y, X)`` dask array whole (or in Z-slabs), so the
+    ``rotate_patches``/``filter_empty``/``patch_size`` guards that protect
+    the legacy ``get_patch_coordinates`` index mapping do not apply here.
+
+    Spacing is never assumed: an explicit ``spacing`` wins; otherwise it is
+    parsed from the store's NGFF metadata by axis name via
+    :func:`_read_ngff_zyx_spacing`. The output store is created EXCLUSIVELY
+    (``mode="w-"`` after a fail-fast ``Path.exists`` pre-check) -- unlike the
+    legacy path's ``mode="w"`` truncate semantics -- so an existing
+    ``zarr_location`` is never clobbered. Output chunks mirror the legacy
+    chunk-per-slice convention ``(1, Y, X)`` and writes are positional at
+    ``[z0:z1]`` (output shape == input shape; no crop/pad drift).
+
+    Parameters
+    ----------
+    model : NnUnetV2Model
+        The nnU-Net wrapper to predict with.
+    dataset : OmeZarrDataset
+        The dataset; only ``.data`` (the ``(Z,Y,X)`` dask array) and
+        ``.zarr_path`` (for NGFF spacing) are read.
+    zarr_location : str
+        Output zarr location. Must not already exist.
+    spacing : tuple[float, float, float] | None
+        Explicit ``(sz, sy, sx)`` spacing; None reads NGFF metadata.
+    z_chunk_size : int | None
+        Z-slab depth for bounded-memory inference; None predicts the whole
+        volume in one call.
+
+    Raises
+    ------
+    FileExistsError
+        If ``zarr_location`` already exists (checked before inference).
+    TypeError
+        If the created zarr store is not a zarr Array.
+    ValueError
+        If ``dataset.data`` is not a non-empty 3D volume, if ``spacing`` is
+        malformed or the NGFF metadata has no usable z/y/x scale, or if
+        ``z_chunk_size`` is not a positive integer.
+    """
+    data = dataset.data
+    if data.ndim != 3 or any(d == 0 for d in data.shape):
+        raise ValueError(
+            "predict_volume: nnU-Net path requires a non-empty 3D "
+            f"(Z, Y, X) volume; got dataset.data with shape {data.shape} "
+            f"(ndim={data.ndim}) -- an empty axis cannot produce a "
+            "meaningful mask."
+        )
+
+    if spacing is None:
+        spacing = _read_ngff_zyx_spacing(dataset.zarr_path)
+    else:
+        spacing = tuple(spacing)
+        if len(spacing) != 3 or any(not np.isfinite(s) or s <= 0 for s in spacing):
+            raise ValueError(
+                f"predict_volume: spacing must be three finite positive "
+                f"values in z,y,x order; got {spacing}."
+            )
+
+    # z_chunk_size bounds resident memory on huge volumes. Reject non-positive
+    # values explicitly: range(0, Z, 0) raises anyway but range(0, Z, -1)
+    # would silently iterate nothing and leave an all-zero output store --
+    # the plausible-shaped-but-wrong failure mode.
+    if z_chunk_size is not None and z_chunk_size < 1:
+        raise ValueError(
+            f"predict_volume: z_chunk_size must be a positive integer; got {z_chunk_size}."
+        )
+
+    # Refuse to overwrite an existing store BEFORE the expensive inference:
+    # a pre-existing zarr_location almost certainly holds data the caller
+    # did not mean to destroy. The legacy path keeps its mode="w" truncate
+    # semantics; this refusal is nnU-Net-path-only by design.
+    if Path(zarr_location).exists():
+        raise FileExistsError(
+            f"predict_volume: output zarr already exists at {zarr_location} -- "
+            "the nnU-Net path refuses to overwrite; remove it or choose a new location."
+        )
+
+    new_volume = zarr.open(
+        zarr_location,
+        mode="w-",
+        shape=data.shape,
+        chunks=(1, *data.shape[1:]),
+        dtype=np.uint8,
+    )
+    if not isinstance(new_volume, zarr.Array):
+        raise TypeError(f"Expected zarr Array, got {type(new_volume)}")
+
+    z_dim = data.shape[0]
+    if z_chunk_size is None:
+        # Boundary-required .compute(): nnUNetPredictor needs a real ndarray,
+        # so the whole dask volume materializes here for the single call.
+        arr = np.asarray(data[None].compute(), dtype=np.float32)
+        new_volume[:] = model.predict(arr, spacing)
+    else:
+        for z0 in tqdm(range(0, z_dim, z_chunk_size), desc="Predicting", unit="z-chunks"):
+            z1 = min(z0 + z_chunk_size, z_dim)
+            # Boundary-required .compute(): each Z-slab materializes for the
+            # nnU-Net call; the slab bounds resident memory on huge volumes.
+            chunk = np.asarray(data[z0:z1].compute(), dtype=np.float32)[None]
+            new_volume[z0:z1] = model.predict(chunk, spacing)
 
 
 def do_predict(model: VsegModel, patch: torch.Tensor) -> NDArray[np.uint8]:

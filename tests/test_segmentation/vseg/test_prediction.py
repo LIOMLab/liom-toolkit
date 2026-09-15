@@ -401,7 +401,10 @@ def _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor):
             }
         )
         probs = np.zeros((2, *input_image.shape[1:]), dtype=np.float32)
-        probs[1] = (input_image[0] > input_image[0].mean()).astype(np.float32)
+        # Fixed per-pixel threshold (NOT a per-call statistic like the mean):
+        # a slab-dependent aggregate would produce different masks for the
+        # whole-volume vs chunked calls and defeat the equality comparison.
+        probs[1] = (input_image[0] > 0.5).astype(np.float32)
         probs[0] = 1.0 - probs[1]
         seg = np.zeros(input_image.shape[1:], dtype=np.uint8)
         return seg, probs
@@ -453,9 +456,7 @@ def test_predict_volume_nnunet_explicit_spacing_overrides_ngff(
     """
     from liom_toolkit.segmentation.vseg.prediction import predict_volume
 
-    predict_volume(
-        nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), spacing=(3.0, 2.0, 1.0)
-    )
+    predict_volume(nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), spacing=(3.0, 2.0, 1.0))
 
     calls = fake_nnunet_predictor.calls["predict_calls"]
     assert len(calls) == 1
@@ -548,7 +549,7 @@ def test_predict_volume_nnunet_zero_dim_raises(
 
     tiny_dataset.data = tiny_dataset.data[:0]  # (0, 32, 32)
 
-    with pytest.raises(ValueError, match="empty|shape"):
+    with pytest.raises(ValueError, match=r"empty|shape"):
         predict_volume(nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"))
 
     assert fake_nnunet_predictor.calls["predict_calls"] == []
@@ -568,7 +569,7 @@ def test_predict_volume_nnunet_existing_output_raises(
     existing = tmp_path / "existing.zarr"
     existing.mkdir()
 
-    with pytest.raises(FileExistsError, match="existing.zarr"):
+    with pytest.raises(FileExistsError, match=r"existing\.zarr"):
         predict_volume(nnunet_model, tiny_dataset, str(existing))
 
     assert fake_nnunet_predictor.calls["predict_calls"] == []
