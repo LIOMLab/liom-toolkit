@@ -2,9 +2,9 @@
 CLI Reference
 =============
 
-The LIOM Toolkit ships seven ``liom-*`` command-line tools, registered as
-console scripts in ``pyproject.toml`` under ``[project.scripts]``. Each tool
-is a thin wrapper over a library function: the script module defines
+The LIOM Toolkit ships the ``liom-*`` command-line tools below, registered
+as console scripts in ``pyproject.toml`` under ``[project.scripts]``. Each
+tool is a thin wrapper over a library function: the script module defines
 ``_build_argument_parser()`` (which builds the argparse tree without
 importing heavy dependencies) and ``main()`` (which lazy-imports the heavy
 deps and wires an optional ``--dask_scheduler`` argument to
@@ -54,6 +54,34 @@ liom-segment-2d
    :func: _build_argument_parser
    :prog: liom-segment-2d
 
+liom-predict-volume
+~~~~~~~~~~~~~~~~~~~
+
+Runs nnU-Net v2 inference over a whole OME-Zarr volume and writes a
+``(Z, Y, X)`` uint8 mask zarr (values ``0``/``255``). The tool wraps
+``NnUnetV2Model`` + ``OmeZarrDataset`` + ``predict_volume``: sliding-window
+inference with Gaussian overlap blending and fold ensembling are handled
+by nnU-Net itself.
+
+Voxel-spacing precedence: an explicit ``--spacing SZ SY SX`` (microns, in
+z,y,x axis order) always wins; when omitted, the spacing is read from the
+input's NGFF ``coordinateTransformations`` metadata by axis name. If
+neither is available the run fails rather than assuming isotropic
+spacing — a wrong spacing silently mis-resamples the inference.
+
+``--model-dir`` must point at a **trusted** ``nnUNetv2_train`` output
+directory (containing ``dataset.json``, ``plans.json``, and
+``fold_<n>/<checkpoint>``): nnU-Net loads checkpoints upstream with
+``weights_only=False``, so a model directory is code-execution-grade
+input. ``--output`` must not already exist — the nnU-Net path refuses to
+overwrite. ``--z-chunk-size`` bounds resident memory by predicting in
+Z-slabs; ``--device`` defaults to CUDA-when-available else CPU.
+
+.. argparse::
+   :module: liom_toolkit.scripts.liom_predict_volume
+   :func: _build_argument_parser
+   :prog: liom-predict-volume
+
 Registration
 ------------
 
@@ -95,10 +123,40 @@ liom-train-model
    :func: _build_argument_parser
    :prog: liom-train-model
 
+liom-prepare-nnunet-dataset
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Converts labeled 2D coronal PNG slices (``<case>.png`` image +
+``<case>_mask.png`` label pairs) into the nnU-Net v2 raw-format layout
+(``imagesTr/``, ``labelsTr/``, ``dataset.json``) that ``nnUNetv2_train``
+consumes.
+
+.. argparse::
+   :module: liom_toolkit.scripts.liom_prepare_nnunet_dataset
+   :func: _build_argument_parser
+   :prog: liom-prepare-nnunet-dataset
+
+liom-pretrain
+~~~~~~~~~~~~~
+
+Runs masked-inpainting self-supervised pretraining on unlabeled LSFM
+volumes: builds the nnU-Net 2D ResEnc network, constructs an SSL slice
+corpus from the supplied OME-Zarr stores, and writes a
+``{'network_weights': state_dict}`` checkpoint suitable for warm-starting
+``nnUNetv2_train -pretrained_weights``.
+
+.. argparse::
+   :module: liom_toolkit.scripts.liom_pretrain
+   :func: _build_argument_parser
+   :prog: liom-pretrain
+
 .. note::
 
-   The ``liom-train-model`` and ``liom-segment-2d`` (U-Net mode) tools
-   require the ``ai`` extra (``pip install liom-toolkit[ai]``). The
+   The ``liom-train-model``, ``liom-segment-2d`` (U-Net mode), and
+   ``liom-predict-volume`` tools require the ``ai`` extra
+   (``pip install liom-toolkit[ai]``); ``liom-pretrain`` additionally
+   requires the ``benchmark`` extra
+   (``pip install "liom-toolkit[ai,benchmark]"``). The
    ``liom-build-template`` and ``liom-align-annotations`` tools require the
    ``antspy`` extra (``pip install liom-toolkit[antspy]``). See
    :doc:`getting_started` for the full extras matrix.
