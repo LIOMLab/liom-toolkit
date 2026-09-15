@@ -364,6 +364,41 @@ def test_run_benchmark_tracer_slice(tmp_path) -> None:
     assert row["reported_dice"] == pytest.approx(1.0, abs=1e-6)
 
 
+def test_read_slice_as_tensor_scales_by_dtype_range(tmp_path) -> None:
+    """_read_slice_as_tensor normalizes integer rasters by the dtype range.
+
+    A uint16 slice must divide by 65535, not 255 — hardcoding 255 leaves
+    values up to ~257, far outside the [0,1] range the contenders were
+    trained on, producing systematically wrong but plausible masks. uint8
+    still divides by 255; float rasters rescale by the observed max when
+    they exceed 1.0.
+    """
+    pytest.importorskip("torch")
+    import imageio.v3 as iio
+    import torch
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import (
+        _read_slice_as_tensor,
+    )
+
+    u16 = np.zeros((8, 8), dtype=np.uint16)
+    u16[2:5, 2:5] = 65535
+    p16 = tmp_path / "u16.png"
+    iio.imwrite(p16, u16)
+    t16 = _read_slice_as_tensor(str(p16), torch.device("cpu"))
+    assert t16.dtype == torch.float32
+    assert t16.shape == (1, 1, 8, 8)
+    assert t16.max().item() == pytest.approx(1.0)
+    assert t16.min().item() == 0.0
+
+    u8 = np.zeros((8, 8), dtype=np.uint8)
+    u8[2:5, 2:5] = 255
+    p8 = tmp_path / "u8.png"
+    iio.imwrite(p8, u8)
+    t8 = _read_slice_as_tensor(str(p8), torch.device("cpu"))
+    assert t8.max().item() == pytest.approx(1.0)
+
+
 # ---------------------------------------------------------------------------
 # nnU-Net in-process contender — fake leaf modules pin the pipeline contract
 #

@@ -263,9 +263,19 @@ def _read_slice_as_tensor(slice_path: str, device: torch.device) -> torch.Tensor
     import imageio.v3 as iio
 
     img = iio.imread(slice_path)
-    arr = np.asarray(img, dtype=np.float32)
-    if arr.max() > 1.0:
-        arr = arr / 255.0
+    raw = np.asarray(img)
+    if np.issubdtype(raw.dtype, np.integer):
+        # Normalize integer rasters by the dtype's full range, not a
+        # hardcoded 255: a uint16 slice scaled by 255 would leave values up
+        # to ~257 -- far outside the [0,1] range the contenders were
+        # trained on, producing systematically wrong but plausible masks.
+        arr = raw.astype(np.float32) / np.iinfo(raw.dtype).max
+    else:
+        # Float rasters are assumed already normalized; rescale by the
+        # observed max when they are not (e.g. 0-255 range floats).
+        arr = raw.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / arr.max()
     # (H, W) → (1, 1, H, W) — batch=1, channel=1.
     return torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).to(device)
 
