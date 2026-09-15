@@ -557,9 +557,11 @@ def _predict_volume_nnunet(
     TypeError
         If the created zarr store is not a zarr Array.
     ValueError
-        If ``dataset.data`` is not a non-empty 3D volume, if ``spacing`` is
-        malformed or the NGFF metadata has no usable z/y/x scale, or if
-        ``z_chunk_size`` is not a positive integer.
+        If ``dataset.data`` is not a non-empty 3D volume, if the volume is
+        all-zero (cannot normalize -- nnU-Net would NaN on std=0 and emit a
+        plausible all-background mask), if ``spacing`` is malformed or the
+        NGFF metadata has no usable z/y/x scale, or if ``z_chunk_size`` is
+        not a positive integer.
     """
     data = dataset.data
     if data.ndim != 3 or any(d == 0 for d in data.shape):
@@ -599,6 +601,20 @@ def _predict_volume_nnunet(
             "the nnU-Net path refuses to overwrite; remove it or choose a new location."
         )
 
+    # All-zero guard, mirroring predict_one's: nnU-Net's crop_to_nonzero
+    # falls back to the full bbox on an all-zero input, and z-score
+    # normalization of a constant array divides by std=0 -- NaN propagates
+    # through the network into a plausible all-background mask written to
+    # disk (the silent-wrong-data mode this guard exists to prevent).
+    # Boundary-required .compute(): the max must be a real scalar for the
+    # branch; dask evaluates the reduction block-wise so the volume itself
+    # is not materialized.
+    if data.max().compute() == 0:
+        raise ValueError(
+            "predict_volume: dataset.data is all-zero; cannot normalize. "
+            "Check the channel selection and the input store."
+        )
+
     new_volume = zarr.open(
         zarr_location,
         mode="w-",
@@ -621,6 +637,12 @@ def _predict_volume_nnunet(
             # Boundary-required .compute(): each Z-slab materializes for the
             # nnU-Net call; the slab bounds resident memory on huge volumes.
             chunk = np.asarray(data[z0:z1].compute(), dtype=np.float32)[None]
+            # An all-zero slab inside a non-zero volume would NaN inside
+            # nnU-Net's z-score normalization (std=0). The correct mask for
+            # an all-zero slab is all-zero, and new_volume's zero fill_value
+            # already holds it -- skip the model call and leave the zeros.
+            if chunk.max() == 0:
+                continue
             new_volume[z0:z1] = model.predict(chunk, spacing)
 
 

@@ -551,6 +551,95 @@ def test_predict_volume_legacy_rejects_nnunet_kwargs(tmp_path):
         predict_volume(None, None, str(tmp_path / "b.zarr"), z_chunk_size=2)
 
 
+def test_predict_volume_nnunet_all_zero_volume_raises(
+    tmp_path, nnunet_model, fake_nnunet_predictor
+):
+    """predict_volume raises ValueError on an all-zero input volume.
+
+    nnU-Net's ``crop_to_nonzero`` full-bbox fallback lets an all-zero input
+    through, and z-score normalization of a constant array NaNs on std=0 --
+    without the guard the call would write a plausible all-background mask
+    on garbage input (the silent-wrong-data mode). The error must fire
+    before any model invocation.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.conversion.conversion import save_zarr
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    zarr_path = str(tmp_path / "zeros.zarr")
+    save_zarr(
+        np.zeros((1, 4, 32, 32), dtype=np.float32),
+        zarr_path,
+        scales=(6.5, 6.5, 6.5),
+        chunks=(1, 1, 32, 32),
+    )
+    dataset = OmeZarrDataset(
+        zarr_path,
+        patch_size=(1, 32, 32),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        channel=0,
+    )
+
+    with pytest.raises(ValueError, match="all-zero"):
+        predict_volume(nnunet_model, dataset, str(tmp_path / "out.zarr"))
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
+def test_predict_volume_nnunet_skips_all_zero_slabs(
+    tmp_path, nnunet_model, fake_nnunet_predictor
+):
+    """All-zero Z-slabs in a non-zero volume are written as zeros without a model call.
+
+    A chunked volume can contain all-zero slabs (empty z-regions) that would
+    NaN inside nnU-Net's z-score normalization. The chunked path must skip
+    the model call for those slabs -- the zero-initialized output store
+    already holds the correct all-zero mask -- while still predicting the
+    non-zero slabs identically to the whole-volume path.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.conversion.conversion import save_zarr
+    from liom_toolkit.segmentation.vseg.dataset import OmeZarrDataset
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    # Slab [0:2] all-zero, [2:5] non-zero; z_chunk_size=2 gives 3 slabs.
+    vol = np.zeros((1, 5, 32, 32), dtype=np.float32)
+    vol[0, 2:] = np.random.default_rng(0).random((3, 32, 32))
+    zarr_path = str(tmp_path / "partial_zeros.zarr")
+    save_zarr(vol, zarr_path, scales=(6.5, 6.5, 6.5), chunks=(1, 1, 32, 32))
+    dataset = OmeZarrDataset(
+        zarr_path,
+        patch_size=(1, 32, 32),
+        device="cpu",
+        pre_process=False,
+        normalise=False,
+        rotate_patches=False,
+        channel=0,
+    )
+
+    _wire_deterministic_probs(nnunet_model, fake_nnunet_predictor)
+
+    whole_out = str(tmp_path / "whole.zarr")
+    predict_volume(nnunet_model, dataset, whole_out)
+    whole = np.asarray(zarr.open(whole_out, mode="r")[:])
+
+    fake_nnunet_predictor.calls["predict_calls"].clear()
+    chunked_out = str(tmp_path / "chunked.zarr")
+    predict_volume(nnunet_model, dataset, chunked_out, z_chunk_size=2)
+
+    calls = fake_nnunet_predictor.calls["predict_calls"]
+    # The leading all-zero slab [0:2] is skipped: 2 model calls, not 3.
+    assert len(calls) == 2
+    assert [c["input_image"].shape[1] for c in calls] == [2, 1]
+
+    chunked = np.asarray(zarr.open(chunked_out, mode="r")[:])
+    np.testing.assert_array_equal(chunked, whole)
+
+
 def test_predict_volume_nnunet_zero_dim_raises(
     tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
 ):
