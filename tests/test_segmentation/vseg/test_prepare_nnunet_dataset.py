@@ -164,6 +164,42 @@ def test_prepare_nnunet_2d_raises_on_length_mismatch(tmp_path) -> None:
         )
 
 
+def test_prepare_nnunet_2d_raises_on_nonempty_output_dir(tmp_path) -> None:
+    """prepare_nnunet_2d raises FileExistsError on a non-empty output dir.
+
+    Reusing an existing dataset dir leaves stale ``case_NNNN`` files from a
+    previous run: ``dataset.json`` reflects only the new count while the
+    leftover files silently contaminate fingerprint extraction and training
+    (silent wrong-data). An existing EMPTY directory is fine to reuse.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "src"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+    (out_dir / "imagesTr").mkdir(parents=True)
+    (out_dir / "imagesTr" / "case_0099_0000.png").write_bytes(b"stale")
+
+    with pytest.raises(FileExistsError, match="non-empty"):
+        prepare_nnunet_2d(
+            image_paths=image_paths,
+            label_paths=label_paths,
+            output_dir=str(out_dir),
+            dataset_id=101,
+        )
+
+    # An existing but empty dir is accepted.
+    empty_dir = tmp_path / "Dataset102_LIOM6p5"
+    empty_dir.mkdir()
+    prepare_nnunet_2d(
+        image_paths=image_paths,
+        label_paths=label_paths,
+        output_dir=str(empty_dir),
+        dataset_id=102,
+    )
+    assert (empty_dir / "dataset.json").is_file()
+
+
 def test_prepare_nnunet_cli_creates_output(tmp_path, monkeypatch) -> None:
     """The liom-prepare-nnunet-dataset CLI creates the nnU-Net raw dataset.
 

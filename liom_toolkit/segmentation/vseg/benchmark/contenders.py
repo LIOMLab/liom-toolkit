@@ -780,6 +780,10 @@ class NnUnetContender:
 
         # nnU-Net locates datasets as $nnUNet_raw/Dataset{id:03d}_{name}/ —
         # the raw dir must be written there, not to a local output dir.
+        # prepare_nnunet_2d raises FileExistsError if the dir already exists
+        # non-empty: a shared nnUNet_raw + fixed dataset_id would otherwise
+        # leave stale case files from a previous run that contaminate
+        # fingerprint extraction and training.
         dataset_dirname = f"Dataset{self.dataset_id:03d}_LIOM6p5"
         raw_dir = str(Path(env["nnUNet_raw"]) / dataset_dirname)
         prepare_nnunet_2d(

@@ -108,6 +108,13 @@ def prepare_nnunet_2d(
 
     Raises
     ------
+    FileExistsError
+        If ``output_dir`` exists and is non-empty -- leftover
+        ``case_NNNN`` files from a previous run would silently contaminate
+        the new dataset (``dataset.json``'s ``numTraining`` only reflects
+        the new count, but nnU-Net's fingerprint extraction and integrity
+        check see the stale files). Remove the directory or pick a fresh
+        ``output_dir``.
     ValueError
         If ``image_paths`` and ``label_paths`` have different lengths, or if
         any input image/label path does not exist (the offending path is in
@@ -127,6 +134,16 @@ def prepare_nnunet_2d(
             raise ValueError(f"prepare_nnunet_2d: label does not exist: {lbl_p}")
 
     root = Path(output_dir)
+    # Refuse to write into a non-empty dataset dir: a re-run with fewer
+    # cases would leave stale case_NNNN files that dataset.json no longer
+    # accounts for, contaminating fingerprint extraction and training with
+    # data the caller did not pass. An existing EMPTY dir is fine to reuse.
+    if root.exists() and any(root.iterdir()):
+        raise FileExistsError(
+            f"prepare_nnunet_2d: output_dir exists and is non-empty: {root} -- "
+            "remove it or choose a fresh directory so stale case files from a "
+            "previous run cannot contaminate the dataset"
+        )
     images_tr = root / "imagesTr"
     labels_tr = root / "labelsTr"
     images_tr.mkdir(parents=True, exist_ok=True)
