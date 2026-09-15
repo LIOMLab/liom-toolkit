@@ -17,7 +17,7 @@ failure mode AGENTS §2 forbids).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 def run_benchmark(
     contenders: list[Contender],
-    split_config: dict,
-    eval_config: dict | None = None,
+    split_config: dict[str, Any],
+    eval_config: dict[str, Any] | None = None,
     output_dir: str = ".",
 ) -> dict[str, dict[str, float | str | dict[str, float]]]:
     """Train + predict + score each contender through the ship-gate eval matrix.
@@ -42,12 +42,12 @@ def run_benchmark(
     contenders : list[Contender]
         The contender instances to evaluate. Each is trained and scored
         independently.
-    split_config : dict
+    split_config : dict[str, Any]
         Must contain ``"train_slices"`` (list[str]), ``"test_slices"``
         (list[str]), and ``"gt_masks"`` (list[NDArray] — ground-truth boolean
         masks aligned with ``test_slices``). May also carry ``"patch_size"``
         and ``"ddp"`` which are threaded into ``train_and_predict``.
-    eval_config : dict | None
+    eval_config : dict[str, Any] | None
         Optional overrides for the eval-metric kwargs: ``"voxel_size_um"``,
         ``"capillary_radius_um"``, ``"boundary_patch_size"``. ``None`` uses
         the metric defaults.

@@ -27,18 +27,20 @@ from __future__ import annotations
 import os
 import random
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-# torch is in the [ai] extra. The upfront ImportError is the honest signal
-# on an io-only install — the message names [ai]. The `from e` chain
+# torch is in the [ai] extra; MONAI is in [benchmark]. The upfront
+# ImportError is the honest signal on an io-only install — the message names
+# both extras (mirrors the ssl/warmstart.py guard). The `from e` chain
 # preserves the underlying error for debugging (AGENTS §2).
 try:
     import torch
     from torch.utils.data import Dataset
 except ImportError as e:
     raise ImportError(
-        "Please install liom-toolkit[ai] to use the MONAI benchmark training loop."
+        "Please install liom-toolkit[ai,benchmark] to use the MONAI benchmark training loop."
     ) from e
 
 __all__ = ["train_monai_model"]
@@ -335,9 +337,13 @@ def train_monai_model(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- DDP entry (replicated from train_model) -------------------------
-    dist = None
-    DistributedDataParallel = None
-    DistributedSampler = None
+    # Any-annotated sentinels: the `if ddp:` block below rebinds these to the
+    # real torch.distributed module and DDP classes; None is the
+    # not-in-ddp-mode marker. Annotating declares that contract so the type
+    # checker stops seeing a `None` call at the ddp-guarded call sites.
+    dist: Any = None
+    DistributedDataParallel: Any = None
+    DistributedSampler: Any = None
     rank = 0
 
     if ddp:
@@ -386,9 +392,7 @@ def train_monai_model(
             # sees a fresh random subset.
             world_size = dist.get_world_size() if dist is not None else 1
             rank_samples = samples_per_epoch // world_size
-            train_sampler = RandomSampler(
-                train_dataset, replacement=True, num_samples=rank_samples
-            )
+            train_sampler = RandomSampler(train_dataset, replacement=True, num_samples=rank_samples)
             val_sampler = DistributedSampler(val_dataset, shuffle=False)
             train_loader = DataLoader(
                 train_dataset,

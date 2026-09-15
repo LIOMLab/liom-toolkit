@@ -40,7 +40,7 @@ in the message (AGENTS section 2 -- never ``assert`` for validation).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,7 +101,7 @@ def run_comparison(
     *,
     iterations_per_epoch: int,
     patch_level: bool = False,
-    eval_config: dict | None = None,
+    eval_config: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     """Score pretrained-init vs from-scratch through the REUSED eval_metrics gate.
 
@@ -134,7 +134,7 @@ def run_comparison(
     patch_level : bool
         Must be ``False``. Passing ``True`` selects the patch-level i.i.d.
         config and is rejected by ``per_volume_split``.
-    eval_config : dict | None
+    eval_config : dict[str, Any] | None
         Optional overrides for the eval-metric kwargs:
         ``"voxel_size_um"``, ``"capillary_radius_um"``,
         ``"boundary_patch_size"``. ``None`` uses the metric defaults.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -82,6 +82,8 @@ def train(
     ------
     ImportError
         If PyTorch is not installed (re-raised with an actionable message).
+    ValueError
+        If the loader yields no batches (empty dataset — cannot train).
     """
     try:
         import torch
@@ -156,9 +158,7 @@ def train(
     # on ``device`` (NCCL is CUDA-only; gloo handles CPU) -- see the
     # matching comment in evaluate().
     if ddp_active:
-        loss_pair = torch.tensor(
-            [loss_sum, float(loss_count)], dtype=torch.float64, device=device
-        )
+        loss_pair = torch.tensor([loss_sum, float(loss_count)], dtype=torch.float64, device=device)
         dist.all_reduce(loss_pair, op=dist.ReduceOp.SUM)
         loss_sum = float(loss_pair[0].item())
         loss_count = int(loss_pair[1].item())
@@ -217,6 +217,8 @@ def evaluate(
     ------
     ImportError
         If PyTorch is not installed (re-raised with an actionable message).
+    ValueError
+        If the loader yields no batches (empty dataset — cannot evaluate).
     """
     try:
         import torch
@@ -632,9 +634,14 @@ def train_model(
             dev = torch.device("cpu")
     else:
         rank = 0
-        dist = None
-        DistributedDataParallel = None
-        DistributedSampler = None
+        # Any-annotated sentinels: the `if ddp:` branch rebinds these to the
+        # real torch.distributed module and DDP classes; None is the
+        # not-in-ddp-mode marker. Annotating declares that contract so the
+        # type checker stops seeing a `None` call at the ddp-guarded call
+        # sites — no control-flow change.
+        dist: Any = None
+        DistributedDataParallel: Any = None
+        DistributedSampler: Any = None
 
     try:
         # Setup training parameters and wandb run
@@ -1021,7 +1028,9 @@ def train_model(
         # collision the relocation was meant to fix).
         if rank == 0:
             final_loss = pd.DataFrame(data=[train_losses, val_losses]).T
-            final_loss.to_csv(Path(output_train) / "final_metrics.csv", encoding="utf-8", index=False)
+            final_loss.to_csv(
+                Path(output_train) / "final_metrics.csv", encoding="utf-8", index=False
+            )
     finally:
         # Clean shutdown of the DDP process group. Under torchrun the
         # process exits and the runtime cleans up, but calling

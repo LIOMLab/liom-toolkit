@@ -573,6 +573,12 @@ python-version = "3.12"   # match ruff target-version (>=3.12 floor)
 #     [seg] extra (D-01) so it is absent from the core-only lint env. ty can't
 #     resolve it statically; replacing with Any avoids the unresolved-import
 #     error while the runtime try/except guard (D-05) gives the honest signal.
+#   - nnunetv2.**: optional extra ([ai]); ships no py.typed and is absent from
+#     the core-only lint env (ci.yml runs `uv sync` with no extras).
+#   - kvikio.**: the [gds] extra is Linux-gated (kvikio-cu13 ships no macOS/CPU
+#     wheels), so it is absent from the lint env on every CI runner.
+#   - dask_jobqueue.**: the [dask-cluster] extra; absent from the core-only
+#     lint env (unresolved at utils/dask_cluster.py).
 [tool.ty.analysis]
 replace-imports-with-any = [
     "ants.**",
@@ -584,6 +590,9 @@ replace-imports-with-any = [
     "allensdk.**",
     "SimpleITK.**",
     "monai.**",
+    "nnunetv2.**",
+    "kvikio.**",
+    "dask_jobqueue.**",
 ]
 
 [tool.ty.terminal]
