@@ -6,9 +6,13 @@ Covers three concerns:
   ``runtime_checkable``; each of the four contender classes
   (``Improved2DContender``, ``MonaiUnetContender``, ``SwinUnetContender``,
   ``NnUnetContender``) exposes ``name``, ``train_and_predict`` and
-  ``predict_on_slices``; the three non-tracer contenders raise
-  ``NotImplementedError`` from ``train_and_predict`` (their wiring lands in a
-  later plan after the MONAI dependency is added).
+  ``predict_on_slices``.
+* **nnU-Net in-process contender** — ``NnUnetContender`` runs the full
+  nnU-Net v2 lifecycle in-process (dataset prepare → fingerprint → plan →
+  preprocess → train → predict). The tests inject fake ``nnunetv2`` leaf
+  modules into ``sys.modules`` plus the shared fake-predictor fixture to
+  pin the call order and the bool-mask output contract without a real
+  training run.
 * **Per-volume split enforcement** — ``per_volume_split`` partitions at the
   brain (volume) level, raises ``ValueError`` if a brain appears in both
   train and test (no silent vascular-structure leak), and raises
@@ -132,6 +136,8 @@ def test_improved_2d_contender_satisfies_protocol() -> None:
 def test_skeletal_contender_names() -> None:
     """The 3 skeletal contenders have the expected names and satisfy the Protocol structurally."""
     pytest.importorskip("torch")
+    import inspect
+
     from liom_toolkit.segmentation.vseg.benchmark.contenders import (
         Contender,
         MonaiUnetContender,
@@ -139,15 +145,25 @@ def test_skeletal_contender_names() -> None:
         SwinUnetContender,
     )
 
+    # The in-process contender ctor must expose the pipeline knobs and must
+    # NOT carry the deleted subprocess-bridge parameter.
+    sig = inspect.signature(NnUnetContender.__init__)
+    assert "nnunet_venv_python" not in sig.parameters, (
+        "nnunet_venv_python must be gone — the subprocess bridge is deleted"
+    )
+    assert "trainer_name" in sig.parameters, (
+        "trainer_name must be a ctor param (default nnUNetTrainer_50epochs)"
+    )
+
     assert MonaiUnetContender().name == "monai_unet"
     assert SwinUnetContender().name == "monai_swinunetr"
-    assert NnUnetContender(nnunet_venv_python="/usr/bin/python3").name == "nnunet_v2"
+    assert NnUnetContender().name == "nnunet_v2"
     assert isinstance(MonaiUnetContender(), Contender)
     assert isinstance(SwinUnetContender(), Contender)
-    assert isinstance(NnUnetContender(nnunet_venv_python="/usr/bin/python3"), Contender)
+    assert isinstance(NnUnetContender(), Contender)
 
 
-def test_skeletal_contenders_raise_on_missing_labels() -> None:
+def test_skeletal_contenders_raise_on_missing_labels(monkeypatch) -> None:
     """The 3 wired contenders raise ValueError on missing mask labels.
 
     The MONAI contenders (MonaiUnetContender, SwinUnetContender) and the
@@ -167,7 +183,7 @@ def test_skeletal_contenders_raise_on_missing_labels() -> None:
 
     monai = MonaiUnetContender()
     swin = SwinUnetContender()
-    nnunet = NnUnetContender(nnunet_venv_python="/usr/bin/python3")
+    nnunet = NnUnetContender()
     assert isinstance(monai, Contender)
     assert isinstance(swin, Contender)
     assert isinstance(nnunet, Contender)
@@ -178,27 +194,18 @@ def test_skeletal_contenders_raise_on_missing_labels() -> None:
         monai.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
     with pytest.raises(ValueError, match="no matching label"):
         swin.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
-    # nnU-Net contender checks nnUNet_raw env var first (before labels).
-    # Without it set, it raises RuntimeError. With it set, it raises
-    # ValueError on the missing label.
-    import os
-
-    old_raw = os.environ.pop("nnUNet_raw", None)
-    try:
-        with pytest.raises(RuntimeError, match="nnUNet_raw env var is not set"):
-            nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
-    finally:
-        if old_raw is not None:
-            os.environ["nnUNet_raw"] = old_raw
-    os.environ["nnUNet_raw"] = "/tmp/fake_nnunet_raw"
-    try:
-        with pytest.raises(ValueError, match="no matching label"):
-            nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
-    finally:
-        if old_raw is None:
-            os.environ.pop("nnUNet_raw", None)
-        else:
-            os.environ["nnUNet_raw"] = old_raw
+    # The nnU-Net contender validates the nnUNet_* env vars first (the
+    # shared validate_nnunet_env contract), then the label guard.
+    monkeypatch.delenv("nnUNet_raw", raising=False)
+    monkeypatch.delenv("nnUNet_preprocessed", raising=False)
+    monkeypatch.delenv("nnUNet_results", raising=False)
+    with pytest.raises(RuntimeError, match="nnU-Net v2 environment variables must be set"):
+        nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
+    monkeypatch.setenv("nnUNet_raw", "/tmp/fake_nnunet_raw")
+    monkeypatch.setenv("nnUNet_preprocessed", "/tmp/fake_nnunet_pre")
+    monkeypatch.setenv("nnUNet_results", "/tmp/fake_nnunet_res")
+    with pytest.raises(ValueError, match="no matching label"):
+        nnunet.train_and_predict(["nonexistent.png"], ["y"], "/tmp/out")
 
 
 def test_improved_2d_train_and_predict_returns_binary_masks(tmp_path) -> None:
@@ -358,169 +365,279 @@ def test_run_benchmark_tracer_slice(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# nnU-Net subprocess bridge (NO torch required — pure subprocess + path check)
+# nnU-Net in-process contender — fake leaf modules pin the pipeline contract
+#
+# nnunetv2 is an [ai] dependency, so the contender runs the whole lifecycle
+# in-process: prepare_nnunet_2d → extract_fingerprint_dataset →
+# plan_experiment_dataset → preprocess_dataset → run_training →
+# NnUnetV2Model.predict_proba. The tests inject fake ``nnunetv2`` leaf
+# modules into sys.modules (the conftest fake_nnunet_predictor fixture covers
+# the inference leaf) so no real nnU-Net run happens, while the REAL
+# NnUnetV2Model wrapper still validates the trained-model dir the fake
+# run_training materializes.
 # ---------------------------------------------------------------------------
 
 
-def test_nnunet_bridge_validates_input_path(tmp_path) -> None:
-    """nnunet_predict raises ValueError when input_folder does not exist.
+def _inject_nnunet_pipeline_leaves(monkeypatch, nnunet_results_dir: Path) -> list:
+    """Inject fake ``nnunetv2`` pipeline leaf modules; return the call log.
 
-    The bridge validates the input folder before invoking the subprocess so a
-    typo'd path surfaces as a clear ValueError (with the offending path) rather
-    than a cryptic nnU-Net CLI traceback.
-    """
-    from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
+    Inserts ``nnunetv2.experiment_planning(.plan_and_preprocess_api)`` and
+    ``nnunetv2.run(.run_training)`` into ``sys.modules`` via
+    ``monkeypatch.setitem`` (auto-restored on teardown — the same
+    sys.modules-swap discipline as the conftest fake-predictor fixture). The
+    fake ``run_training`` materializes the trained-model directory the
+    contender derives from ``nnUNet_results`` so the real
+    ``NnUnetV2Model`` directory validation passes.
 
-    nonexistent = str(tmp_path / "does_not_exist")
-    with pytest.raises(ValueError, match="input_folder does not exist"):
-        nnunet_predict(
-            input_folder=nonexistent,
-            output_folder=str(tmp_path / "out"),
-            dataset_id=999,
-            nnunet_venv_python="/usr/bin/python3",
-        )
-
-
-def test_nnunet_bridge_raises_on_nonzero_exit(tmp_path, monkeypatch) -> None:
-    """nnunet_predict raises RuntimeError when the subprocess exits non-zero.
-
-    No silent pass on a failed nnU-Net run (AGENTS §2): the returncode and the
-    tail of stderr are surfaced in the RuntimeError message so the failure is
-    actionable. The subprocess is mocked so no real nnU-Net invocation happens.
-    """
-    from subprocess import CompletedProcess
-
-    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
-
-    input_folder = tmp_path / "imgs"
-    input_folder.mkdir()
-    fake_proc = CompletedProcess(
-        args=["nnUNetv2_predict"],
-        returncode=1,
-        stdout=b"",
-        stderr=b"some nnunet error detail",
-    )
-    monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
-    monkeypatch.setattr(
-        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
-    )
-    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
-    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
-    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
-
-    with pytest.raises(RuntimeError, match="nnUNetv2_predict exited 1"):
-        nnunet_bridge.nnunet_predict(
-            input_folder=str(input_folder),
-            output_folder=str(tmp_path / "out"),
-            dataset_id=999,
-            nnunet_venv_python="/usr/bin/python3",
-        )
-
-
-def test_nnunet_bridge_raises_on_missing_env_vars(tmp_path, monkeypatch) -> None:
-    """nnunet_predict raises RuntimeError when nnUNet_* env vars are unset.
-
-    The nnU-Net CLI requires nnUNet_raw/preprocessed/results to locate its
-    datasets and plans. Missing any of them is a misconfiguration, not a
-    recoverable state — the bridge raises RuntimeError naming the requirement
-    instead of silently passing an empty env to the subprocess.
-    """
-    from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
-
-    input_folder = tmp_path / "imgs"
-    input_folder.mkdir()
-    monkeypatch.delenv("nnUNet_raw", raising=False)
-    monkeypatch.delenv("nnUNet_preprocessed", raising=False)
-    monkeypatch.delenv("nnUNet_results", raising=False)
-
-    with pytest.raises(RuntimeError, match="nnUNet_raw/preprocessed/results"):
-        nnunet_predict(
-            input_folder=str(input_folder),
-            output_folder=str(tmp_path / "out"),
-            dataset_id=999,
-            nnunet_venv_python="/usr/bin/python3",
-        )
-
-
-def test_nnunet_bridge_does_not_import_nnunetv2(tmp_path, monkeypatch) -> None:
-    """nnunet_predict never imports nnunetv2 (torch-clobbering isolation).
-
-    nnU-Net v2 pins its own torch/CUDA build that conflicts with the
-    liom-toolkit [ai] extra's torch. The bridge runs nnU-Net as a subprocess
-    in a separate venv so the liom-toolkit process never imports nnunetv2.
-    Verified by checking sys.modules does not contain "nnunetv2" after the
-    (mocked) call.
+    Returns
+    -------
+    list
+        ``(stage, kwargs)`` records in call order — ``"fingerprint"``,
+        ``"plan"``, ``"preprocess"``, ``"train"``.
     """
     import sys
-    from subprocess import CompletedProcess
+    import types
 
-    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
+    calls: list = []
 
-    sys.modules.pop("nnunetv2", None)
-    input_folder = tmp_path / "imgs"
-    input_folder.mkdir()
-    fake_proc = CompletedProcess(
-        args=["nnUNetv2_predict"],
-        returncode=0,
-        stdout=b"",
-        stderr=b"",
-    )
-    monkeypatch.setattr(nnunet_bridge.subprocess, "run", lambda *a, **k: fake_proc)
-    monkeypatch.setattr(
-        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
-    )
-    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
-    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
-    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+    def extract_fingerprint_dataset(dataset_id, **kwargs):
+        calls.append(("fingerprint", {"dataset_id": dataset_id, **kwargs}))
 
-    nnunet_bridge.nnunet_predict(
-        input_folder=str(input_folder),
-        output_folder=str(tmp_path / "out"),
-        dataset_id=999,
-        nnunet_venv_python="/usr/bin/python3",
-    )
-    assert "nnunetv2" not in sys.modules, (
-        "nnunet_bridge must NEVER import nnunetv2 (torch-clobbering isolation)"
-    )
+    def plan_experiment_dataset(dataset_id, **kwargs):
+        calls.append(("plan", {"dataset_id": dataset_id, **kwargs}))
+        return {}, "nnUNetPlans"
+
+    def preprocess_dataset(dataset_id, **kwargs):
+        calls.append(("preprocess", {"dataset_id": dataset_id, **kwargs}))
+
+    def run_training(dataset_name_or_id, **kwargs):
+        calls.append(("train", {"dataset_name_or_id": dataset_name_or_id, **kwargs}))
+        # Materialize the expected results-layout model dir — the contender
+        # derives it as Dataset{id:03d}_LIOM6p5/{trainer}__{plans}__{config}.
+        model_dir = (
+            nnunet_results_dir
+            / f"Dataset{int(dataset_name_or_id):03d}_LIOM6p5"
+            / f"{kwargs['trainer_class_name']}__{kwargs['plans_identifier']}"
+            f"__{kwargs['configuration']}"
+        )
+        (model_dir / "fold_0").mkdir(parents=True)
+        (model_dir / "dataset.json").write_text("{}")
+        (model_dir / "plans.json").write_text("{}")
+        (model_dir / "fold_0" / "checkpoint_final.pth").write_bytes(b"stub")
+
+    ep_pkg = types.ModuleType("nnunetv2.experiment_planning")
+    ep_pkg.__path__ = []  # mark as a package without touching the real one
+    pp_leaf = types.ModuleType("nnunetv2.experiment_planning.plan_and_preprocess_api")
+    pp_leaf.extract_fingerprint_dataset = extract_fingerprint_dataset
+    pp_leaf.plan_experiment_dataset = plan_experiment_dataset
+    pp_leaf.preprocess_dataset = preprocess_dataset
+    run_pkg = types.ModuleType("nnunetv2.run")
+    run_pkg.__path__ = []
+    run_leaf = types.ModuleType("nnunetv2.run.run_training")
+    run_leaf.run_training = run_training
+
+    for name, mod in {
+        "nnunetv2.experiment_planning": ep_pkg,
+        "nnunetv2.experiment_planning.plan_and_preprocess_api": pp_leaf,
+        "nnunetv2.run": run_pkg,
+        "nnunetv2.run.run_training": run_leaf,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    return calls
 
 
-def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
-    """nnunet_predict invokes subprocess.run with a list argv and no shell=True.
+def test_nnunet_contender_missing_label(tmp_path, monkeypatch) -> None:
+    """train_and_predict raises ValueError on a missing label BEFORE any nnU-Net call.
 
-    The subprocess-injection mitigation: a list argv (no shell=True) means
-    user-supplied paths cannot break out of the argv into a separate shell
-    command. Captured via the call args passed to the mocked subprocess.run.
+    A train slice without ``<stem>_mask.png`` is a data-prep error, not an
+    nnU-Net failure — the guard must fire before ``prepare_nnunet_2d`` and
+    before any nnunetv2 function runs. Proven by a fake
+    ``plan_and_preprocess_api`` leaf that records calls and must stay
+    untouched.
     """
-    from subprocess import CompletedProcess
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import NnUnetContender
 
-    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
-
-    input_folder = tmp_path / "imgs"
-    input_folder.mkdir()
-    captured: dict = {}
-    fake_proc = CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
-
-    def _capture(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
-        return fake_proc
-
-    monkeypatch.setattr(nnunet_bridge.subprocess, "run", _capture)
-    monkeypatch.setattr(
-        nnunet_bridge, "_nnunet_console_script", lambda py, name: f"/fake/bin/{name}"
-    )
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
     monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
     monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+    calls = _inject_nnunet_pipeline_leaves(monkeypatch, tmp_path / "res")
 
-    nnunet_bridge.nnunet_predict(
-        input_folder=str(input_folder),
-        output_folder=str(tmp_path / "out"),
-        dataset_id=999,
-        nnunet_venv_python="/usr/bin/python3",
+    with pytest.raises(ValueError, match="no matching label"):
+        NnUnetContender().train_and_predict(["nonexistent.png"], ["y"], str(tmp_path))
+    assert calls == [], (
+        f"no nnunetv2 pipeline call may run before the label guard; got {calls}"
     )
-    assert isinstance(captured["cmd"], list), "argv must be a list (no shell=True)"
-    assert captured["kwargs"].get("shell") is not True, "shell=True is forbidden"
+
+
+def test_nnunet_contender_predict_on_slices_in_process(
+    tmp_path, fake_nnunet_predictor, stub_nnunet_model_dir
+) -> None:
+    """predict_on_slices treats checkpoint_path as the nnU-Net model dir.
+
+    The real ``NnUnetV2Model`` validates the stub trained-model dir, the
+    fake predictor records each call, and the contender returns bool masks
+    in input order. Asserts the predictor saw a ``(1, H, W)`` float32 array
+    and the ctor ``spacing`` in ``image_properties`` — and that an empty
+    slice list still raises ValueError before touching the model.
+    """
+    pytest.importorskip("torch")
+    import imageio.v3 as iio
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import NnUnetContender
+
+    contender = NnUnetContender()
+    with pytest.raises(ValueError, match="slices list is empty"):
+        contender.predict_on_slices([], str(stub_nnunet_model_dir))
+
+    img = np.zeros((8, 6), dtype=np.uint8)
+    img[2:5, 1:4] = 255
+    slices = []
+    for i in range(2):
+        p = tmp_path / f"slice_{i}.png"
+        iio.imwrite(p, img)
+        slices.append(str(p))
+
+    # Stage a fixed above-threshold probability so the mask content is
+    # deterministic (vessel channel 1 → 0.8 everywhere).
+    probs = np.zeros((2, 8, 6), dtype=np.float32)
+    probs[0] = 0.2
+    probs[1] = 0.8
+    fake_nnunet_predictor.state["probs"] = probs
+
+    masks = contender.predict_on_slices(slices, str(stub_nnunet_model_dir))
+
+    assert len(masks) == 2
+    for m in masks:
+        assert m.dtype == np.bool_
+        assert m.shape == (8, 6)
+        assert m.all()
+    predict_calls = fake_nnunet_predictor.calls["predict_calls"]
+    assert len(predict_calls) == 2
+    for rec in predict_calls:
+        assert rec["input_image"].shape == (1, 8, 6)
+        assert rec["input_image"].dtype == np.float32
+        assert rec["image_properties"]["spacing"] == [1.0, 1.0]
+
+
+def test_nnunet_contender_train_pipeline_call_order(
+    tmp_path, monkeypatch, fake_nnunet_predictor
+) -> None:
+    """train_and_predict runs the six pipeline stages in order with the right args.
+
+    Fake leaf modules record ``fingerprint``/``plan``/``preprocess``/``train``
+    calls; a patched ``prepare_nnunet_2d`` records its call and creates the
+    raw dir; the conftest fake predictor supplies the predict stage. The
+    assertion is the full ordered sequence
+    prepare → fingerprint → plan → preprocess → train → predict — the
+    in-process contract replacing the deleted subprocess bridge.
+    """
+    pytest.importorskip("torch")
+    import imageio.v3 as iio
+
+    from liom_toolkit.segmentation.vseg.benchmark.contenders import NnUnetContender
+
+    monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
+    calls = _inject_nnunet_pipeline_leaves(monkeypatch, tmp_path / "res")
+
+    prepare_calls: list = []
+
+    def fake_prepare_nnunet_2d(image_paths, label_paths, output_dir, **kwargs):
+        prepare_calls.append(
+            {"image_paths": image_paths, "label_paths": label_paths, "output_dir": output_dir, **kwargs}
+        )
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d",
+        fake_prepare_nnunet_2d,
+    )
+
+    # Train slices WITH matching <stem>_mask.png labels.
+    img = np.zeros((8, 6), dtype=np.uint8)
+    img[2:5, 1:4] = 255
+    train_dir = tmp_path / "train"
+    train_dir.mkdir()
+    train_slices = []
+    for i in range(2):
+        p = train_dir / f"train_{i}.png"
+        iio.imwrite(p, img)
+        iio.imwrite(train_dir / f"train_{i}_mask.png", img)
+        train_slices.append(str(p))
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    test_slices = []
+    for i in range(2):
+        p = test_dir / f"test_{i}.png"
+        iio.imwrite(p, img)
+        test_slices.append(str(p))
+
+    masks = NnUnetContender().train_and_predict(
+        train_slices, test_slices, str(tmp_path / "out")
+    )
+
+    # Stage order: prepare → fingerprint → plan → preprocess → train, then
+    # predict via the fake predictor (one call per test slice).
+    stages = ["prepare"] + [stage for stage, _ in calls] + ["predict"]
+    assert stages == [
+        "prepare",
+        "fingerprint",
+        "plan",
+        "preprocess",
+        "train",
+        "predict",
+    ], f"pipeline stages out of order: {stages}"
+
+    assert prepare_calls[0]["dataset_id"] == 999
+    assert prepare_calls[0]["output_dir"].endswith("Dataset999_LIOM6p5")
+    stage_kwargs = dict(calls)
+    assert stage_kwargs["fingerprint"]["dataset_id"] == 999
+    assert stage_kwargs["fingerprint"]["check_dataset_integrity"] is True
+    assert stage_kwargs["plan"]["dataset_id"] == 999
+    assert stage_kwargs["preprocess"]["plans_identifier"] == "nnUNetPlans"
+    assert stage_kwargs["preprocess"]["configurations"] == ("2d",)
+    assert stage_kwargs["preprocess"]["num_processes"] == (8,)
+    assert stage_kwargs["train"]["dataset_name_or_id"] == "999"
+    assert stage_kwargs["train"]["configuration"] == "2d"
+    assert stage_kwargs["train"]["fold"] == 0
+    assert stage_kwargs["train"]["trainer_class_name"] == "nnUNetTrainer_50epochs"
+    assert stage_kwargs["train"]["plans_identifier"] == "nnUNetPlans"
+    assert stage_kwargs["train"]["num_gpus"] == 1
+
+    predict_calls = fake_nnunet_predictor.calls["predict_calls"]
+    assert len(predict_calls) == len(test_slices)
+    assert len(masks) == len(test_slices)
+    for m in masks:
+        assert m.dtype == np.bool_
+        assert m.shape == (8, 6)
+
+
+def test_no_nnunet_bridge_imports() -> None:
+    """No ``import``/``from`` line in liom_toolkit or tests references nnunet_bridge.
+
+    The subprocess bridge module is deleted; this sweep guards against
+    reintroduction. Scoped to import lines only so test names, docstrings,
+    and prose mentions (e.g. "the former nnunet_bridge was removed") do not
+    false-positive — the same discipline as
+    ``test_warmstart_does_not_import_nnunet_bridge``.
+    """
+    import re
+
+    import liom_toolkit
+
+    roots = [Path(liom_toolkit.__file__).parent, Path(__file__).resolve().parents[2]]
+    import_re = re.compile(r"^\s*(import |from ).*nnunet_bridge")
+    violations = []
+    for root in roots:
+        for py_file in root.rglob("*.py"):
+            for lineno, line in enumerate(py_file.read_text().splitlines(), start=1):
+                if import_re.match(line):
+                    violations.append(f"{py_file}:{lineno}: {line.strip()}")
+    assert not violations, (
+        f"nnunet_bridge import references remain: {violations}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -528,17 +645,17 @@ def test_nnunet_bridge_uses_list_argv_no_shell(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
+def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch, fake_nnunet_predictor) -> None:
     """run_benchmark scores all 4 contenders end-to-end on synthetic data.
 
     The MONAI contenders (MonaiUnetContender, SwinUnetContender) train for
     real (1 epoch on tiny 32×32 synthetic slices with matching
     ``<name>_mask.png`` labels) and predict via SlidingWindowInferer. The
-    nnU-Net contender's subprocess calls (plan_and_preprocess, train,
-    predict) are mocked — nnU-Net runs in a separate venv on the lab box,
-    not in CI — and fake prediction PNGs are written to the output folder
-    so the read-back path exercises the bool conversion. Improved2DContender
-    is mocked as before (train_model + predict_one + VsegModel).
+    nnU-Net contender runs its in-process pipeline against fake nnunetv2
+    leaf modules (fingerprint/plan/preprocess/train) plus the shared
+    fake-predictor fixture — ``prepare_nnunet_2d`` runs for real into the
+    monkeypatched ``nnUNet_raw`` dir. Improved2DContender is mocked as
+    before (train_model + predict_one + VsegModel).
 
     Asserts all 4 contenders produce boolean masks and score through the
     ship-gate eval-metric matrix via run_benchmark (4-key result table).
@@ -607,27 +724,16 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({}, str(ckpt_path))
 
-    # --- Mock nnU-Net subprocess calls (nnU-Net runs in a separate venv) ---
-    # prepare_nnunet_2d runs for real (it just copies PNGs). The three
-    # subprocess calls are mocked. nnunet_predict is mocked to write fake
-    # prediction PNGs to the output folder so the read-back path exercises
-    # the bool conversion.
-    from liom_toolkit.segmentation.vseg.benchmark import nnunet_bridge
-
-    # nnU-Net contender reads nnUNet_raw to locate the dataset directory.
+    # --- Fake the nnU-Net pipeline leaves (in-process, no subprocess) ---
+    # prepare_nnunet_2d runs for real (it copies PNGs into the monkeypatched
+    # nnUNet_raw tree). The fingerprint/plan/preprocess/train leaves are fake
+    # sys.modules entries; run_training materializes the results-layout model
+    # dir that the real NnUnetV2Model validates, and the conftest fake
+    # predictor supplies the predict calls.
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "nnUNet_raw"))
-    monkeypatch.setattr(nnunet_bridge, "nnunet_plan_and_preprocess", lambda **k: None)
-    monkeypatch.setattr(nnunet_bridge, "nnunet_train", lambda **k: None)
-
-    def _fake_nnunet_predict(input_folder, output_folder, dataset_id, **kw):
-        """Write fake prediction PNGs matching the input case names."""
-        out = Path(output_folder)
-        out.mkdir(parents=True, exist_ok=True)
-        for f in Path(input_folder).glob("*_0000.png"):
-            stem = f.name[: -len("_0000.png")]
-            iio.imwrite(out / f"{stem}.png", gt_uint8)
-
-    monkeypatch.setattr(nnunet_bridge, "nnunet_predict", _fake_nnunet_predict)
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "nnUNet_pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "nnUNet_res"))
+    _inject_nnunet_pipeline_leaves(monkeypatch, tmp_path / "nnUNet_res")
 
     split_config = {
         "train_slices": train_slices,
@@ -637,7 +743,7 @@ def test_run_benchmark_full_4_contenders(tmp_path, monkeypatch) -> None:
         "ddp": False,
     }
 
-    nnunet = NnUnetContender(device="cpu", dataset_id=999, nnunet_venv_python="/usr/bin/python3")
+    nnunet = NnUnetContender(device="cpu", dataset_id=999)
     contenders = [
         Improved2DContender(device="cpu"),
         MonaiUnetContender(device="cpu", epochs=1, batch_size=1),
