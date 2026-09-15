@@ -2,8 +2,8 @@
 
 The in-CI benchmark tests (``test_benchmark_contenders.py``,
 ``test_prepare_nnunet_dataset.py``) exercise the harness on synthetic data —
-they prove the eval-metric matrix, the Contender Protocol, the nnU-Net
-subprocess bridge, and the OME-Zarr→nnU-Net converter all wire together. This
+they prove the eval-metric matrix, the Contender Protocol, the in-process
+nnU-Net pipeline, and the OME-Zarr→nnU-Net converter all wire together. This
 test goes beyond them: it SSHes to the lab CUDA box and runs the full
 4-contender benchmark (Improved2D, MONAI UNet, SwinUNETR, nnU-Net v2) on real
 6.5 µm lightsheet data via ``run_benchmark``, then asserts the result table
@@ -28,11 +28,15 @@ Configuration via env vars (defaults match the lab box):
 * ``LIOM_BENCH_DATASET_DIR`` — directory of labeled PNG slices on the remote
   (default ``~/code/vseg/data/LSFM_dataset``). The harness reads S23 (train)
   and S24 (held-out test) subdirectories from here.
-* ``LIOM_BENCH_NNUNET_VENV`` — path to the nnU-Net venv python on the remote
-  (default ``~/venvs/nnunet/bin/python``). nnU-Net runs in a separate venv
-  (torch-clobbering isolation); it is NOT a liom-toolkit dependency.
 * ``LIOM_BENCH_NNUNET_DATASET_ID`` — the nnU-Net dataset id to register
   (default ``101``).
+
+``nnunetv2`` is an ``[ai]`` dependency, so the nnU-Net contender runs its
+full pipeline (dataset prepare → fingerprint → plan → preprocess → train →
+predict) in-process inside the same uv env — there is no separate venv.
+The remote script exports ``nnUNet_raw`` / ``nnUNet_preprocessed`` /
+``nnUNet_results`` (defaults ``/data/nnUNet_*``) before the run; nnU-Net
+refuses to run without them.
 
 Uses ONLY the stdlib ``subprocess`` module to drive ``ssh`` (no paramiko /
 fabric dependency — AGENTS section 3: modules must import cleanly without
@@ -113,10 +117,11 @@ def test_benchmark_real_run():
 
     Probes SSH connectivity and GPU count first (skips cleanly on failure),
     then pipes a ``bash -s`` script over SSH that: syncs the repo with all
-    extras (installs MONAI in the ``[ai]`` env), prepares the nnU-Net dataset
-    via ``liom-prepare-nnunet-dataset``, activates the nnU-Net venv and runs
-    ``nnUNetv2_plan_and_preprocess`` + ``nnUNetv2_train`` (2d config), and
-    runs the 4-contender benchmark via ``run_benchmark``. The script echoes
+    extras (installs torch + nnunetv2 + MONAI in the single env), exports
+    the ``nnUNet_*`` directory env vars, and runs the 4-contender benchmark
+    via ``run_benchmark`` — the ``NnUnetContender`` performs its own
+    prepare → plan → preprocess → train → predict pipeline in-process.
+    The script echoes
     ``LIOM_BENCH_OK <output_dir>`` on success and writes a JSON result table
     to ``<output_dir>/benchmark_results.json``. The test asserts the
     sentinel is present and the result table file exists on the remote.
@@ -173,12 +178,6 @@ def test_benchmark_real_run():
     elif not os.path.isabs(dataset_dir):
         dataset_dir = f"{remote_home}/{dataset_dir}"
 
-    nnunet_venv = os.environ.get("LIOM_BENCH_NNUNET_VENV") or "~/venvs/nnunet/bin/python"
-    if nnunet_venv.startswith(("~", "$HOME")):
-        nnunet_venv = remote_home + nnunet_venv[nnunet_venv.find("/") :]
-    elif not os.path.isabs(nnunet_venv):
-        nnunet_venv = f"{remote_home}/{nnunet_venv}"
-
     nnunet_dataset_id = os.environ.get("LIOM_BENCH_NNUNET_DATASET_ID") or "101"
 
     # --- The real 4-contender benchmark run (one bash -s script over SSH) ---
@@ -200,38 +199,16 @@ def test_benchmark_real_run():
         mkdir -p "$OUT"
         export LIOM_BENCH_OUT="$OUT"
         export LIOM_BENCH_DATASET_DIR={shlex.quote(dataset_dir)}
-        export LIOM_BENCH_NNUNET_VENV={shlex.quote(nnunet_venv)}
         export LIOM_BENCH_NNUNET_DATASET_ID={shlex.quote(nnunet_dataset_id)}
 
-        # --- nnU-Net v2: prepare dataset + preprocess + train (separate venv) ---
-        # nnU-Net runs in a separate venv (torch-clobbering isolation); it is
-        # NOT a liom-toolkit dependency. The env vars nnUNet_raw /
-        # nnUNet_preprocessed / nnUNet_results MUST be set on the box before
-        # invoking nnU-Net (no silent fallback — nnU-Net refuses to run
-        # without them).
-        NNUNET_RAW="${{nnUNet_raw:-/data/nnUNet_raw}}"
-        NNUNET_PREP="${{nnUNet_preprocessed:-/data/nnUNet_preprocessed}}"
-        NNUNET_RES="${{nnUNet_results:-/data/nnUNet_results}}"
-        export nnUNet_raw="$NNUNET_RAW"
-        export nnUNet_preprocessed="$NNUNET_PREP"
-        export nnUNet_results="$NNUNET_RES"
-
-        # Convert the labeled PNG slices to nnU-Net raw format.
-        uv run liom-prepare-nnunet-dataset \\
-            "$LIOM_BENCH_DATASET_DIR" \\
-            "$NNUNET_RAW/Dataset${{LIOM_BENCH_NNUNET_DATASET_ID}}_LIOM6p5" \\
-            --dataset-id "$LIOM_BENCH_NNUNET_DATASET_ID" \\
-            --dataset-name "LIOM6p5" \\
-            --file-ending ".png"
-
-        # Activate the nnU-Net venv, preprocess, and train the 2d config.
-        # `nnUNetv2_train` trains one fold; the prediction step is invoked
-        # by the NnUnetContender via the subprocess bridge at benchmark time.
-        NNUNET_PY="$LIOM_BENCH_NNUNET_VENV"
-        "$NNUNET_PY" -m nnunetv2 nnUNetv2_plan_and_preprocess \\
-            -d "$LIOM_BENCH_NNUNET_DATASET_ID" --verify_dataset_integrity
-        "$NNUNET_PY" -m nnunetv2 nnUNetv2_train \\
-            -d "$LIOM_BENCH_NNUNET_DATASET_ID" -c 2d
+        # --- nnU-Net v2 env (single env — nnunetv2 is an [ai] dep) --------
+        # The contender runs prepare → fingerprint → plan → preprocess →
+        # train → predict in-process inside the same uv env; only the
+        # nnUNet_* directory env vars need to be set (nnU-Net refuses to
+        # run without them — no silent fallback).
+        export nnUNet_raw="${{nnUNet_raw:-/data/nnUNet_raw}}"
+        export nnUNet_preprocessed="${{nnUNet_preprocessed:-/data/nnUNet_preprocessed}}"
+        export nnUNet_results="${{nnUNet_results:-/data/nnUNet_results}}"
 
         # --- Run the full 4-contender benchmark via the library entry -----
         # run_benchmark trains + predicts + scores each contender through
@@ -281,8 +258,8 @@ def test_benchmark_real_run():
             MonaiUnetContender(),
             SwinUnetContender(),
             NnUnetContender(
-                nnunet_venv_python=os.environ["LIOM_BENCH_NNUNET_VENV"],
                 dataset_id=int(os.environ["LIOM_BENCH_NNUNET_DATASET_ID"]),
+                num_gpus=2,
             ),
         ]
         results = run_benchmark(

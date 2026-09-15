@@ -465,9 +465,7 @@ def test_nnunet_contender_missing_label(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="no matching label"):
         NnUnetContender().train_and_predict(["nonexistent.png"], ["y"], str(tmp_path))
-    assert calls == [], (
-        f"no nnunetv2 pipeline call may run before the label guard; got {calls}"
-    )
+    assert calls == [], f"no nnunetv2 pipeline call may run before the label guard; got {calls}"
 
 
 def test_nnunet_contender_predict_on_slices_in_process(
@@ -546,7 +544,12 @@ def test_nnunet_contender_train_pipeline_call_order(
 
     def fake_prepare_nnunet_2d(image_paths, label_paths, output_dir, **kwargs):
         prepare_calls.append(
-            {"image_paths": image_paths, "label_paths": label_paths, "output_dir": output_dir, **kwargs}
+            {
+                "image_paths": image_paths,
+                "label_paths": label_paths,
+                "output_dir": output_dir,
+                **kwargs,
+            }
         )
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -574,9 +577,7 @@ def test_nnunet_contender_train_pipeline_call_order(
         iio.imwrite(p, img)
         test_slices.append(str(p))
 
-    masks = NnUnetContender().train_and_predict(
-        train_slices, test_slices, str(tmp_path / "out")
-    )
+    masks = NnUnetContender().train_and_predict(train_slices, test_slices, str(tmp_path / "out"))
 
     # Stage order: prepare → fingerprint → plan → preprocess → train, then
     # predict via the fake predictor (one call per test slice).
@@ -635,9 +636,7 @@ def test_no_nnunet_bridge_imports() -> None:
             for lineno, line in enumerate(py_file.read_text().splitlines(), start=1):
                 if import_re.match(line):
                     violations.append(f"{py_file}:{lineno}: {line.strip()}")
-    assert not violations, (
-        f"nnunet_bridge import references remain: {violations}"
-    )
+    assert not violations, f"nnunet_bridge import references remain: {violations}"
 
 
 # ---------------------------------------------------------------------------
