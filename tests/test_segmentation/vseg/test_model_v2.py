@@ -720,7 +720,7 @@ def test_vseg_barrel_imports_without_torch_or_nnunetv2() -> None:
     for name in saved:
         sys.modules.pop(name)
     try:
-        import liom_toolkit.segmentation.vseg as vseg
+        from liom_toolkit.segmentation import vseg
 
         assert "torch" not in sys.modules
         assert "nnunetv2" not in sys.modules
@@ -743,9 +743,9 @@ def test_vseg_nnunetv2model_resolves_lazily() -> None:
     ``AttributeError`` naming it.
     """
     pytest.importorskip("torch")
-    import liom_toolkit.segmentation.vseg as vseg
+    from liom_toolkit.segmentation import vseg
     from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
 
     assert vseg.NnUnetV2Model is NnUnetV2Model
     with pytest.raises(AttributeError, match="bogus_attribute"):
-        vseg.bogus_attribute
+        _ = vseg.bogus_attribute
