@@ -209,6 +209,14 @@ class NnUnetV2Model:
             )
         if use_folds is not None:
             folds = use_folds if isinstance(use_folds, (tuple, list)) else (use_folds,)
+            # An empty sequence passes the loop vacuously, then nnU-Net
+            # loads zero checkpoints -- list_of_parameters stays empty and
+            # inference crashes on `None.to('cpu')` deep in the predictor.
+            if len(folds) == 0:
+                raise ValueError(
+                    "use_folds must be None or a non-empty sequence of fold "
+                    "indices; got an empty sequence"
+                )
             for fold in folds:
                 checkpoint = model_dir / f"fold_{fold}" / checkpoint_name
                 if not checkpoint.is_file():

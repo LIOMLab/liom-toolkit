@@ -219,6 +219,24 @@ def test_init_validates_explicit_use_folds(fake_nnunet_predictor, stub_nnunet_mo
 
 
 @pytest.mark.ai
+def test_init_rejects_empty_use_folds(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
+    """An empty use_folds raises ValueError instead of loading zero checkpoints.
+
+    An empty sequence would skip auto-detection AND pass the fold loop
+    vacuously, leaving ``list_of_parameters`` empty -- inference then
+    crashes opaquely on ``None.to('cpu')`` deep inside nnU-Net. The wrapper
+    must reject it at construction.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
+
+    with pytest.raises(ValueError, match="non-empty"):
+        NnUnetV2Model(stub_nnunet_model_dir, use_folds=())
+
+    assert fake_nnunet_predictor.calls["init_calls"] == []
+
+
+@pytest.mark.ai
 def test_init_excludes_fold_all_unless_requested(fake_nnunet_predictor, tmp_path) -> None:
     """fold_all is NOT an auto-detected fold -- a fold_all-only dir raises ValueError.
 
