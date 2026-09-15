@@ -20,32 +20,39 @@ The three remaining contenders:
 * ``SwinUnetContender`` — MONAI :class:`~monai.networks.nets.SwinUNETR`
   (``spatial_dims=2``, ``use_checkpoint=True``; no ``img_size=`` — removed in
   MONAI 1.5) + the same composite loss + SlidingWindowInferer path.
-* ``NnUnetContender`` — nnU-Net v2 via the subprocess bridge
-  (:func:`~liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge.nnunet_predict`).
-  nnU-Net runs in a separate venv (torch-clobbering isolation); the
-  contender converts the train slices to nnU-Net raw format via
+* ``NnUnetContender`` — nnU-Net v2 run fully in-process. ``nnunetv2`` is a
+  member of the ``[ai]`` extra, so the contender drives nnU-Net's own
+  Python API in the same environment: dataset conversion via
   :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`,
-  shells out to nnU-Net, and reads the predicted PNGs back as boolean masks.
+  fingerprint/plan/preprocess via ``nnunetv2.experiment_planning``, training
+  via ``nnunetv2.run.run_training.run_training`` (``num_gpus > 1`` engages
+  nnU-Net's built-in DDP), and prediction via
+  :class:`~liom_toolkit.segmentation.vseg.model_v2.NnUnetV2Model`.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
 # torch is in the [ai] extra. The upfront ImportError is the honest signal
-# on an io-only install — the message names [ai]. The `from e` chain
-# preserves the underlying error for debugging (AGENTS §2). MONAI is imported
-# inside the contender methods (function-scope) so this module imports
-# cleanly with only torch installed; MONAI is a separate [ai] dep.
+# on an io-only install — the message names [ai,benchmark] (the torch +
+# MONAI path the benchmark contenders need). The `from e` chain preserves
+# the underlying error for debugging (AGENTS §2). MONAI is imported inside
+# the contender methods (function-scope) so this module imports cleanly
+# with only torch installed; MONAI is a separate [benchmark] dep.
 try:
     import torch
 except ImportError as e:
-    raise ImportError("Please install liom-toolkit[ai] to use the benchmark contenders.") from e
+    raise ImportError(
+        "Please install liom-toolkit[ai,benchmark] to use the benchmark contenders."
+    ) from e
+
+if TYPE_CHECKING:
+    from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
 
 __all__ = [
     "Contender",
@@ -627,21 +634,30 @@ class SwinUnetContender:
 
 
 class NnUnetContender:
-    """nnU-Net v2 contender — subprocess bridge to a separate venv.
+    """nnU-Net v2 contender — the full lifecycle runs in-process.
 
-    nnU-Net v2 pins its own torch/CUDA build that conflicts with the
-    liom-toolkit ``[ai]`` extra's torch (the torch-clobbering hazard). This
-    contender runs nnU-Net as a subprocess in a separate venv via
-    :func:`~liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge.nnunet_predict`
-    — the liom-toolkit process never imports ``nnunetv2``.
+    ``nnunetv2`` is a member of the ``[ai]`` extra, so the contender drives
+    nnU-Net's own Python API in the same environment — no subprocess, no
+    separate venv. ``train_and_predict`` chains:
 
-    The contender converts the train slices to nnU-Net v2 raw format via
-    :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`,
-    invokes ``nnUNetv2_predict`` (subprocess bridge), and reads the predicted
-    PNGs back as boolean masks (nnU-Net writes 0/255 uint8 PNGs; binarizing
-    to bool is required so the eval-metric matrix receives
-    ``NDArray[np.bool_]`` — a 0/255 uint8 array passed to ``cl_score`` would
-    scale tprec/tsens by 255 → wrong values).
+    1. :func:`~liom_toolkit.segmentation.vseg.ssl.warmstart.validate_nnunet_env`
+       — the ``nnUNet_raw`` / ``nnUNet_preprocessed`` / ``nnUNet_results``
+       env contract, then the ``<stem>_mask.png`` label guard.
+    2. :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`
+       — converts the train slices + labels to nnU-Net raw format.
+    3. ``extract_fingerprint_dataset`` → ``plan_experiment_dataset`` →
+       ``preprocess_dataset`` — nnU-Net self-configures patch size, batch
+       size, and architecture from the dataset statistics.
+    4. ``run_training`` — nnU-Net's own training loop; ``num_gpus > 1``
+       engages its built-in DDP.
+    5. :class:`~liom_toolkit.segmentation.vseg.model_v2.NnUnetV2Model` —
+       the shared ``nnUNetPredictor`` wrapper turns each test slice into a
+       boolean mask (vessel-channel softmax ``> 0.5``).
+
+    The trained-model directory derived from ``nnUNet_results`` (and the
+    ``checkpoint_path`` accepted by :meth:`predict_on_slices`) must be a
+    TRUSTED nnU-Net training output — upstream loads checkpoints with
+    ``torch.load(weights_only=False)``.
     """
 
     name: str = "nnunet_v2"
@@ -650,45 +666,45 @@ class NnUnetContender:
         self,
         device: str = "cpu",
         dataset_id: int = 999,
-        nnunet_venv_python: str | None = None,
         num_gpus: int = 1,
+        *,
+        trainer_name: str = "nnUNetTrainer_50epochs",
+        spacing: tuple[float, float] = (1.0, 1.0),
+        num_processes: int = 8,
     ) -> None:
         """Initialise the contender.
 
         Parameters
         ----------
         device : str
-            Unused for nnU-Net (it runs in its own venv with its own device
-            config) — kept for Protocol structural conformance.
+            The torch device string for training + inference (``"cpu"`` or
+            ``"cuda"``); forwarded to ``run_training`` and the predictor
+            wrapper.
         dataset_id : int
-            The nnU-Net dataset id to use for the converter + predictor.
-        nnunet_venv_python : str | None
-            Path to the Python interpreter in the separate nnU-Net venv
-            (torch-clobbering isolation). Required — there is no
-            lab-independent default. A lab that installs nnU-Net elsewhere
-            must pass its own venv-python path (AGENTS §1: no hardcoded lab
-            config). ``None`` raises :class:`ValueError`.
+            The nnU-Net dataset id. The dataset is written to
+            ``nnUNet_raw/Dataset{id:03d}_LIOM6p5`` and the trained model is
+            read back from the matching ``nnUNet_results`` subtree.
         num_gpus : int
-            Number of GPUs for nnU-Net's built-in DDP training
-            (``-num_gpus`` CLI flag). Default 1.
-
-        Raises
-        ------
-        ValueError
-            If ``nnunet_venv_python`` is ``None`` (no lab-independent
-            default exists).
+            Number of GPUs for nnU-Net's built-in DDP training. Default 1.
+        trainer_name : str
+            The nnU-Net trainer class name passed to ``run_training``.
+            Default ``"nnUNetTrainer_50epochs"`` — the installed 50-epoch
+            variant, matching the 50-epoch budget of the MONAI contenders
+            for a fair comparison.
+        spacing : tuple[float, float]
+            In-plane ``(row, col)`` spacing forwarded to the predictor's
+            ``predict_proba``. Benchmark PNGs are pixel-space — pass the
+            real in-plane spacing if the dataset carries physical units.
+        num_processes : int
+            Worker processes for fingerprint extraction and preprocessing.
+            Default 8 (nnU-Net's own default).
         """
-        if nnunet_venv_python is None:
-            raise ValueError(
-                "nnunet_venv_python is required — path to the Python "
-                "interpreter in the separate nnU-Net venv "
-                "(torch-clobbering isolation). There is no lab-independent "
-                "default; pass the venv-python path for your environment."
-            )
         self.device = device
         self.dataset_id = dataset_id
-        self.nnunet_venv_python = nnunet_venv_python
         self.num_gpus = num_gpus
+        self.trainer_name = trainer_name
+        self.spacing = spacing
+        self.num_processes = num_processes
 
     def train_and_predict(
         self,
@@ -698,26 +714,17 @@ class NnUnetContender:
         patch_size: tuple[int, int, int] = (1, 256, 256),
         ddp: bool = False,
     ) -> list[NDArray[np.bool_]]:
-        """Full nnU-Net pipeline: convert → preprocess → train → predict → read back.
+        """Full nnU-Net pipeline in-process: prepare → plan → train → predict.
 
-        Runs the complete nnU-Net v2 subprocess sequence in the separate
-        venv (torch-clobbering isolation):
+        Validates the ``nnUNet_*`` env vars first, then the per-slice
+        ``<stem>_mask.png`` labels, then runs the library chain:
+        ``prepare_nnunet_2d`` → ``extract_fingerprint_dataset`` →
+        ``plan_experiment_dataset`` → ``preprocess_dataset`` →
+        ``run_training`` → ``NnUnetV2Model`` predictions.
 
-        1. Convert train slices + their ``<stem>_mask.png`` labels to
-           nnU-Net raw format via
-           :func:`~liom_toolkit.scripts.liom_prepare_nnunet_dataset.prepare_nnunet_2d`.
-        2. ``nnUNetv2_plan_and_preprocess`` — nnU-Net self-configures its
-           patch/batch/architecture from the dataset statistics.
-        3. ``nnUNetv2_train`` (2d config, fold 0) — trains the model.
-        4. Copy test slices to a temp input folder in nnU-Net's
-           ``{case}_0000.png`` naming convention.
-        5. ``nnUNetv2_predict`` — predicts on the test folder.
-        6. Read predictions back as boolean masks (nnU-Net writes 0/255
-           uint8 PNGs; binarizing to bool is required so the eval-metric
-           matrix receives ``NDArray[np.bool_]``).
-
-        The ``ddp`` flag is unused — nnU-Net manages its own
-        multi-GPU training internally. Kept for Protocol structural
+        ``patch_size`` and ``ddp`` are unused — nnU-Net self-configures its
+        patch size from the dataset statistics and manages multi-GPU
+        training internally via ``num_gpus``. Kept for Protocol structural
         conformance.
 
         Returns
@@ -728,49 +735,50 @@ class NnUnetContender:
         Raises
         ------
         ValueError
-            If a train slice has no matching ``<name>_mask.png`` label.
-        RuntimeError
-            If any nnU-Net subprocess exits non-zero (the returncode and
-            stderr tail are in the message), or if a prediction file is
-            missing after ``nnUNetv2_predict`` (no silent zero-mask
-            fallback — AGENTS §2).
+            If a train slice has no matching ``<stem>_mask.png`` label, or
+            the expected trained-model directory does not exist after
+            ``run_training`` (a silently crashed trainer must not be
+            glob-guessed into a wrong results dir — AGENTS §2).
+
+        Notes
+        -----
+        ``RuntimeError`` propagates from
+        :func:`~liom_toolkit.segmentation.vseg.ssl.warmstart.validate_nnunet_env`
+        when any ``nnUNet_*`` env var is unset — the message names the
+        missing vars.
         """
-        import imageio.v3 as iio
+        # nnunetv2 is in the [ai] extra — function-scope imports so the
+        # module loads with only torch installed.
+        from nnunetv2.experiment_planning.plan_and_preprocess_api import (
+            extract_fingerprint_dataset,
+            plan_experiment_dataset,
+            preprocess_dataset,
+        )
+        from nnunetv2.run.run_training import run_training
 
         from liom_toolkit.scripts.liom_prepare_nnunet_dataset import (
             prepare_nnunet_2d,
         )
-        from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import (
-            nnunet_plan_and_preprocess,
-            nnunet_predict,
-            nnunet_train,
-        )
+        from liom_toolkit.segmentation.vseg.ssl.warmstart import validate_nnunet_env
 
-        # 1. Convert train slices + masks to nnU-Net raw format.
-        # nnU-Net looks for datasets in $nnUNet_raw/Dataset{id:03d}_{name}/,
-        # so prepare_nnunet_2d must write there (not to a local output dir).
-        # The env vars are validated by nnunet_plan_and_preprocess below,
-        # but we need them here too — read them early with an explicit check.
-        # The nnUNet_raw env var name is mandated by the nnU-Net v2 CLI
-        # (upstream convention — renaming would break nnU-Net's dataset lookup).
-        nnunet_raw_env = os.environ.get("nnUNet_raw")  # ruff: ignore[uncapitalized-environment-variables]
-        if nnunet_raw_env is None:
-            raise RuntimeError(
-                "NnUnetContender: nnUNet_raw env var is not set — "
-                "nnU-Net needs it to locate the raw dataset directory"
-            )
+        env = validate_nnunet_env()
+
         train_label_paths = [
             str(Path(p).with_name(f"{Path(p).stem}_mask{Path(p).suffix}")) for p in train_slices
         ]
         # Validate that all mask files exist before starting the long
-        # subprocess chain (no silent failure mid-pipeline).
+        # pipeline (no silent failure mid-run).
         for lbl in train_label_paths:
             if not Path(lbl).is_file():
                 raise ValueError(
                     f"NnUnetContender: no matching label for a train slice — "
                     f"expected {lbl} (the <name>_mask.png convention)"
                 )
-        raw_dir = str(Path(nnunet_raw_env) / f"Dataset{self.dataset_id:03d}_LIOM6p5")
+
+        # nnU-Net locates datasets as $nnUNet_raw/Dataset{id:03d}_{name}/ —
+        # the raw dir must be written there, not to a local output dir.
+        dataset_dirname = f"Dataset{self.dataset_id:03d}_LIOM6p5"
+        raw_dir = str(Path(env["nnUNet_raw"]) / dataset_dirname)
         prepare_nnunet_2d(
             image_paths=train_slices,
             label_paths=train_label_paths,
@@ -778,74 +786,61 @@ class NnUnetContender:
             dataset_id=self.dataset_id,
         )
 
-        # 2. Plan + preprocess (nnU-Net self-configures).
-        nnunet_plan_and_preprocess(
-            dataset_id=self.dataset_id,
-            nnunet_venv_python=self.nnunet_venv_python,
+        extract_fingerprint_dataset(
+            self.dataset_id,
+            num_processes=self.num_processes,
+            check_dataset_integrity=True,
         )
-
-        # 3. Train (2d config, fold 0, 50-epoch trainer for fair comparison).
-        nnunet_train(
-            dataset_id=self.dataset_id,
+        _plans_dict, plans_identifier = plan_experiment_dataset(self.dataset_id)
+        # preprocess_dataset's num_processes is a per-configuration tuple.
+        preprocess_dataset(
+            self.dataset_id,
+            plans_identifier=plans_identifier,
+            configurations=("2d",),
+            num_processes=(self.num_processes,),
+        )
+        run_training(
+            dataset_name_or_id=str(self.dataset_id),
             configuration="2d",
             fold=0,
+            trainer_class_name=self.trainer_name,
+            plans_identifier=plans_identifier,
             num_gpus=self.num_gpus,
-            nnunet_venv_python=self.nnunet_venv_python,
+            device=torch.device(self.device),
         )
 
-        # 4. Copy test slices to a temp input folder in nnU-Net's
-        #    {case}_0000.png naming convention (single channel = _0000).
-        predict_input = Path(output_dir) / "nnunet_predict_input"
-        predict_input.mkdir(parents=True, exist_ok=True)
-        case_names: list[str] = []
-        for slice_path in test_slices:
-            stem = Path(slice_path).stem
-            case_name = f"{stem}_0000"
-            iio.imwrite(
-                predict_input / f"{case_name}.png",
-                iio.imread(slice_path),
+        # nnU-Net writes trained models to
+        # $nnUNet_results/Dataset{id}_{name}/{trainer}__{plans}__{config}/.
+        # Check the expected path explicitly — never glob-guess a results
+        # dir after a silently-crashed trainer.
+        model_dir = (
+            Path(env["nnUNet_results"])
+            / dataset_dirname
+            / f"{self.trainer_name}__{plans_identifier}__2d"
+        )
+        if not model_dir.is_dir():
+            raise ValueError(
+                f"NnUnetContender: expected trained-model dir missing after "
+                f"run_training: {model_dir} — the trainer crashed silently "
+                f"or wrote elsewhere"
             )
-            case_names.append(stem)
 
-        # 5. Predict.
-        predict_output = Path(output_dir) / "nnunet_predict_output"
-        predict_output.mkdir(parents=True, exist_ok=True)
-        nnunet_predict(
-            input_folder=str(predict_input),
-            output_folder=str(predict_output),
-            dataset_id=self.dataset_id,
-            configuration="2d",
-            fold="0",
-            trainer="nnUNetTrainer50Epochs",
-            nnunet_venv_python=self.nnunet_venv_python,
-        )
+        from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
 
-        # 6. Read predictions back as bool masks. nnU-Net writes
-        #    {case}.png (without the _0000 channel suffix) to the output
-        #    folder. Raise on a missing prediction file — no silent
-        #    zero-mask fallback (AGENTS §2).
-        masks: list[NDArray[np.bool_]] = []
-        for stem in case_names:
-            pred_path = predict_output / f"{stem}.png"
-            if not pred_path.is_file():
-                raise RuntimeError(
-                    f"NnUnetContender: nnU-Net prediction file missing: "
-                    f"{pred_path} — nnUNetv2_predict likely failed for this "
-                    f"case (no silent zero-mask fallback)"
-                )
-            masks.append(np.asarray(iio.imread(pred_path), dtype=bool))
-        return masks
+        model = NnUnetV2Model(model_dir, device=self.device)
+        return self._predict_masks(model, test_slices)
 
     def predict_on_slices(
         self,
         slices: list[str],
         checkpoint_path: str,
     ) -> list[NDArray[np.bool_]]:
-        """Predict from a trained nnU-Net model via the subprocess bridge.
+        """Predict from a trained nnU-Net model directory in-process.
 
-        ``checkpoint_path`` here is the nnU-Net output folder (the directory
-        nnU-Net wrote predictions to in a prior run); the bridge re-invokes
-        ``nnUNetv2_predict`` on the slices.
+        ``checkpoint_path`` is the nnU-Net MODEL DIRECTORY (the
+        ``<Dataset>/<trainer>__<plans>__<config>/`` results-layout folder),
+        not a single ``.pth`` file — it is handed to the predictor wrapper,
+        which validates the directory contract up front.
 
         Returns
         -------
@@ -855,42 +850,68 @@ class NnUnetContender:
         Raises
         ------
         ValueError
-            If ``slices`` is empty, or the slices span more than one parent
-            folder (the bridge predicts on a single input folder).
+            If ``slices`` is empty, or ``checkpoint_path`` fails the
+            trained-model directory contract (propagated from the wrapper).
+        """
+        if not slices:
+            raise ValueError("NnUnetContender.predict_on_slices: slices list is empty")
+
+        from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
+
+        model = NnUnetV2Model(checkpoint_path, device=self.device)
+        return self._predict_masks(model, slices)
+
+    def _predict_masks(
+        self,
+        model: NnUnetV2Model,
+        slices: list[str],
+    ) -> list[NDArray[np.bool_]]:
+        """Predict one boolean mask per slice through the shared wrapper.
+
+        Each slice is read via imageio, cast to float32 with a leading
+        channel dim, and passed to the wrapper's ``predict_proba``; the
+        vessel channel (index 1) is thresholded at a strict ``> 0.5``.
+
+        Parameters
+        ----------
+        model : NnUnetV2Model
+            The initialized predictor wrapper.
+        slices : list[str]
+            Paths to the 2D image slices to predict on.
+
+        Returns
+        -------
+        list[NDArray[np.bool_]]
+            One boolean mask per slice, in ``slices`` order.
+
+        Raises
+        ------
+        ValueError
+            If the model returns fewer than 2 probability channels — a
+            single-class softmax has no vessel channel, so reading
+            ``probs[1]`` would be a silent wrong-channel read.
         RuntimeError
-            If a prediction file is missing after ``nnUNetv2_predict`` (no
-            silent zero-mask fallback — AGENTS §2).
+            If a returned mask's shape differs from its input slice — a
+            shape drift would misalign the eval metrics.
         """
         import imageio.v3 as iio
 
-        from liom_toolkit.segmentation.vseg.benchmark.nnunet_bridge import nnunet_predict
-
-        if not slices:
-            raise ValueError("NnUnetContender.predict_on_slices: slices list is empty")
-        parents = {Path(s).parent for s in slices}
-        if len(parents) != 1:
-            raise ValueError(
-                f"NnUnetContender.predict_on_slices: all slices must be in one "
-                f"folder (the bridge predicts on a single input folder); got "
-                f"{len(parents)} distinct folders"
-            )
-        nnunet_predict(
-            input_folder=str(Path(slices[0]).parent),
-            output_folder=checkpoint_path,
-            dataset_id=self.dataset_id,
-            configuration="2d",
-            fold="all",
-            trainer="nnUNetTrainer50Epochs",
-            nnunet_venv_python=self.nnunet_venv_python,
-        )
         masks: list[NDArray[np.bool_]] = []
         for slice_path in slices:
-            pred_path = Path(checkpoint_path) / f"{Path(slice_path).stem}.png"
-            if not pred_path.is_file():
-                raise RuntimeError(
-                    f"NnUnetContender.predict_on_slices: prediction file "
-                    f"missing: {pred_path} — nnUNetv2_predict likely failed "
-                    f"for this case (no silent zero-mask fallback, AGENTS §2)"
+            img = np.asarray(iio.imread(slice_path))
+            probs = model.predict_proba(img.astype(np.float32)[None], spacing=self.spacing)
+            if probs.shape[0] < 2:
+                raise ValueError(
+                    f"NnUnetContender: predict_proba returned "
+                    f"{probs.shape[0]} probability channel(s) for "
+                    f"{slice_path}; the binary vessel contract requires "
+                    f"at least 2 (channel 1 is the vessel probability)"
                 )
-            masks.append(np.asarray(iio.imread(pred_path), dtype=bool))
+            mask = probs[1] > 0.5
+            if mask.shape != img.shape:
+                raise RuntimeError(
+                    f"NnUnetContender: prediction shape {mask.shape} does "
+                    f"not match input shape {img.shape} for {slice_path}"
+                )
+            masks.append(mask)
         return masks
