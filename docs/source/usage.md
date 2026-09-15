@@ -39,10 +39,16 @@ stage reads and writes `.ome.zarr` stores.
 4. **Segmentation** — Extract the vessel network. Two paths are supported:
    classical 2D Frangi + threshold vessel segmentation
    (`liom-segment-2d` in classical mode,
-   `liom_toolkit.segmentation.plane_segmentation`) and a PyTorch U-Net
-   vessel segmentation model (`liom-segment-2d` in U-Net mode and
-   `liom-train-model` for training, `liom_toolkit.segmentation.vseg`). The
-   U-Net path requires the `ai` extra.
+   `liom_toolkit.segmentation.plane_segmentation`) and deep-learning vessel
+   segmentation (`liom_toolkit.segmentation.vseg`). The production model is
+   an nnU-Net v2 2D network: `liom-prepare-nnunet-dataset` converts OME-Zarr
+   data into nnU-Net raw format, training is delegated to nnU-Net's own CLIs
+   (`nnUNetv2_plan_and_preprocess` then `nnUNetv2_train -num_gpus N` for
+   multi-GPU), and inference runs through `predict_one`/`predict_volume` or
+   the `liom-predict-volume` CLI against the trained model directory.
+   `liom-train-model` (and `liom-segment-2d` in U-Net mode) remains for the
+   legacy `VsegModel` path only. Both deep-learning paths require the `ai`
+   extra.
 
 5. **Statistics** — Compute per-region vessel metrics (density, length,
    branch counts) restricted to Allen Atlas regions.

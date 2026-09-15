@@ -25,7 +25,8 @@ degrade gracefully.
 This is a **library, not an application** — there is no GUI, no hardware, no
 operator-in-the-loop. The CLIs (`liom-convert-hdf5-to-zarr`, `liom-create-mask`,
 `liom-segment-2d`, `liom-align-annotations`, `liom-build-template`,
-`liom-compute-slice-metrics`, `liom-train-model`) are thin wrappers over library
+`liom-compute-slice-metrics`, `liom-train-model`, `liom-predict-volume`,
+`liom-prepare-nnunet-dataset`, `liom-pretrain`) are thin wrappers over library
 functions. Write code that is safe to call from a notebook or another library,
 not just from the CLI.
 
@@ -80,7 +81,7 @@ workstations and Linux runners.
 | | Target environment |
 |---|---|
 | Python | `requires-python = ">=3.12"`; 3.12 is the primary/floor version, 3.14 is also CI-tested |
-| Heavy deps | `ants`, `torch` are **extras** — not installed by default; lazy-imported |
+| Heavy deps | `ants`, `torch`, `nnunetv2`, `monai` are **extras** — not installed by default; lazy-imported |
 | What runs | Pure-logic tests, IO round-trip tests on small synthetic volumes, lint/type checks, CLI smoke tests |
 
 **Default assumption: only core deps are installed.** Everything you write
@@ -252,7 +253,7 @@ docstring stating the behavior being asserted and the why.
 
 ## 6. Running the CLIs
 
-Seven console scripts are registered in `pyproject.toml` under
+Ten console scripts are registered in `pyproject.toml` under
 `[project.scripts]`:
 ```bash
 uv run liom-convert-hdf5-to-zarr --help
@@ -262,6 +263,9 @@ uv run liom-align-annotations --help
 uv run liom-build-template --help
 uv run liom-compute-slice-metrics --help
 uv run liom-train-model --help
+uv run liom-predict-volume --help
+uv run liom-prepare-nnunet-dataset --help
+uv run liom-pretrain --help
 ```
 Each resolves to a `main()` function in `liom_toolkit/scripts/liom_*.py`. Each
 script module defines `_build_argument_parser()` (with
@@ -301,12 +305,16 @@ liom_toolkit/                  importable package (importable as `liom_toolkit`)
     vseg/                      PyTorch U-Net vessel segmentation subpackage
       __init__.py              exports predict_one, predict_volume + torch guard (__all__)
       model.py                 VsegModel U-Net (Conv/Encoder/Decoder blocks) — torch at top
+      model_v2.py              NnUnetV2Model — eager wrapper around nnUNetPredictor
       dataset.py               OmeZarrDataset / OmeZarrLabelDataSet
       training.py              train_model loop, W&B logging, checkpointing
       prediction.py            predict_one, predict_volume, do_predict
       validation.py            validate_model, metrics CSV, diff images
-      loss.py                  DiceLoss, DiceBCELoss — torch at top
+      loss.py                  DiceLoss, DiceBCELoss, DiceFocalClDiceLoss — torch at top
       cldice.py                cl_dice topology metric
+      eval_metrics.py          ship-gate eval metrics (centerline recall, caliber bins, ...)
+      benchmark/               architecture-benchmark harness ([ai,benchmark] gated)
+      ssl/                     self-supervised pretraining (masked inpainting, warm-start)
       utils.py                 CLAHE, metrics, file sorting
   visualization/               slice/MIP extraction from OME-Zarr
     __init__.py                explicit import list + __all__
@@ -330,6 +338,9 @@ liom_toolkit/                  importable package (importable as `liom_toolkit`)
     liom_build_template.py
     liom_compute_slice_metrics.py
     liom_train_model.py
+    liom_predict_volume.py
+    liom_prepare_nnunet_dataset.py
+    liom_pretrain.py
 tests/                         pytest suite (mirrors package layout)
   conftest.py                  shared synthetic-volume fixtures
   test_<subpkg>/test_<module>.py
@@ -353,32 +364,49 @@ Dependencies are declared as **optional-dependencies** (PEP 621) for extras and
 **dependency-groups** (PEP 735) for dev/docs. Follow the existing form:
 
 - `[project.dependencies]` — core, always installed: `tqdm`,
-  `scikit-image>=0.26`, `imageio>=2.30`, `ome-zarr>=0.18.0`, `nibabel`,
-  `zarr>=3.0`, `h5py`, `pynrrd`, `pandas`, `requests`, `PyWavelets`,
-  `SimpleITK`, `dask`, `bokeh>=3.1.0`, `distributed`, `opencv-python`,
-  `natsort`, `openpyxl>=3.1`, `tifffile>=2024.0`. Everything in
-  `liom_toolkit/` must import with only these present.
+  `imageio>=2.30`, `ome-zarr>=0.18.0`, `nibabel`, `zarr>=3.0`, `h5py`,
+  `pynrrd`, `dask`, `bokeh>=3.1.0`, `distributed`, `natsort`,
+  `tifffile>=2024.0`. Everything in `liom_toolkit/` must import with only
+  these present.
 - `[dependency-groups].dev` — `pytest>=8.0`, `pytest-cov>=7.1.0`,
-  `pytest-xdist>=3.8.0`, `hypothesis`, `ruff>=0.16.4`, `ty==0.0.74`,
+  `pytest-xdist>=3.8.0`, `hypothesis`, `ruff>=0.16.5`, `ty==0.0.75`,
   `types-tqdm`, `types-opencv-python`, `scipy-stubs`, `pandas-stubs`,
   `pyarrow>=25.0.1`, `types-openpyxl`, `pyyaml>=6.0`. Installed automatically
   by `uv sync` (default group); also covered by `uv sync --all-extras`.
 - `[dependency-groups].docs` — Sphinx + theme/extensions + notebook tooling,
   all bounded ranges. Docs-build-only (RTD installs this group via
   `.readthedocs.yaml`); NOT offered as a user-facing extra.
+- `[project.optional-dependencies].io` — no-op extra (core IS the IO set);
+  declared for discoverability.
+- `[project.optional-dependencies].seg` — `scikit-image`, `simpleitk`,
+  version-split `scipy`, `opencv-python`. Classical segmentation + vseg image
+  handling.
+- `[project.optional-dependencies].stats` — `pandas`, `openpyxl`,
+  version-split `scipy`. Per-region vessel metrics.
 - `[project.optional-dependencies].ai` — `torch`, `torchvision`, `timm`,
-  `einops`, `wandb`, `scikit-learn`. Required by `vseg/`.
-- `[project.optional-dependencies].antspy` — `antspyx>=0.6.3`. Required by
-  `registration/`.
+  `einops`, `wandb`, `scikit-learn`, `nnunetv2>=2.8.1`. Required by `vseg/`,
+  including the `NnUnetV2Model` production inference path.
+- `[project.optional-dependencies].benchmark` — `monai>=1.6.0`. Benchmark
+  contenders (`vseg/benchmark/`) and SSL masking transforms (`vseg/ssl/`);
+  NOT on the production inference path.
+- `[project.optional-dependencies].gds` — `kvikio-cu13` (Linux+CUDA only).
+  GPUDirect Storage fast-path for the SSL corpus reader.
+- `[project.optional-dependencies].antspy` — `antspyx>=0.6.3`, `pandas`,
+  `requests`. Required by `registration/`.
+- `[project.optional-dependencies].dask-cluster` — `dask-jobqueue>=0.9.0`.
+  SLURM cluster-deployed Dask.
+- `[project.optional-dependencies].pipeline` — self-referential aggregate of
+  `io` + `seg` + `stats` + `ai` + `benchmark` + `antspy` + `dask-cluster`.
 - `[project.optional-dependencies].all` — convenience aggregate of
-  `ai` + `antspy`.
+  `ai` + `benchmark` + `antspy` + `seg` + `stats` + `dask-cluster` (excludes
+  `gds`).
 
-`[project.scripts]` declares the seven console scripts (see §6). The package
+`[project.scripts]` declares the ten console scripts (see §6). The package
 ships a `py.typed` marker (`[tool.setuptools.package-data]`).
 
 ## 9. Optional-dependency import pattern — follow it for new heavy deps
 
-Heavy/optional deps (`ants`, `torch`, `wandb`) are wrapped in
+Heavy/optional deps (`ants`, `torch`, `wandb`, `nnunetv2`, `monai`) are wrapped in
 `try/except ImportError: raise ImportError("Please install X to use ...")` so
 the package degrades gracefully. See `registration/__init__.py`,
 `segmentation/vseg/__init__.py`, `utils/ants.py`, and the function-scope guards
