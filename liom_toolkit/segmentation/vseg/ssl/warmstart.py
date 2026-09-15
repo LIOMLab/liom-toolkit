@@ -17,8 +17,9 @@ env vars are set before instantiating the in-process ``NNUNetTrainer``
 ``KeyError`` / ``FileNotFoundError`` downstream).
 
 This is the IN-PROCESS path: it imports from ``nnunetv2.run.run_training``
-directly, NOT the subprocess ``nnunet_bridge.py`` (which is superseded and
-slated for deletion). nnunetv2 is in the ``[ai]`` extra and is imported
+directly — the former ``nnunet_bridge.py`` subprocess wrapper was removed
+once ``nnunetv2`` became an in-process dependency. nnunetv2 is in the
+``[ai]`` extra and is imported
 function-scope so this module loads with only torch installed. Validation
 uses ``if ...: raise ValueError(...)`` / ``RuntimeError(...)`` with the
 offending value in the message (AGENTS section 2 -- never ``assert`` for
@@ -165,10 +166,10 @@ def warm_start(
     Instantiates the in-process ``NNUNetTrainer`` (no subprocess), loads the
     pretrained weights via ``maybe_load_checkpoint(pretrained_weights_file=...)``
     (which calls ``load_pretrained_weights`` BEFORE ``run_training``), then
-    runs training + validation. This is the in-process warm-start path
-    (RESEARCH Pattern 2) -- it imports from
-    ``nnunetv2.run.run_training`` directly, NOT the subprocess
-    ``nnunet_bridge``.
+    runs training + validation. This is the in-process warm-start path —
+    it imports from ``nnunetv2.run.run_training`` directly; the former
+    ``nnunet_bridge.py`` subprocess wrapper was removed once ``nnunetv2``
+    became an in-process dependency.
 
     Pretrained weights can only be used at the BEGINNING of training;
     ``maybe_load_checkpoint`` raises ``RuntimeError`` if both
