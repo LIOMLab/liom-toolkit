@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
-from collections.abc import Callable
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -105,43 +106,84 @@ def test_star_import_matches_all(dotted: str, name: str) -> None:
 # CLI entry-point resolution guard (CLOSE-02)
 # ---------------------------------------------------------------------------
 
-# The 7 console scripts registered in pyproject.toml [project.scripts]. The
-# entry_points test guards the CLI contract (every registered name resolves to
-# an importable callable) WITHOUT growing the curated library __all__ surface
-# -- compute_slice_metrics and train_model are deliberately NOT re-exported by
-# any subpackage __init__ (D-02 locked decision: the entry_points test and the
+# The expected console-script roster is DERIVED from pyproject.toml
+# [project.scripts] (config-as-data, AGENTS section 5) so the test can never
+# lag the registry: adding a script to pyproject without a working main fails
+# here, and removing one drops the expectation automatically. The
+# entry_points guard protects the CLI contract WITHOUT growing the curated
+# library __all__ surface -- the script targets are deliberately NOT
+# re-exported by any subpackage __init__ (the entry_points guard and the
 # __all__ guard are decoupled by design).
-EXPECTED_SCRIPTS: set[str] = {
-    "liom-align-annotations",
-    "liom-build-template",
-    "liom-compute-slice-metrics",
-    "liom-convert-hdf5-to-zarr",
-    "liom-create-mask",
-    "liom-segment-2d",
-    "liom-train-model",
-}
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_all_console_scripts_resolve_to_callables() -> None:
-    """Every registered liom console script resolves to an importable callable.
+def _registered_liom_scripts() -> dict[str, str]:
+    """Return the ``liom-*`` console scripts registered in pyproject.toml.
+
+    Parses ``[project.scripts]`` via tomllib -- the pyproject table is the
+    authoritative roster, so the expected set can never drift from the
+    registered set.
+    """
+    scripts = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "scripts"
+    ]
+    return {name: value for name, value in scripts.items() if name.startswith("liom-")}
+
+
+def test_installed_console_scripts_match_pyproject_roster() -> None:
+    """Installed console_scripts match the pyproject ``liom-*`` roster exactly.
 
     Reads installed-package metadata via ``importlib.metadata.entry_points``
-    (the editable install exposes the [project.scripts] entries), filters to
-    the 7 EXPECTED_SCRIPTS, asserts the set matches exactly (no curation
-    drift -- a missing or extra entry point is a CLI contract violation), and
-    asserts each ``ep.load()`` returns a callable. Runs on core-only CI: the
-    metadata is read from the installed package, not from the optional deps.
+    and asserts the ``liom-*`` set equals the parsed ``[project.scripts]``
+    set -- a missing entry point means the editable install was not
+    refreshed after a pyproject edit, and an extra one means the registry
+    drifted from the declared table.
     """
+    expected = _registered_liom_scripts()
     eps = importlib.metadata.entry_points(group="console_scripts")
-    liom_eps = {ep for ep in eps if ep.name in EXPECTED_SCRIPTS}
-    found = {ep.name for ep in liom_eps}
-    assert found == EXPECTED_SCRIPTS, (
-        f"console_scripts curation drift: expected {sorted(EXPECTED_SCRIPTS)} "
-        f"but found {sorted(found)} -- symmetric difference: "
-        f"{sorted(EXPECTED_SCRIPTS ^ found)}"
+    found = {ep.name for ep in eps if ep.name.startswith("liom-")}
+    assert found == set(expected), (
+        f"console_scripts registry drift: pyproject declares "
+        f"{sorted(expected)} but the installed package exposes "
+        f"{sorted(found)} -- symmetric difference: "
+        f"{sorted(set(expected) ^ found)} (re-run `uv sync` after editing "
+        "[project.scripts])"
     )
-    for ep in liom_eps:
-        func: Callable = ep.load()
-        assert callable(func), (
-            f"{ep.name} -> {ep.value} is not callable (ep.load() returned {type(func).__name__})"
+
+
+def test_every_registered_script_resolves_to_callable_main() -> None:
+    """Every pyproject ``liom-*`` script's ``module:attr`` resolves to a callable main.
+
+    The convention (AGENTS section 6) is ``liom-<name> =
+    "liom_toolkit.scripts.<module>:main"`` -- a script registered in
+    pyproject without a working ``main`` fails here. Module imports stay
+    core-safe by convention: each script lazy-imports heavy deps inside
+    ``main()``, so resolving ``main`` never pulls torch/ants.
+    """
+    for name, target in _registered_liom_scripts().items():
+        module_name, sep, attr = target.partition(":")
+        assert sep and attr == "main", (
+            f"{name} = {target!r} does not follow the '<module>:main' entry-point convention"
         )
+        module = importlib.import_module(module_name)
+        func = getattr(module, attr, None)
+        assert callable(func), (
+            f"{name} -> {target} is not callable (resolved to {type(func).__name__})"
+        )
+
+
+def test_every_registered_script_is_documented_in_cli_rst() -> None:
+    """Each registered ``liom-*`` script name appears literally in docs/source/cli.rst.
+
+    The CLI reference must cover the full registered roster -- a script
+    added to pyproject without a cli.rst section fails here, so the docs
+    can never lag the registry.
+    """
+    rst_text = (_REPO_ROOT / "docs" / "source" / "cli.rst").read_text(encoding="utf-8")
+    missing = sorted(name for name in _registered_liom_scripts() if name not in rst_text)
+    assert not missing, (
+        f"cli.rst does not document registered scripts: {missing} -- add a "
+        "section per script (the registry, the surface test, and the user "
+        "docs all derive from pyproject.toml [project.scripts])"
+    )
