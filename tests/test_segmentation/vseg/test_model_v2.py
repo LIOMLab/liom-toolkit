@@ -242,6 +242,30 @@ def test_init_excludes_fold_all_unless_requested(fake_nnunet_predictor, tmp_path
     assert fake_nnunet_predictor.calls["init_calls"][-1]["use_folds"] == ("all",)
 
 
+@pytest.mark.ai
+def test_init_rejects_out_of_range_tile_step_size(
+    fake_nnunet_predictor, stub_nnunet_model_dir
+) -> None:
+    """tile_step_size outside (0, 1] raises ValueError naming the value.
+
+    nnU-Net's sliding-window math steps by ``tile_step_size * tile``: a
+    step > 1 leaves un-predicted gaps that Gaussian blending fills with
+    near-zero-weight garbage (plausible-shaped-but-wrong), and a step <= 0
+    crashes on division upstream. The bound is validated at construction,
+    before the predictor is built.
+    """
+    pytest.importorskip("torch")
+    from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
+
+    for bad in (0.0, -0.5, 1.5, 2.0):
+        with pytest.raises(ValueError, match="tile_step_size"):
+            NnUnetV2Model(stub_nnunet_model_dir, tile_step_size=bad)
+
+    # Boundary value 1.0 is valid (non-overlapping adjacent tiles).
+    NnUnetV2Model(stub_nnunet_model_dir, tile_step_size=1.0)
+    assert fake_nnunet_predictor.calls["ctor_kwargs"][-1]["tile_step_size"] == 1.0
+
+
 # ---------------------------------------------------------------------------
 # predict_proba input validation
 # ---------------------------------------------------------------------------

@@ -174,8 +174,11 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(f"--z-chunk-size must be a positive int, got {args.z_chunk_size}")
     if args.folds is not None and any(f < 0 for f in args.folds):
         parser.error(f"--folds must be non-negative ints, got {args.folds}")
-    if args.tile_step_size <= 0:
-        parser.error(f"--tile-step-size must be a positive float, got {args.tile_step_size}")
+    if not 0 < args.tile_step_size <= 1:
+        parser.error(
+            f"--tile-step-size must be in the interval (0, 1], got "
+            f"{args.tile_step_size} -- a step > 1 leaves un-predicted image regions"
+        )
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),

@@ -81,7 +81,12 @@ class NnUnetV2Model:
         Checkpoint filename inside each fold directory. Defaults to
         ``"checkpoint_final.pth"``.
     tile_step_size : float, optional
-        Sliding-window tile overlap fraction. Defaults to 0.5.
+        Sliding-window tile step as a fraction of the patch size. Must be
+        in the interval ``(0, 1]`` -- nnU-Net's
+        ``compute_steps_for_sliding_window`` steps by
+        ``tile_step_size * tile``, so a value ``> 1`` leaves un-predicted
+        gaps the Gaussian blending fills with near-zero-weight garbage,
+        and ``<= 0`` crashes on division upstream. Defaults to 0.5.
     use_gaussian : bool, optional
         Weighted Gaussian blending across overlapping tiles. Defaults to
         True.
@@ -106,8 +111,9 @@ class NnUnetV2Model:
     ------
     ValueError
         If ``model_dir`` is not a directory, or lacks ``dataset.json``,
-        ``plans.json``, or a usable ``fold_*/<checkpoint_name>``. The message
-        names the offending path component.
+        ``plans.json``, or a usable ``fold_*/<checkpoint_name>``, or if
+        ``tile_step_size`` is outside ``(0, 1]``. The message names the
+        offending path component or value.
     """
 
     def __init__(
@@ -123,6 +129,15 @@ class NnUnetV2Model:
         allow_tqdm: bool = False,
         verbose: bool = False,
     ) -> None:
+        # nnUNetPredictor stores tile_step_size verbatim with no bounds
+        # check; the wrapper validates the (0, 1] contract up front -- a
+        # step > 1 leaves uncovered image regions that the Gaussian
+        # blending renders as plausible-but-wrong output.
+        if not 0 < tile_step_size <= 1:
+            raise ValueError(
+                f"tile_step_size must be in the interval (0, 1]; got {tile_step_size}"
+            )
+
         model_dir = Path(model_dir)
         self._validate_model_dir(model_dir, use_folds, checkpoint_name)
 
