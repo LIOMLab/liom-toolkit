@@ -137,9 +137,7 @@ class NnUnetV2Model:
         # step > 1 leaves uncovered image regions that the Gaussian
         # blending renders as plausible-but-wrong output.
         if not 0 < tile_step_size <= 1:
-            raise ValueError(
-                f"tile_step_size must be in the interval (0, 1]; got {tile_step_size}"
-            )
+            raise ValueError(f"tile_step_size must be in the interval (0, 1]; got {tile_step_size}")
 
         model_dir = Path(model_dir)
         self._validate_model_dir(model_dir, use_folds, checkpoint_name)
