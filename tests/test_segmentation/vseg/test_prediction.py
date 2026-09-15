@@ -191,7 +191,6 @@ def test_predict_one_nnunet_calls_predictor_once_with_raw_input(
         model=nnunet_model,
         img_path=str(img_path),
         save_path=str(save_path),
-        dev="cpu",
         spacing=(6.5, 6.5),
     )
 
@@ -210,29 +209,41 @@ def test_predict_one_nnunet_calls_predictor_once_with_raw_input(
     assert set(np.unique(result)).issubset({0, 255})
 
 
-def test_predict_one_nnunet_ignores_legacy_norm_and_dev(
+def test_predict_one_nnunet_rejects_nondefault_legacy_kwargs(
     tmp_path, predict_one, nnunet_model, fake_nnunet_predictor
 ):
-    """The nnU-Net path ignores norm/norm_param/dev (legacy-only parameters).
+    """The nnU-Net path raises on non-default legacy-only kwargs (no silent ignore).
 
-    ``norm_param={"a": 1}`` is a dict the legacy path would fail to index as
-    ``norm_param[0]`` — surviving it proves the parameter was never touched.
-    ``dev="cuda"`` on a CUDA-less host would raise inside the legacy
-    ``.to(device)`` path — surviving it proves ``dev`` was never used. The
-    byte-equality assertion on the predictor input proves no CLAHE/min-max
-    ran regardless of the ``norm`` flag.
+    The kwarg policy is symmetric: ``spacing`` on a legacy model raises, so
+    non-default ``dev``/``norm``/``norm_param`` on an nnU-Net model raise
+    too -- a caller passing ``norm=False`` intending "no CLAHE" must learn
+    the flag did not apply rather than silently get nnU-Net's own
+    normalization. Default values still pass (the parameters exist for
+    signature compatibility).
     """
     img_path = tmp_path / "nnunet_raw.png"
     raw = _write_synthetic_image(str(img_path), shape=(16, 16))
     save_path = tmp_path / "out_nnunet_raw"
 
+    for kwargs in (
+        {"dev": "cpu"},
+        {"norm": False},
+        {"norm_param": (5, 0.1)},
+    ):
+        with pytest.raises(ValueError, match="legacy-only"):
+            predict_one(
+                model=nnunet_model,
+                img_path=str(img_path),
+                save_path=str(save_path),
+                spacing=(6.5, 6.5),
+                **kwargs,
+            )
+
+    # Defaults pass and the predictor sees the raw image unchanged.
     predict_one(
         model=nnunet_model,
         img_path=str(img_path),
         save_path=str(save_path),
-        dev="cuda",
-        norm_param={"a": 1},
-        norm=False,
         spacing=(6.5, 6.5),
     )
 
@@ -258,7 +269,6 @@ def test_predict_one_nnunet_requires_spacing(
             model=nnunet_model,
             img_path=str(img_path),
             save_path=str(tmp_path / "out_nnunet_nospacing"),
-            dev="cpu",
         )
 
     assert fake_nnunet_predictor.calls["predict_calls"] == []
@@ -282,7 +292,6 @@ def test_predict_one_nnunet_all_zero_raises_before_model(
             model=nnunet_model,
             img_path=str(img_path),
             save_path=str(tmp_path / "out_nnunet_zeros"),
-            dev="cpu",
             spacing=(6.5, 6.5),
         )
 
@@ -306,7 +315,6 @@ def test_predict_one_nnunet_patching_raises_not_implemented(
             model=nnunet_model,
             img_path=str(img_path),
             save_path=str(tmp_path / "out_nnunet_patch"),
-            dev="cpu",
             patching=True,
             spacing=(6.5, 6.5),
         )
@@ -554,14 +562,10 @@ def test_predict_volume_nnunet_z_chunking_requires_2d_config(
     from liom_toolkit.segmentation.vseg.prediction import predict_volume
 
     # Simulate a 3d config on the fake predictor.
-    nnunet_model.predictor.configuration_manager = SimpleNamespace(
-        patch_size=(16, 16, 16)
-    )
+    nnunet_model.predictor.configuration_manager = SimpleNamespace(patch_size=(16, 16, 16))
 
     with pytest.raises(ValueError, match="2d"):
-        predict_volume(
-            nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), z_chunk_size=2
-        )
+        predict_volume(nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), z_chunk_size=2)
 
     assert fake_nnunet_predictor.calls["predict_calls"] == []
 
@@ -620,9 +624,7 @@ def test_predict_volume_nnunet_all_zero_volume_raises(
     assert fake_nnunet_predictor.calls["predict_calls"] == []
 
 
-def test_predict_volume_nnunet_skips_all_zero_slabs(
-    tmp_path, nnunet_model, fake_nnunet_predictor
-):
+def test_predict_volume_nnunet_skips_all_zero_slabs(tmp_path, nnunet_model, fake_nnunet_predictor):
     """All-zero Z-slabs in a non-zero volume are written as zeros without a model call.
 
     A chunked volume can contain all-zero slabs (empty z-regions) that would

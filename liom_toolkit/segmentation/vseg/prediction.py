@@ -60,20 +60,22 @@ def predict_one(
     save_path : str
         The path to save the results.
     dev : str
-        The device to use for prediction. Legacy-path only -- ignored on the
-        nnU-Net path (the device was bound at ``NnUnetV2Model``
-        construction).
+        The device to use for prediction. Legacy-path only -- a non-default
+        value raises ValueError on the nnU-Net path (the device was bound
+        at ``NnUnetV2Model`` construction).
     norm_param : tuple[float, float]
         The parameters for the normalization: ``(kernel_size, clip_limit)``.
-        Legacy-path only -- ignored on the nnU-Net path.
+        Legacy-path only -- a non-default value raises ValueError on the
+        nnU-Net path.
     norm : bool
         When True (default), apply CLAHE via cv2.createCLAHE before
         inference -- this preserves the shipped always-CLAHE behavior. When
         False, skip CLAHE and use only the min-max-scaled uint8 image. The
         default of True means callers that omit ``norm`` see no behavior
-        change. Legacy-path only -- ignored on the nnU-Net path (nnU-Net
-        owns normalization per its plans, so the raw image is fed to the
-        model).
+        change. Legacy-path only -- a non-default value raises ValueError
+        on the nnU-Net path (nnU-Net owns normalization per its plans, so
+        the raw image is fed to the model and the flag would silently do
+        nothing).
     patching : bool
         When False (default), run the existing single full-image pass (the
         only implemented path: stride equals the image height, one patch
@@ -105,8 +107,10 @@ def predict_one(
         If ``patching=True`` (2D tiled inference is not implemented).
     ValueError
         If the input image is all-zero (cannot normalise), if ``spacing``
-        is None on the nnU-Net path, or if ``spacing`` is passed with a
-        legacy model.
+        is None on the nnU-Net path, if ``spacing`` is passed with a
+        legacy model, or if a non-default ``dev``/``norm``/``norm_param``
+        is passed on the nnU-Net path (legacy-only parameters are never
+        silently ignored in either direction).
     """
     try:
         import torch
@@ -135,6 +139,29 @@ def predict_one(
                 "-- a PNG carries no spacing metadata and silently defaulting "
                 "to isotropic spacing would mis-resample the prediction. Pass "
                 "spacing explicitly."
+            )
+        # Symmetric kwarg policy: the legacy path raises on the nnU-Net-only
+        # ``spacing`` kwarg, so the nnU-Net path raises on non-default
+        # legacy-only kwargs instead of silently ignoring them -- a caller
+        # passing norm=False intending "no CLAHE" must learn the flag did
+        # not apply rather than get nnU-Net's own normalization silently.
+        legacy_only: list[str] = []
+        if dev != "cuda":
+            legacy_only.append("dev")
+        if norm is not True:
+            legacy_only.append("norm")
+        try:
+            norm_param_is_default = tuple(norm_param) == (10, 0.05)
+        except TypeError:
+            norm_param_is_default = False
+        if not norm_param_is_default:
+            legacy_only.append("norm_param")
+        if legacy_only:
+            raise ValueError(
+                f"predict_one: {', '.join(legacy_only)} are legacy-only "
+                "parameters -- they have no effect on an NnUnetV2Model "
+                "(the device was bound at construction; nnU-Net owns "
+                "normalization per its plans). Drop them for nnU-Net models."
             )
         # The all-zero guard fires on the RAW image before nnU-Net sees it:
         # crop_to_nonzero's full-bbox fallback would otherwise let an
