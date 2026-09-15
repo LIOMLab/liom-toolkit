@@ -548,7 +548,10 @@ def _predict_volume_nnunet(
         Explicit ``(sz, sy, sx)`` spacing; None reads NGFF metadata.
     z_chunk_size : int | None
         Z-slab depth for bounded-memory inference; None predicts the whole
-        volume in one call.
+        volume in one call. Only valid for a ``'2d'`` nnU-Net
+        configuration -- 2D slices are independent, so slab boundaries are
+        invisible; a 3d config would lose z-context at every boundary and
+        produce seam artifacts.
 
     Raises
     ------
@@ -561,7 +564,8 @@ def _predict_volume_nnunet(
         all-zero (cannot normalize -- nnU-Net would NaN on std=0 and emit a
         plausible all-background mask), if ``spacing`` is malformed or the
         NGFF metadata has no usable z/y/x scale, or if ``z_chunk_size`` is
-        not a positive integer.
+        not a positive integer or is combined with a non-``'2d'`` model
+        configuration (3d configs lose z-context at slab boundaries).
     """
     data = dataset.data
     if data.ndim != 3 or any(d == 0 for d in data.shape):
@@ -586,10 +590,25 @@ def _predict_volume_nnunet(
     # values explicitly: range(0, Z, 0) raises anyway but range(0, Z, -1)
     # would silently iterate nothing and leave an all-zero output store --
     # the plausible-shaped-but-wrong failure mode.
-    if z_chunk_size is not None and z_chunk_size < 1:
-        raise ValueError(
-            f"predict_volume: z_chunk_size must be a positive integer; got {z_chunk_size}."
-        )
+    if z_chunk_size is not None:
+        if z_chunk_size < 1:
+            raise ValueError(
+                f"predict_volume: z_chunk_size must be a positive integer; got {z_chunk_size}."
+            )
+        # Z-slab chunking is only correct for a '2d' configuration: 2D
+        # slices are independent, so slab boundaries are invisible. A 3d
+        # config loses z-context at every boundary and produces seam
+        # artifacts that look plausible. patch_size rank is the same
+        # discriminator nnU-Net's own sliding-window slicer uses (2 entries
+        # -> 2d config, 3 -> 3d).
+        patch_ndim = len(model.predictor.configuration_manager.patch_size)
+        if patch_ndim != 2:
+            raise ValueError(
+                "predict_volume: z_chunk_size requires a '2d' nnU-Net "
+                "configuration (slab-independent 2D predictions); the "
+                f"loaded model's patch_size has {patch_ndim} entries. Run "
+                "the whole-volume path (z_chunk_size=None) for 3d configs."
+            )
 
     # Refuse to overwrite an existing store BEFORE the expensive inference:
     # a pre-existing zarr_location almost certainly holds data the caller

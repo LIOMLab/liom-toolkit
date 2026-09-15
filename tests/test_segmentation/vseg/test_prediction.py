@@ -536,6 +536,36 @@ def test_predict_volume_nnunet_z_chunking_matches_whole(
     np.testing.assert_array_equal(chunked, whole)
 
 
+def test_predict_volume_nnunet_z_chunking_requires_2d_config(
+    tmp_path, nnunet_model, fake_nnunet_predictor, tiny_dataset
+):
+    """z_chunk_size combined with a 3d-configuration model raises ValueError.
+
+    Z-slab chunking is only correct for a ``'2d'`` configuration: 2D slices
+    are independent so slab boundaries are invisible. A 3d config loses
+    z-context at every boundary and produces seam artifacts that look
+    plausible -- the wrapper rejects the combination before inference. The
+    check keys on patch_size rank (2 entries -> 2d, 3 -> 3d), the same
+    discriminator nnU-Net's own sliding-window slicer uses.
+    """
+    pytest.importorskip("torch")
+    from types import SimpleNamespace
+
+    from liom_toolkit.segmentation.vseg.prediction import predict_volume
+
+    # Simulate a 3d config on the fake predictor.
+    nnunet_model.predictor.configuration_manager = SimpleNamespace(
+        patch_size=(16, 16, 16)
+    )
+
+    with pytest.raises(ValueError, match="2d"):
+        predict_volume(
+            nnunet_model, tiny_dataset, str(tmp_path / "out.zarr"), z_chunk_size=2
+        )
+
+    assert fake_nnunet_predictor.calls["predict_calls"] == []
+
+
 def test_predict_volume_legacy_rejects_nnunet_kwargs(tmp_path):
     """spacing/z_chunk_size on a legacy (non-NnUnetV2) model raise ValueError.
 

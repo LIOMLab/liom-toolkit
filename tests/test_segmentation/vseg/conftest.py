@@ -84,6 +84,11 @@ def fake_nnunet_predictor() -> Any:
                     "checkpoint_name": checkpoint_name,
                 }
             )
+            # The real predictor sets configuration_manager during
+            # initialize; the stub model dirs these tests write are always
+            # '2d' configs, mirrored by a 2-entry patch_size -- the same
+            # rank discriminator nnU-Net's sliding-window slicer uses.
+            self.configuration_manager = SimpleNamespace(patch_size=(32, 32))
 
         def predict_single_npy_array(
             self,
