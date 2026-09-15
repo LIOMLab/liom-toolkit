@@ -40,9 +40,7 @@ import pytest
 
 
 @pytest.mark.ai
-def test_init_initializes_predictor_eagerly(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_init_initializes_predictor_eagerly(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """Construction validates model_dir, then builds + initializes the predictor eagerly.
 
     The wrapper owns the predictor as a unit: ``__init__`` must call
@@ -93,9 +91,7 @@ def test_init_device_none_resolves_to_available_device(
 
 
 @pytest.mark.ai
-def test_init_honors_explicit_device(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_init_honors_explicit_device(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """An explicit device (str or torch.device) is honored verbatim.
 
     The caller owns device selection; the wrapper must forward it unchanged
@@ -122,9 +118,7 @@ def test_init_honors_explicit_device(
 
 
 @pytest.mark.ai
-def test_init_rejects_nonexistent_and_non_dir_model_dir(
-    fake_nnunet_predictor, tmp_path
-) -> None:
+def test_init_rejects_nonexistent_and_non_dir_model_dir(fake_nnunet_predictor, tmp_path) -> None:
     """A model_dir that does not exist or is a file raises ValueError naming the path.
 
     The check fires BEFORE nnU-Net is constructed -- nnU-Net would otherwise
@@ -149,9 +143,7 @@ def test_init_rejects_nonexistent_and_non_dir_model_dir(
 
 
 @pytest.mark.ai
-def test_init_rejects_missing_dataset_json(
-    fake_nnunet_predictor, tmp_path
-) -> None:
+def test_init_rejects_missing_dataset_json(fake_nnunet_predictor, tmp_path) -> None:
     """A model_dir without dataset.json raises ValueError naming dataset.json.
 
     ``initialize_from_trained_model_folder`` reads ``dataset.json`` for the
@@ -165,15 +157,13 @@ def test_init_rejects_missing_dataset_json(
     (model_dir / "fold_0").mkdir(parents=True)
     (model_dir / "plans.json").write_text("{}")
     (model_dir / "fold_0" / "checkpoint_final.pth").write_bytes(b"x")
-    with pytest.raises(ValueError, match="dataset.json"):
+    with pytest.raises(ValueError, match=r"dataset\.json"):
         NnUnetV2Model(model_dir)
     assert fake_nnunet_predictor.calls["init_calls"] == []
 
 
 @pytest.mark.ai
-def test_init_rejects_missing_plans_json(
-    fake_nnunet_predictor, tmp_path
-) -> None:
+def test_init_rejects_missing_plans_json(fake_nnunet_predictor, tmp_path) -> None:
     """A model_dir without plans.json raises ValueError naming plans.json."""
     pytest.importorskip("torch")
     from liom_toolkit.segmentation.vseg.model_v2 import NnUnetV2Model
@@ -182,15 +172,13 @@ def test_init_rejects_missing_plans_json(
     (model_dir / "fold_0").mkdir(parents=True)
     (model_dir / "dataset.json").write_text("{}")
     (model_dir / "fold_0" / "checkpoint_final.pth").write_bytes(b"x")
-    with pytest.raises(ValueError, match="plans.json"):
+    with pytest.raises(ValueError, match=r"plans\.json"):
         NnUnetV2Model(model_dir)
     assert fake_nnunet_predictor.calls["init_calls"] == []
 
 
 @pytest.mark.ai
-def test_init_rejects_missing_fold_checkpoint(
-    fake_nnunet_predictor, tmp_path
-) -> None:
+def test_init_rejects_missing_fold_checkpoint(fake_nnunet_predictor, tmp_path) -> None:
     """No fold_*/checkpoint_final.pth raises ValueError naming the checkpoint.
 
     Covers both subcases: no ``fold_*`` subdirectory at all, and a ``fold_0``
@@ -207,15 +195,13 @@ def test_init_rejects_missing_fold_checkpoint(
         (model_dir / "plans.json").write_text("{}")
         if sub == "empty_fold":
             (model_dir / "fold_0").mkdir()
-        with pytest.raises(ValueError, match="checkpoint_final.pth"):
+        with pytest.raises(ValueError, match=r"checkpoint_final\.pth"):
             NnUnetV2Model(model_dir)
     assert fake_nnunet_predictor.calls["init_calls"] == []
 
 
 @pytest.mark.ai
-def test_init_validates_explicit_use_folds(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_init_validates_explicit_use_folds(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """An explicit use_folds validates exactly those fold dirs.
 
     ``use_folds=(1,)`` on a dir that only contains ``fold_0`` raises
@@ -233,9 +219,7 @@ def test_init_validates_explicit_use_folds(
 
 
 @pytest.mark.ai
-def test_init_excludes_fold_all_unless_requested(
-    fake_nnunet_predictor, tmp_path
-) -> None:
+def test_init_excludes_fold_all_unless_requested(fake_nnunet_predictor, tmp_path) -> None:
     """fold_all is NOT an auto-detected fold -- a fold_all-only dir raises ValueError.
 
     Mirrors nnU-Net's ``auto_detect_available_folds``, which filters
@@ -251,7 +235,7 @@ def test_init_excludes_fold_all_unless_requested(
     (model_dir / "plans.json").write_text("{}")
     (model_dir / "fold_all" / "checkpoint_final.pth").write_bytes(b"x")
 
-    with pytest.raises(ValueError, match="checkpoint_final.pth"):
+    with pytest.raises(ValueError, match=r"checkpoint_final\.pth"):
         NnUnetV2Model(model_dir)
 
     NnUnetV2Model(model_dir, use_folds=("all",))
@@ -289,9 +273,7 @@ def test_predict_proba_rejects_non_ndarray_and_bad_ndim(
 
 
 @pytest.mark.ai
-def test_predict_proba_rejects_empty_dims(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_predict_proba_rejects_empty_dims(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """A zero channel count or a zero spatial dim raises ValueError naming the dim.
 
     A zero-sized axis would produce a zero-sized mask that LOOKS plausible
@@ -312,9 +294,7 @@ def test_predict_proba_rejects_empty_dims(
 
 
 @pytest.mark.ai
-def test_predict_proba_rejects_bad_spacing(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_predict_proba_rejects_bad_spacing(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """Wrong spacing length, non-positive, or non-finite spacing raises ValueError.
 
     Spacing drives nnU-Net's resampling; a silently-defaulted or mis-ordered
@@ -406,9 +386,7 @@ def test_predict_returns_uint8_mask_with_expected_values(
 
 
 @pytest.mark.ai
-def test_predict_threshold_boundary_is_strict(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_predict_threshold_boundary_is_strict(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """The threshold is strict ``> 0.5``: a probability of exactly 0.5 maps to 0.
 
     A ``>=`` boundary would classify a maximally-uncertain voxel as vessel;
@@ -426,7 +404,9 @@ def test_predict_threshold_boundary_is_strict(
     mask = model.predict(np.zeros((1, 2, 4, 4), np.float32), (6.5, 6.5, 6.5))
     assert int(mask.sum()) == 0
 
-    probs[1, 0, 0, 0] = np.nextafter(0.5, 1.0)
+    # float32-aware nextafter: a float64 nextafter would round back to 0.5
+    # when stored into the float32 array.
+    probs[1, 0, 0, 0] = np.nextafter(np.float32(0.5), np.float32(1.0), dtype=np.float32)
     probs[0, 0, 0, 0] = 1.0 - probs[1, 0, 0, 0]
     mask = model.predict(np.zeros((1, 2, 4, 4), np.float32), (6.5, 6.5, 6.5))
     assert mask[0, 0, 0] == 255
@@ -453,9 +433,7 @@ def test_predict_rejects_single_channel_probabilities(
 
 
 @pytest.mark.ai
-def test_predict_accepts_all_zero_input(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_predict_accepts_all_zero_input(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """An all-zero input array does NOT raise from the wrapper.
 
     nnU-Net's ``crop_to_nonzero`` returns the full bounding box on an
@@ -480,9 +458,7 @@ def test_predict_accepts_all_zero_input(
 
 
 @pytest.mark.ai
-def test_model_is_not_a_torch_nn_module(
-    fake_nnunet_predictor, stub_nnunet_model_dir
-) -> None:
+def test_model_is_not_a_torch_nn_module(fake_nnunet_predictor, stub_nnunet_model_dir) -> None:
     """NnUnetV2Model does NOT subclass torch.nn.Module.
 
     The nnU-Net predictor owns the full inference pipeline (preprocessing,
@@ -515,11 +491,7 @@ def test_model_v2_has_no_assert_or_preprocessing_imports() -> None:
         "model_v2.py must not use `assert` for validation (stripped under "
         "python -O); use `if ...: raise ValueError` instead"
     )
-    import_lines = [
-        line
-        for line in src.splitlines()
-        if re.match(r"^\s*(import |from )", line)
-    ]
+    import_lines = [line for line in src.splitlines() if re.match(r"^\s*(import |from )", line)]
     assert not any("cv2" in line or "skimage" in line for line in import_lines), (
         "model_v2.py must not import cv2/skimage -- nnU-Net owns preprocessing"
     )
@@ -623,16 +595,10 @@ def test_real_nnunet_predictor_roundtrip_cpu(tmp_path, monkeypatch) -> None:
             "ExperimentPlanner produced no 2d configuration; got "
             f"{sorted(plans_dict['configurations'])}"
         )
-    dataset_json = json.loads(
-        (raw_dir / dataset_dirname / "dataset.json").read_text()
-    )
-    net = build_pretrain_network(
-        plans_dict, dataset_json, configuration="2d", device="cpu"
-    )
+    dataset_json = json.loads((raw_dir / dataset_dirname / "dataset.json").read_text())
+    net = build_pretrain_network(plans_dict, dataset_json, configuration="2d", device="cpu")
 
-    model_dir = (
-        results_dir / dataset_dirname / f"nnUNetTrainer__{plans_identifier}__2d"
-    )
+    model_dir = results_dir / dataset_dirname / f"nnUNetTrainer__{plans_identifier}__2d"
     (model_dir / "fold_0").mkdir(parents=True)
     (model_dir / "dataset.json").write_text(json.dumps(dataset_json))
     (model_dir / "plans.json").write_text(json.dumps(plans_dict))

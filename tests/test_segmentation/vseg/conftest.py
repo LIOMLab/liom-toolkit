@@ -123,9 +123,7 @@ def fake_nnunet_predictor() -> Any:
     sys.modules["nnunetv2.inference"] = inference_pkg
     sys.modules[leaf_name] = leaf
     try:
-        yield SimpleNamespace(
-            predictor_cls=FakePredictor, calls=calls, state=state
-        )
+        yield SimpleNamespace(predictor_cls=FakePredictor, calls=calls, state=state)
     finally:
         for name, original in saved.items():
             if original is None:
