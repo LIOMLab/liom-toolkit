@@ -79,9 +79,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: pypi   # gates the job behind an environment (protection rules can be added later; required for future trusted-publishing switch)
+    environment: pypi   # the registered PyPI trusted publisher matches on this environment name
     permissions:
-      contents: read   # PyPI upload uses the token secret, not the GITHUB_TOKEN
+      contents: read   # least-privilege for checkout; PyPI auth is via OIDC, not the GITHUB_TOKEN
+      id-token: write  # mint the GitHub OIDC identity token for PyPI trusted publishing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,12 +95,11 @@ jobs:
           # events, which avoids cache poisoning on release builds.
       - run: uv sync
       - run: uv build
+      # OIDC trusted publishing: with no `password` input the action mints a
+      # short-lived PyPI token from the GitHub OIDC identity token — no stored
+      # secret. Requires `id-token: write` above plus the `pypi` environment
+      # matching the trusted publisher registered on PyPI.
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}
-          # TODO(follow-up): switch to PyPI trusted publishing (OIDC) once a trusted
-          # publisher is configured on PyPI. That removes the PYPI_TOKEN secret and
-          # requires permissions: id-token: write + environment: pypi on this job.
 
   github-release:
     needs: publish   # gate: do not create a GitHub Release if PyPI upload failed
