@@ -203,7 +203,8 @@ class TestReleaseWorkflow:
     The publish job moved OUT of ci.yml into a dedicated release.yml that
     fires on ``git tag v*`` push. This class guards the workflow CONFIG as
     data: the trigger, the publish job (PyPI upload via the pinned PyPA
-    action with the existing PYPI_TOKEN), the mandatory full-history
+    action using OIDC trusted publishing — a short-lived token minted from
+    the GitHub OIDC identity, no stored secret), the mandatory full-history
     checkout (setuptools-scm needs git tags to derive the version), and the
     separate GitHub Release job gated on publish success so a failed PyPI
     upload cannot create an orphan GitHub Release.
@@ -265,6 +266,49 @@ class TestReleaseWorkflow:
         uses = [str(s.get("uses", "")) for s in steps if isinstance(s, dict)]
         assert any("pypa/gh-action-pypi-publish" in u for u in uses), (
             f"release.yml publish job must use pypa/gh-action-pypi-publish; got uses={uses!r}"
+        )
+
+    def test_release_workflow_publish_uses_oidc(self) -> None:
+        """The publish job must carry the OIDC trusted-publishing
+        contract: ``permissions.id-token: write``, ``environment: pypi``,
+        and a ``pypa/gh-action-pypi-publish`` step with NO ``password``
+        input.
+
+        With no ``password`` input the action mints a short-lived PyPI
+        token from the GitHub OIDC identity token — there is no stored
+        secret. Re-adding a ``password`` or dropping ``id-token: write`` /
+        ``environment: pypi`` silently breaks the OIDC exchange at release
+        time (the publish job goes red on the tag push).
+        """
+        pytest.importorskip("yaml")
+        parsed = _load_release_workflow()
+        publish = parsed.get("jobs", {}).get("publish", {})
+        permissions = publish.get("permissions", {})
+        assert permissions.get("id-token") == "write", (
+            "release.yml publish job must grant permissions.id-token: write "
+            f"to mint the OIDC token; got permissions={permissions!r}"
+        )
+        assert publish.get("environment") == "pypi", (
+            "release.yml publish job must run in the 'pypi' environment "
+            "(the registered PyPI trusted publisher matches on it); got "
+            f"environment={publish.get('environment')!r}"
+        )
+        pypi_step = next(
+            (
+                s
+                for s in publish.get("steps", [])
+                if isinstance(s, dict) and "pypa/gh-action-pypi-publish" in str(s.get("uses", ""))
+            ),
+            None,
+        )
+        assert pypi_step is not None, (
+            "release.yml publish job has no pypa/gh-action-pypi-publish step"
+        )
+        with_block = pypi_step.get("with") or {}
+        assert "password" not in with_block, (
+            "release.yml publish step must NOT pass a 'password' input — "
+            "OIDC trusted publishing mints a short-lived token and requires "
+            f"no stored secret; got with={with_block!r}"
         )
 
     def test_release_workflow_publish_has_fetch_depth_zero(self) -> None:
