@@ -30,6 +30,7 @@ import argparse
 import json
 import logging
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -272,6 +273,202 @@ def prepare_nnunet_2d(
         json.dumps(dict(sorted(manifest.items())), indent=2)
     )
     logger.info("Wrote nnU-Net dataset %s (%d cases)", root, len(image_paths))
+
+
+def _load_case_brain_manifest(manifest: Mapping[str, str] | str | Path) -> dict[str, str]:
+    """Return the ``{case_id: brain}`` mapping from a Mapping or a JSON path.
+
+    Returns
+    -------
+    dict[str, str]
+        The case id → brain mapping.
+
+    Raises
+    ------
+    ValueError
+        If ``manifest`` is a path that does not exist, or the loaded JSON is
+        not an object mapping strings to strings.
+    """
+    if isinstance(manifest, Mapping):
+        return dict(manifest)
+    path = Path(manifest)
+    if not path.is_file():
+        raise ValueError(f"case_brain_manifest not found: {path}")
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in loaded.items()
+    ):
+        raise ValueError(
+            f"case_brain_manifest at {path} must be a JSON object mapping "
+            "case id (str) to brain name (str)"
+        )
+    return loaded
+
+
+def write_loo_splits(
+    manifest: Mapping[str, str] | str | Path,
+    out_path: str,
+    *,
+    val_first: str | None = None,
+) -> list[dict]:
+    """Write a verified 2-fold leave-one-brain-out ``splits_final.json``.
+
+    Groups the manifest's case ids by brain and builds two complementary
+    folds: fold 0 trains on one brain and validates on ``val_first`` (or the
+    lexicographically larger brain by default), fold 1 swaps. nnU-Net's
+    ``do_split`` honors a pre-existing splits file verbatim but only *warns*
+    on train/val overlap, so :func:`verify_loo_splits` runs on the built
+    splits BEFORE the file is written — a malformed split can never reach
+    training silently.
+
+    Parameters
+    ----------
+    manifest : Mapping[str, str] | str | Path
+        The ``{case_id: brain}`` mapping, or a path to
+        ``case_brain_manifest.json``.
+    out_path : str
+        Destination for ``splits_final.json`` (e.g.
+        ``$nnUNet_preprocessed/<Dataset>/splits_final.json`` — installed
+        after ``plan_and_preprocess``, before training).
+    val_first : str | None
+        Brain validated in fold 0. Default: the lexicographically larger
+        brain name (s24 > s23).
+
+    Returns
+    -------
+    list[dict]
+        The written splits: ``[{"train": [...], "val": [...]}, ...]``.
+
+    Raises
+    ------
+    ValueError
+        If the manifest does not contain exactly 2 distinct brains, or if
+        ``val_first`` is not one of them (the offending names are in the
+        message).
+    """
+    manifest_map = _load_case_brain_manifest(manifest)
+    brains = sorted(set(manifest_map.values()))
+    if len(brains) != 2:
+        raise ValueError(
+            f"write_loo_splits: leave-one-brain-out requires exactly 2 "
+            f"distinct brains, found {len(brains)}: {brains}"
+        )
+    val0 = val_first if val_first is not None else brains[-1]
+    if val0 not in brains:
+        raise ValueError(
+            f"write_loo_splits: val_first={val0!r} is not a brain in the manifest {brains}"
+        )
+    other = brains[0] if brains[1] == val0 else brains[1]
+
+    def _cases_of(brain: str) -> list[str]:
+        return sorted(c for c, b in manifest_map.items() if b == brain)
+
+    splits = [
+        {"train": _cases_of(other), "val": _cases_of(val0)},
+        {"train": _cases_of(val0), "val": _cases_of(other)},
+    ]
+    verify_loo_splits(splits, manifest_map)
+    Path(out_path).write_text(json.dumps(splits, indent=2) + "\n", encoding="utf-8")
+    logger.info("Wrote 2-fold LOO splits %s (val brains: %s, %s)", out_path, val0, other)
+    return splits
+
+
+def verify_loo_splits(
+    splits: list[dict],
+    manifest: Mapping[str, str] | str | Path,
+) -> None:
+    """Verify a 2-fold leave-one-brain-out splits structure.
+
+    Raises on every malformed variant — nnU-Net only warns on overlap, so
+    this check is the only gate between a hand-written (or hand-corrupted)
+    ``splits_final.json`` and a silently leaky training run.
+
+    Parameters
+    ----------
+    splits : list[dict]
+        The splits structure: ``[{"train": [...], "val": [...]}, ...]``.
+    manifest : Mapping[str, str] | str | Path
+        The ``{case_id: brain}`` mapping, or a path to
+        ``case_brain_manifest.json``.
+
+    Raises
+    ------
+    ValueError
+        When ``len(splits) != 2``; when a fold lacks ``train``/``val``
+        lists; when a case appears in both train and val of the same fold;
+        when a brain's cases are split across train/val within a fold
+        (brain must be atomic); when a fold's val set is not exactly one
+        brain's full case set; when the two folds' val brains are not
+        complementary; when a splits case is absent from the manifest; or
+        when a manifest case appears in neither fold's val set. Offending
+        case ids and brains are named in the message.
+    """
+    manifest_map = _load_case_brain_manifest(manifest)
+    if len(splits) != 2:
+        raise ValueError(f"verify_loo_splits: expected exactly 2 folds, got {len(splits)}")
+
+    val_brains: list[str] = []
+    for i, fold in enumerate(splits):
+        if not isinstance(fold, dict) or "train" not in fold or "val" not in fold:
+            raise ValueError(
+                f"verify_loo_splits: fold {i} must be a dict with 'train' "
+                f"and 'val' case lists, got {fold!r}"
+            )
+        train = set(fold["train"])
+        val = set(fold["val"])
+
+        missing_from_manifest = sorted((train | val) - set(manifest_map))
+        if missing_from_manifest:
+            raise ValueError(
+                f"verify_loo_splits: fold {i} references cases absent from "
+                f"the manifest: {missing_from_manifest}"
+            )
+
+        overlap = sorted(train & val)
+        if overlap:
+            raise ValueError(
+                f"verify_loo_splits: fold {i} has cases in both train and val: {overlap}"
+            )
+
+        train_brains = {manifest_map[c] for c in train}
+        val_brain_set = {manifest_map[c] for c in val}
+        shared = train_brains & val_brain_set
+        if shared:
+            offenders = sorted(c for c in train | val if manifest_map[c] in shared)
+            raise ValueError(
+                f"verify_loo_splits: fold {i} splits brain(s) {sorted(shared)} "
+                f"across train/val — a brain's cases must be wholly in train "
+                f"or wholly in val (offending cases: {offenders})"
+            )
+
+        if len(val_brain_set) != 1:
+            raise ValueError(
+                f"verify_loo_splits: fold {i} val must contain exactly one "
+                f"brain's cases, found brains {sorted(val_brain_set)}"
+            )
+        (val_brain,) = val_brain_set
+        expected_val = {c for c, b in manifest_map.items() if b == val_brain}
+        if val != expected_val:
+            missing = sorted(expected_val - val)
+            extra = sorted(val - expected_val)
+            raise ValueError(
+                f"verify_loo_splits: fold {i} val is not brain {val_brain}'s "
+                f"full case set — missing {missing}, extra {extra}"
+            )
+        val_brains.append(val_brain)
+
+    if val_brains[0] == val_brains[1]:
+        raise ValueError(
+            f"verify_loo_splits: both folds validate on brain "
+            f"{val_brains[0]!r} — the two folds' val brains must be "
+            "complementary (each brain validated exactly once)"
+        )
+
+    never_validated = sorted(set(manifest_map) - set(splits[0]["val"]) - set(splits[1]["val"]))
+    if never_validated:
+        raise ValueError(
+            f"verify_loo_splits: manifest cases never appear in a val set: {never_validated}"
+        )
 
 
 def _discover_pairs(input_dir: Path) -> tuple[list[str], list[str]]:

@@ -26,13 +26,15 @@ import json
 
 import pytest
 
-S23_CASES = [f"s23_{s}" for s in ("575", "700", "750", "800", "1000", "1110", "1200", "1350", "1500")]
+S23_CASES = [
+    f"s23_{s}" for s in ("575", "700", "750", "800", "1000", "1110", "1200", "1350", "1500")
+]
 S24_CASES = ["s24_500", "s24_1200"]
 
 
 def _manifest() -> dict[str, str]:
     """The 11-slice / 2-brain labeled pool as a case → brain mapping."""
-    return {c: "s23" for c in S23_CASES} | {c: "s24" for c in S24_CASES}
+    return dict.fromkeys(S23_CASES, "s23") | dict.fromkeys(S24_CASES, "s24")
 
 
 def test_write_loo_splits_produces_two_complementary_folds(tmp_path) -> None:
@@ -108,7 +110,7 @@ def test_verify_loo_splits_rejects_train_val_overlap(tmp_path) -> None:
 
     manifest = _manifest()
     splits = [
-        {"train": sorted(S23_CASES) + ["s24_500"], "val": ["s24_500", "s24_1200"]},
+        {"train": [*sorted(S23_CASES), "s24_500"], "val": ["s24_500", "s24_1200"]},
         {"train": sorted(S24_CASES), "val": sorted(S23_CASES)},
     ]
     with pytest.raises(ValueError, match="s24_500"):
@@ -125,7 +127,7 @@ def test_verify_loo_splits_rejects_brain_split_across_train_val(tmp_path) -> Non
 
     manifest = _manifest()
     splits = [
-        {"train": sorted(S23_CASES) + ["s24_500"], "val": ["s24_1200"]},
+        {"train": [*sorted(S23_CASES), "s24_500"], "val": ["s24_1200"]},
         {"train": sorted(S24_CASES), "val": sorted(S23_CASES)},
     ]
     with pytest.raises(ValueError, match="s24"):
