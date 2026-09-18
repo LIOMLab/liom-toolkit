@@ -109,6 +109,13 @@ def _derive_case_ids(
     an nnU-Net random split over anonymous cases cannot be verified as
     per-brain.
 
+    A derived id that would end in a ``_NNNN`` modality suffix (real slice
+    files are routinely named by index — ``1000.png`` → ``s23_1000``) is
+    escaped by letter-prefixing the digit tail (``s23_1000`` →
+    ``s23_s1000``) so the alias can never reach nnU-Net. An explicit
+    ``case_names`` id ending ``_NNNN`` still raises — a caller-supplied
+    name is a typo/contract violation, not a naming convention to escape.
+
     Returns
     -------
     list[str]
@@ -117,10 +124,11 @@ def _derive_case_ids(
     Raises
     ------
     ValueError
-        If a case id is empty after sanitization, ends with a ``_NNNN``
-        modality suffix (it would alias with nnU-Net's ``<case>_0000``
-        channel naming), or collides with another case id. The offending
-        id is named in the message.
+        If a case id is empty after sanitization, an explicit
+        ``case_names`` id ends with a ``_NNNN`` modality suffix (it would
+        alias with nnU-Net's ``<case>_0000`` channel naming), or an id
+        collides with another case id. The offending id is named in the
+        message.
     """
     case_ids: list[str] = []
     for i, img_p in enumerate(image_paths):
@@ -135,12 +143,14 @@ def _derive_case_ids(
                 f"prepare_nnunet_2d: empty case id derived from {raw!r} (image {img_p})"
             )
         if re.search(r"_\d{4}$", case):
-            raise ValueError(
-                f"prepare_nnunet_2d: case id {case!r} ends with a _NNNN "
-                "modality suffix — it would alias with nnU-Net's "
-                "<case>_0000 channel naming; rename the slice or pass an "
-                "explicit case_names override"
-            )
+            if case_names is not None:
+                raise ValueError(
+                    f"prepare_nnunet_2d: case id {case!r} ends with a _NNNN "
+                    "modality suffix — it would alias with nnU-Net's "
+                    "<case>_0000 channel naming; rename the slice or pass an "
+                    "explicit case_names override"
+                )
+            case = re.sub(r"_(\d{4})$", r"_s\1", case)
         case_ids.append(case)
     duplicates = sorted({c for c in case_ids if case_ids.count(c) > 1})
     if duplicates:

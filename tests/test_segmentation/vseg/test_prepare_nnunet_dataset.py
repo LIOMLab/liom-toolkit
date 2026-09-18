@@ -239,6 +239,41 @@ def test_prepare_nnunet_2d_rejects_modality_suffix_case_ids(tmp_path) -> None:
         )
 
 
+def test_prepare_nnunet_2d_escapes_numeric_stem_modality_suffix(tmp_path) -> None:
+    """Derived ids from index-named slices escape the ``_NNNN`` modality suffix.
+
+    Real labeled slices are routinely named by index (``1000.png`` +
+    ``1000_mask.png``); the derived ``<dir>_<stem>`` id ``s23_1000`` would
+    alias with nnU-Net's ``<case>_0000`` channel naming, so the digit tail
+    is letter-prefixed (``s23_s1000``) instead of failing — the alias never
+    reaches nnU-Net and the slice is not silently dropped from the dataset.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s23"
+    src.mkdir(parents=True)
+    img = np.zeros((16, 16), dtype=np.uint8)
+    lbl = np.zeros((16, 16), dtype=np.uint8)
+    lbl[4:12, 4:12] = 1
+    for stem in ("575", "1000"):
+        iio.imwrite(src / f"{stem}.png", img)
+        iio.imwrite(src / f"{stem}_mask.png", lbl)
+
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+    prepare_nnunet_2d(
+        image_paths=[str(src / "575.png"), str(src / "1000.png")],
+        label_paths=[str(src / "575_mask.png"), str(src / "1000_mask.png")],
+        output_dir=str(out_dir),
+        dataset_id=101,
+    )
+
+    assert (out_dir / "imagesTr" / "s23_575_0000.png").is_file()
+    assert (out_dir / "imagesTr" / "s23_s1000_0000.png").is_file()
+    assert (out_dir / "labelsTr" / "s23_s1000.png").is_file()
+    manifest = json.loads((out_dir / "case_brain_manifest.json").read_text())
+    assert manifest == {"s23_575": "s23", "s23_s1000": "s23"}
+
+
 def test_prepare_nnunet_2d_rejects_case_names_length_mismatch(tmp_path) -> None:
     """case_names/brain_names must be parallel to image_paths."""
     from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
