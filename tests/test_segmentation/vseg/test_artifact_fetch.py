@@ -171,7 +171,7 @@ def test_default_model_dir_fetches_extracts_and_caches(
 
     # Second call: any urlopen would mean the cache marker was ignored.
     calls = []
-    real_urlopen = urllib.request.urlopen
+    real_urlopen = urllib.request.urlopen  # ruff: ignore[suspicious-url-open-usage] -- delegating wrapper, scheme is file:// here
 
     def counting_urlopen(*args, **kwargs):
         calls.append(args)
@@ -185,14 +185,16 @@ def test_default_model_dir_fetches_extracts_and_caches(
     assert calls == []
 
 
-def test_default_model_dir_stale_marker_refetches(
+def test_default_model_dir_stale_marker_reextracts(
     tmp_path: Path, registered_model, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``.sha256ok`` marker that does not match the registry hash re-fetches.
+    """A stale ``.sha256ok`` marker re-extracts from the verified cached zip.
 
     The marker is only trustworthy when it records the CURRENT registered
-    hash -- a marker for an older artifact (or a hand-written marker)
-    must trigger a fresh verified download, not a blind reuse.
+    hash -- a stale or foreign marker must not be treated as a cache hit.
+    But a still-valid cached zip does not need re-downloading: the second
+    call re-extracts (restoring a deleted member and rewriting the
+    marker) WITHOUT re-opening the URL.
     """
     import urllib.request
 
@@ -201,11 +203,12 @@ def test_default_model_dir_stale_marker_refetches(
     cache_dir = tmp_path / "cache"
     model_dir = artifact.default_model_dir(cache_dir=cache_dir)
 
-    # Simulate a stale/foreign marker.
+    # Simulate a stale/foreign marker plus a tampered extracted tree.
     (model_dir / ".sha256ok").write_text("bogus-hash\n")
+    (model_dir / "fold_0" / "checkpoint_final.pth").unlink()
 
     calls = []
-    real_urlopen = urllib.request.urlopen
+    real_urlopen = urllib.request.urlopen  # ruff: ignore[suspicious-url-open-usage] -- delegating wrapper, scheme is file:// here
 
     def counting_urlopen(*args, **kwargs):
         calls.append(args)
@@ -216,12 +219,52 @@ def test_default_model_dir_stale_marker_refetches(
     again = artifact.default_model_dir(cache_dir=cache_dir)
 
     assert again == model_dir
+    assert calls == []  # valid cached zip -> re-extract, no re-download
+    assert (model_dir / "fold_0" / "checkpoint_final.pth").is_file()
+    assert (model_dir / ".sha256ok").read_text().strip() == registered_model[1]
+
+
+def test_default_model_dir_corrupt_cached_zip_refetches(
+    tmp_path: Path, registered_model, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cached zip whose hash differs from the registry is re-fetched.
+
+    The cached zip is trusted only while its digest matches the baked-in
+    registry value -- a corrupted or replaced cache file triggers a fresh
+    verified download rather than being extracted blind. (The extracted
+    dir's ``.sha256ok`` marker is removed too so the else branch runs at
+    all -- a valid marker alone is already a cache hit.)
+    """
+    import urllib.request
+
+    from liom_toolkit.segmentation.vseg import artifact
+
+    cache_dir = tmp_path / "cache"
+    zip_path, _digest = registered_model
+    model_dir = artifact.default_model_dir(cache_dir=cache_dir)
+
+    # Corrupt the cached zip and invalidate the marker.
+    cached_zip = cache_dir / zip_path.name
+    cached_zip.write_bytes(b"corrupted")
+    (model_dir / ".sha256ok").unlink()
+
+    calls = []
+    real_urlopen = urllib.request.urlopen  # ruff: ignore[suspicious-url-open-usage] -- delegating wrapper, scheme is file:// here
+
+    def counting_urlopen(*args, **kwargs):
+        calls.append(args)
+        return real_urlopen(*args, **kwargs)
+
+    monkeypatch.setattr(urllib.request, "urlopen", counting_urlopen)
+
+    model_dir = artifact.default_model_dir(cache_dir=cache_dir)
+
     assert len(calls) == 1
-    assert (model_dir / ".sha256ok").read_text().strip() != "bogus-hash"
+    assert (model_dir / "dataset.json").is_file()
 
 
 def test_extract_rejects_path_traversal_member(
-    tmp_path: Path, registered_model, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A zip member escaping the destination raises ValueError.
 
@@ -231,7 +274,6 @@ def test_extract_rejects_path_traversal_member(
     """
     from liom_toolkit.segmentation.vseg import artifact
 
-    zip_path, digest = registered_model
     evil_zip = tmp_path / "evil.zip"
     with zipfile.ZipFile(evil_zip, "w") as zf:
         zf.writestr("dataset.json", "{}")
@@ -252,9 +294,7 @@ def test_extract_rejects_path_traversal_member(
         artifact.default_model_dir(cache_dir=tmp_path / "cache")
 
 
-def test_model_cache_dir_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_model_cache_dir_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``LIOM_MODEL_CACHE`` overrides the default cache location.
 
     The cache dir is a documented parameter-with-default (AGENTS section
