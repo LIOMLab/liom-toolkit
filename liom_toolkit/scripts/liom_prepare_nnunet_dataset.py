@@ -290,7 +290,9 @@ def _load_case_brain_manifest(manifest: Mapping[str, str] | str | Path) -> dict[
         not an object mapping strings to strings.
     """
     if isinstance(manifest, Mapping):
-        return dict(manifest)
+        # str() round-trip is identity here but pins dict[str, str] for the
+        # type checker — dict(manifest) infers Unknown key/value types.
+        return {str(k): str(v) for k, v in manifest.items()}
     path = Path(manifest)
     if not path.is_file():
         raise ValueError(f"case_brain_manifest not found: {path}")
@@ -302,7 +304,7 @@ def _load_case_brain_manifest(manifest: Mapping[str, str] | str | Path) -> dict[
             f"case_brain_manifest at {path} must be a JSON object mapping "
             "case id (str) to brain name (str)"
         )
-    return loaded
+    return {str(k): str(v) for k, v in loaded.items()}
 
 
 def write_loo_splits(
@@ -310,7 +312,7 @@ def write_loo_splits(
     out_path: str,
     *,
     val_first: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, list[str]]]:
     """Write a verified 2-fold leave-one-brain-out ``splits_final.json``.
 
     Groups the manifest's case ids by brain and builds two complementary
@@ -336,7 +338,7 @@ def write_loo_splits(
 
     Returns
     -------
-    list[dict]
+    list[dict[str, list[str]]]
         The written splits: ``[{"train": [...], "val": [...]}, ...]``.
 
     Raises
@@ -374,7 +376,7 @@ def write_loo_splits(
 
 
 def verify_loo_splits(
-    splits: list[dict],
+    splits: list[dict[str, list[str]]],
     manifest: Mapping[str, str] | str | Path,
 ) -> None:
     """Verify a 2-fold leave-one-brain-out splits structure.
@@ -385,7 +387,7 @@ def verify_loo_splits(
 
     Parameters
     ----------
-    splits : list[dict]
+    splits : list[dict[str, list[str]]]
         The splits structure: ``[{"train": [...], "val": [...]}, ...]``.
     manifest : Mapping[str, str] | str | Path
         The ``{case_id: brain}`` mapping, or a path to
