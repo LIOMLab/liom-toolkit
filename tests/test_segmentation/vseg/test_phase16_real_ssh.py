@@ -450,6 +450,14 @@ def _arm_script(
                 echo "stage {stage} requires .done_stage10 — run stage10 first" >&2
                 exit 3
             }}
+
+            # Re-pin the remote checkout: a mid-run fix push (or a drifted
+            # checkout) must not leave the arm training stale code — the same
+            # guarantee stage 10 enforces before preprocessing.
+            if [ -n "{env['ref']}" ]; then
+                git fetch origin
+                git checkout {shlex.quote(env['ref'])}
+            fi
             """
         )
         + _verify_splits_fn()
