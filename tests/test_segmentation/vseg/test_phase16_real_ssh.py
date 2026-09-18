@@ -321,10 +321,16 @@ def _prelude(env: dict[str, Any]) -> str:
     """Shared strict-mode prelude: ``cd`` repo, export nnU-Net + LIOM_VSEG env.
 
     Every remote stage is a fresh ``bash -s`` shell, so the exports are
-    re-emitted per stage. ``nnUNet_extTrainer`` points at the repo's ``vseg``
-    directory so ``mp.spawn`` children can resolve the custom trainer class
-    names (module-attribute registration does not exist in spawned
-    interpreters).
+    re-emitted per stage. ``nnUNet_extTrainer`` points at the repo's
+    ``segmentation`` directory so ``mp.spawn`` children can resolve the custom
+    trainer class names (module-attribute registration does not exist in
+    spawned interpreters). It must point at ``segmentation`` rather than
+    ``vseg`` itself: nnU-Net imports every ``.py`` in the directory as a
+    top-level module, and pointing it at ``vseg`` crashes on sibling modules'
+    relative imports (``from .utils import ...``) while also letting
+    ``vseg/ssl/`` shadow the stdlib ``ssl`` package. Scanning the parent lets
+    the finder recurse into ``vseg`` as a package, where relative imports
+    resolve normally.
     """
     return textwrap.dedent(
         f"""\
@@ -337,7 +343,7 @@ def _prelude(env: dict[str, Any]) -> str:
         export nnUNet_raw="${{nnUNet_raw:-/data/nnUNet_raw}}"
         export nnUNet_preprocessed="${{nnUNet_preprocessed:-/data/nnUNet_preprocessed}}"
         export nnUNet_results="${{nnUNet_results:-/data/nnUNet_results}}"
-        export nnUNet_extTrainer="$PWD/liom_toolkit/segmentation/vseg"
+        export nnUNet_extTrainer="$PWD/liom_toolkit/segmentation"
 
         export LIOM_VSEG_NGPUS={shlex.quote(env["ngpus"])}
         export LIOM_VSEG_DS_ID={shlex.quote(env["dataset_id"])}

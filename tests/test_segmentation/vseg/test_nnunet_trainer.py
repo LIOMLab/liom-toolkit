@@ -26,6 +26,8 @@ Every test needs torch + nnunetv2 (the ``[ai]`` extra); each gates with
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -288,3 +290,37 @@ def test_module_docstring_documents_ext_trainer_discovery() -> None:
     from liom_toolkit.segmentation.vseg import nnunet_trainer
 
     assert "nnUNet_extTrainer" in (nnunet_trainer.__doc__ or "")
+
+
+@pytest.mark.ai
+def test_ext_trainer_dir_scan_resolves_trainers() -> None:
+    """nnU-Net's ``nnUNet_extTrainer`` dir-scan resolves both trainer classes.
+
+    The finder imports every ``.py`` in each listed directory as a
+    top-level module. Pointing it at ``vseg`` itself fails: sibling
+    modules' relative imports (``from .utils import ...``) have no parent
+    package, and ``vseg/ssl/`` shadows the stdlib ``ssl`` package for
+    anything the scan imports. The correct target is the ``segmentation``
+    parent directory, where the finder recurses into ``vseg`` as a
+    package and relative imports resolve.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("nnunetv2")
+
+    from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
+
+    import liom_toolkit.segmentation
+
+    scan_dir = Path(liom_toolkit.segmentation.__file__).resolve().parent
+
+    # The scan imports ``vseg`` as a top-level package, so the found class
+    # lives under ``vseg.nnunet_trainer`` -- a distinct module object from
+    # ``liom_toolkit.segmentation.vseg.nnunet_trainer``. nnU-Net only needs
+    # a class bearing the requested name; assert on name + module path.
+    for name in ("LiomDiceFocalClDiceTrainer", "LiomDiceFocalClDiceWarmStartTrainer"):
+        found = recursive_find_python_class(
+            str(scan_dir), name, None, cleanup_imports_from_base_folder=True
+        )
+        assert found is not None, f"dir-scan found no class named {name}"
+        assert found.__name__ == name
+        assert found.__module__ == "vseg.nnunet_trainer"

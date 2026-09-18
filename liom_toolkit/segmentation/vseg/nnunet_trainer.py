@@ -36,9 +36,14 @@ is REQUIRED -- ``run_training(num_gpus>1)`` goes through ``mp.spawn``,
 whose children are fresh interpreters where module-attribute
 registration does not exist. Never register these trainers by assigning
 attributes into ``nnunetv2.training.nnUNetTrainer.nnUNetTrainer``; set
-``nnUNet_extTrainer`` to the directory containing this file (the
-installed package's ``vseg`` directory) before calling
-``run_training``.
+``nnUNet_extTrainer`` to this file's grandparent directory (the
+installed package's ``segmentation`` directory) before calling
+``run_training``. The scan imports every ``.py`` in each listed
+directory as a top-level module, so pointing it at ``vseg`` itself
+crashes on sibling modules' relative imports (and lets ``vseg/ssl/``
+shadow the stdlib ``ssl`` package); scanning ``segmentation`` lets the
+finder recurse into ``vseg`` as a package, where relative imports
+resolve normally.
 
 Arm-3 usage::
 
@@ -157,8 +162,8 @@ class LiomDiceFocalClDiceTrainer(nnUNetTrainer):
       wrapped in upstream's ``DeepSupervisionWrapper`` with the same
       exponentially-decaying per-scale weights.
 
-    Discovery requires the ``nnUNet_extTrainer`` env var to point at a
-    directory containing this file -- see the module docstring.
+    Discovery requires the ``nnUNet_extTrainer`` env var to point at the
+    ``segmentation`` parent directory -- see the module docstring.
     """
 
     def __init__(self, *args: object, num_epochs: int = 50, **kwargs: object) -> None:
