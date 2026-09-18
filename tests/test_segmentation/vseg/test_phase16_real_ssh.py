@@ -462,30 +462,44 @@ def _arm_script(
                     continue
                 fi
                 export LIOM_VSEG_FOLD="$FOLD"
-                uv run python - <<'PY'
+                # The training entry point must be a REAL FILE, not a stdin
+                # heredoc: nnU-Net's validation export pool hardcodes a spawn
+                # context and the dataloader workers spawn too, and spawned
+                # children re-import __main__ as __mp_main__ — '<stdin>' is not
+                # a file, so a heredoc crashes every worker. The __main__
+                # guard keeps the re-import inert in spawned children.
+                TRAIN_PY="$RUN_DIR/_liom_train_fold.py"
+                cat > "$TRAIN_PY" <<'PYEOF'
             import multiprocessing
             import os
 
-            # Fork-after-CUDA deadlocks the nnU-Net dataloader workers; spawn
-            # each worker cleanly instead.
-            multiprocessing.set_start_method("spawn", force=True)
 
-            import torch
+            def _main() -> None:
+                # Fork-after-CUDA deadlocks the nnU-Net dataloader workers;
+                # spawn each worker cleanly instead.
+                multiprocessing.set_start_method("spawn", force=True)
 
-            from nnunetv2.run.run_training import run_training
+                import torch
 
-            run_training(
-                os.environ["LIOM_VSEG_DS_NAME"],
-                "2d",
-                int(os.environ["LIOM_VSEG_FOLD"]),
-                trainer_class_name=os.environ["LIOM_VSEG_TRAINER"],
-                plans_identifier=os.environ["LIOM_VSEG_PLANS"],
-                pretrained_weights=os.environ.get("LIOM_VSEG_PRETRAINED_ARG") or None,
-                num_gpus=int(os.environ["LIOM_VSEG_NGPUS"]),
-                export_validation_probabilities=False,
-                device=torch.device("cuda"),
-            )
-            PY
+                from nnunetv2.run.run_training import run_training
+
+                run_training(
+                    os.environ["LIOM_VSEG_DS_NAME"],
+                    "2d",
+                    int(os.environ["LIOM_VSEG_FOLD"]),
+                    trainer_class_name=os.environ["LIOM_VSEG_TRAINER"],
+                    plans_identifier=os.environ["LIOM_VSEG_PLANS"],
+                    pretrained_weights=os.environ.get("LIOM_VSEG_PRETRAINED_ARG") or None,
+                    num_gpus=int(os.environ["LIOM_VSEG_NGPUS"]),
+                    export_validation_probabilities=False,
+                    device=torch.device("cuda"),
+                )
+
+
+            if __name__ == "__main__":
+                _main()
+            PYEOF
+                uv run python "$TRAIN_PY"
                 test -f "$FD/checkpoint_final.pth" || {
                     echo "fold $FOLD ended without checkpoint_final.pth — trainer crashed" >&2
                     exit 5
