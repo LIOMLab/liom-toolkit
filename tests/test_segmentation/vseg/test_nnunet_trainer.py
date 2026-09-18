@@ -254,24 +254,49 @@ def test_warmstart_trainer_is_distinct_named_subclass() -> None:
 
 
 @pytest.mark.ai
-def test_trainer_init_takes_num_epochs_default_50() -> None:
-    """``__init__`` accepts a ``num_epochs`` keyword defaulting to 50.
+def test_trainer_init_signature_mirrors_parent() -> None:
+    """``__init__`` mirrors ``nnUNetTrainer.__init__``'s parameter names exactly.
 
-    The arm trains at the equalized 250-iterations x 50-epochs budget used
-    by the prior contenders, not nnU-Net's default 1000 epochs. The
-    keyword must be popped before ``super().__init__`` so upstream's
-    signature (which knows no ``num_epochs``) never sees it.
+    Upstream populates ``self.my_init_kwargs`` by iterating
+    ``inspect.signature(self.__init__).parameters`` and indexing
+    ``locals()`` inside the parent constructor. Any extra parameter —
+    including a keyword-only ``num_epochs`` or ``*args``/``**kwargs`` —
+    raises ``KeyError`` before training starts, so the subclass signature
+    must not deviate.
     """
     pytest.importorskip("torch")
     pytest.importorskip("nnunetv2")
     import inspect
 
+    from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+
     from liom_toolkit.segmentation.vseg.nnunet_trainer import LiomDiceFocalClDiceTrainer
 
-    sig = inspect.signature(LiomDiceFocalClDiceTrainer.__init__)
-    assert "num_epochs" in sig.parameters
-    assert sig.parameters["num_epochs"].default == 50
-    assert sig.parameters["num_epochs"].kind == inspect.Parameter.KEYWORD_ONLY
+    parent_params = set(inspect.signature(nnUNetTrainer.__init__).parameters)
+    child_params = set(inspect.signature(LiomDiceFocalClDiceTrainer.__init__).parameters)
+    assert child_params == parent_params
+
+
+@pytest.mark.ai
+def test_trainer_num_epochs_is_50() -> None:
+    """The 50-epoch budget lives in the ``NUM_EPOCHS`` class constant.
+
+    The arm trains at the equalized 250-iterations x 50-epochs budget used
+    by the prior contenders, not nnU-Net's default 1000 epochs. It cannot
+    be an ``__init__`` parameter (see the signature-mirror test), so the
+    constructor assigns ``self.num_epochs`` from ``NUM_EPOCHS`` after
+    ``super().__init__`` returns — the parent sets it to 1000 first.
+    """
+    pytest.importorskip("torch")
+    pytest.importorskip("nnunetv2")
+
+    from liom_toolkit.segmentation.vseg.nnunet_trainer import (
+        LiomDiceFocalClDiceTrainer,
+        LiomDiceFocalClDiceWarmStartTrainer,
+    )
+
+    assert LiomDiceFocalClDiceTrainer.NUM_EPOCHS == 50
+    assert LiomDiceFocalClDiceWarmStartTrainer.NUM_EPOCHS == 50
 
 
 @pytest.mark.ai

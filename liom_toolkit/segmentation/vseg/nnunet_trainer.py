@@ -155,20 +155,38 @@ class LiomDiceFocalClDiceTrainer(nnUNetTrainer):
 
     Identical to stock ``nnUNetTrainer`` except:
 
-    * ``num_epochs`` defaults to 50 (the equalized 250-iterations x
-      50-epochs budget the prior contenders trained at, not upstream's
-      1000-epoch default).
+    * ``num_epochs`` is 50 (the equalized 250-iterations x 50-epochs
+      budget the prior contenders trained at, not upstream's 1000-epoch
+      default), driven by the ``NUM_EPOCHS`` class constant.
     * ``_build_loss`` returns the adapted ``DiceFocalClDiceLoss``,
       wrapped in upstream's ``DeepSupervisionWrapper`` with the same
       exponentially-decaying per-scale weights.
+
+    ``__init__`` must mirror ``nnUNetTrainer.__init__``'s signature
+    exactly: upstream populates ``self.my_init_kwargs`` by iterating
+    ``inspect.signature(self.__init__).parameters`` and indexing
+    ``locals()``, so any extra parameter (even keyword-only) or a
+    ``*args``/``**kwargs`` catch-all raises ``KeyError`` inside the
+    parent constructor.
 
     Discovery requires the ``nnUNet_extTrainer`` env var to point at the
     ``segmentation`` parent directory -- see the module docstring.
     """
 
-    def __init__(self, *args: object, num_epochs: int = 50, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self.num_epochs = num_epochs
+    NUM_EPOCHS: int = 50
+
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device | None = None,
+    ) -> None:
+        if device is None:
+            device = torch.device("cuda")
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.num_epochs = self.NUM_EPOCHS
 
     def _build_loss(self) -> nn.Module:
         """Build the adapted composite loss, wrapped for deep supervision.
