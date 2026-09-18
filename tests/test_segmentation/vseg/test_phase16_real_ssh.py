@@ -406,6 +406,13 @@ def _run_stage(host: str, user: str, script: str, *, timeout: int) -> str:
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
+            "-o",
+            # Detect a dead link in ~90 s instead of hanging until the
+            # stage timeout on a half-open connection; the remote
+            # trainer is setsid-detached and survives the drop.
+            "ServerAliveInterval=30",
+            "-o",
+            "ServerAliveCountMax=3",
             f"{user}@{host}",
             "bash -s",
         ],
@@ -513,9 +520,26 @@ def _arm_script(
             if __name__ == "__main__":
                 _main()
             PYEOF
-                uv run python "$TRAIN_PY"
+                # Run the trainer detached (setsid) with a pidfile: if the
+                # ssh link drops, bash -s dies but the training process
+                # survives — a stage rerun then waits on the pidfile
+                # instead of relaunching (or colliding with) the live
+                # trainer. Output goes to a per-fold log so the crash tail
+                # is preserved for the audit record.
+                PIDFILE="$FD/.train.pid"
+                TRAINLOG="$FD/train_stdout.log"
+                mkdir -p "$FD"
+                if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+                    echo "LIOM_VSEG_WAIT_FOLD $FOLD (detached trainer still running)"
+                else
+                    setsid uv run python "$TRAIN_PY" >"$TRAINLOG" 2>&1 </dev/null &
+                    echo $! > "$PIDFILE"
+                fi
+                while kill -0 "$(cat "$PIDFILE")" 2>/dev/null; do sleep 30; done
                 test -f "$FD/checkpoint_final.pth" || {
-                    echo "fold $FOLD ended without checkpoint_final.pth — trainer crashed" >&2
+                    echo "fold $FOLD ended without checkpoint_final.pth —" \\
+                        "trainer crashed; last log lines:" >&2
+                    tail -40 "$TRAINLOG" >&2
                     exit 5
                 }
             done
