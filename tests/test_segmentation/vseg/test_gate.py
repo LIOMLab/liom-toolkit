@@ -209,10 +209,7 @@ def test_regression_delta_sign_convention():
         metrics = _passing_metrics()
         metrics["boundary_artifact_regression"]["regression_delta"] = ok_delta
         verdict = evaluate_gate(metrics, fold=0)
-        assert (
-            _row(verdict, "boundary_artifact_regression.regression_delta").passed
-            is True
-        )
+        assert _row(verdict, "boundary_artifact_regression.regression_delta").passed is True
         assert verdict.passed is True
 
 
@@ -291,9 +288,7 @@ def test_undefined_reported_row_does_not_fail():
     verdict = evaluate_gate(metrics, fold=0)
 
     assert verdict.passed is True
-    assert (
-        _row(verdict, "caliber_stratified_recall.capillary_recall").passed is True
-    )
+    assert _row(verdict, "caliber_stratified_recall.capillary_recall").passed is True
 
 
 def test_missing_gating_key_raises_valueerror():
