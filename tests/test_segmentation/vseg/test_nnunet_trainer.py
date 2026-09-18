@@ -157,6 +157,7 @@ def test_build_loss_ddp_workaround_sets_tiny_last_weight() -> None:
 
     loss = trainer._build_loss()
 
+    assert isinstance(loss, DeepSupervisionWrapper)
     weights = np.asarray(loss.weight_factors, dtype=np.float64)
     # [1, 0.5, 1e-6] normalized -> last = 1e-6 / 1.500001.
     assert weights.sum() == pytest.approx(1.0)
