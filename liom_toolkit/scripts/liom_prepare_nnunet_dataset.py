@@ -34,6 +34,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import imageio.v3 as iio
+import numpy as np
 
 from liom_toolkit.scripts._common import build_common_parser
 
@@ -162,6 +163,41 @@ def _derive_case_ids(
     return case_ids
 
 
+def _normalize_label(label: np.ndarray, source_path: str) -> np.ndarray:
+    """Map a binary vessel mask to the declared ``{0, 1}`` label scheme.
+
+    Lab masks arrive in both conventions — ``{0, 1}`` and ``{0, 255}`` —
+    sometimes mixed within one brain's directory. ``dataset.json`` declares
+    ``{background: 0, vessel: 1}``, so a ``{0, 255}`` mask is remapped
+    (``255 → 1``) before writing; a ``{0, 1}`` mask passes through
+    unchanged. Any other value set (e.g. ``{0, 1, 2}`` or ``{0, 1, 255}``)
+    is ambiguous for a binary label and raises ``ValueError`` naming the
+    values and file — silently binarizing a multi-class or corrupt mask
+    would be silent wrong-data (AGENTS §2).
+
+    Returns
+    -------
+    np.ndarray
+        The label array with values in ``{0, 1}`` (uint8).
+
+    Raises
+    ------
+    ValueError
+        If the mask contains values outside the ``{0, 1}`` / ``{0, 255}``
+        conventions.
+    """
+    values = set(np.unique(label).tolist())
+    if values <= {0, 1}:
+        return np.asarray(label, dtype=np.uint8)
+    if values <= {0, 255}:
+        return (np.asarray(label) == 255).astype(np.uint8)
+    raise ValueError(
+        f"prepare_nnunet_2d: label mask {source_path} has unexpected values "
+        f"{sorted(values)} — expected a binary vessel mask ({0, 1} or "
+        f"{{0, 255}}); dataset.json declares only background=0, vessel=1"
+    )
+
+
 def prepare_nnunet_2d(
     image_paths: list[str],
     label_paths: list[str],
@@ -217,8 +253,10 @@ def prepare_nnunet_2d(
         If ``image_paths`` and ``label_paths`` have different lengths, if
         ``case_names``/``brain_names`` lengths differ from
         ``len(image_paths)``, if a case id is invalid (empty, ``_NNNN``
-        suffix, or duplicated), or if any input image/label path does not
-        exist (the offending value is in the message).
+        suffix, or duplicated), if a label mask contains values outside the
+        binary ``{0, 1}`` / ``{0, 255}`` conventions, or if any input
+        image/label path does not exist (the offending value is in the
+        message).
     """
     if len(image_paths) != len(label_paths):
         raise ValueError(
@@ -264,7 +302,7 @@ def prepare_nnunet_2d(
     manifest: dict[str, str] = {}
     for case, img_p, lbl_p in zip(case_ids, image_paths, label_paths, strict=True):
         img = iio.imread(img_p)
-        lbl = iio.imread(lbl_p)
+        lbl = _normalize_label(iio.imread(lbl_p), lbl_p)
         iio.imwrite(images_tr / f"{case}_0000{file_ending}", img)
         iio.imwrite(labels_tr / f"{case}{file_ending}", lbl)
     for i, (case, img_p) in enumerate(zip(case_ids, image_paths, strict=True)):

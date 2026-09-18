@@ -274,6 +274,65 @@ def test_prepare_nnunet_2d_escapes_numeric_stem_modality_suffix(tmp_path) -> Non
     assert manifest == {"s23_575": "s23", "s23_s1000": "s23"}
 
 
+def test_prepare_nnunet_2d_remaps_255_mask_to_binary(tmp_path) -> None:
+    """A ``{0, 255}`` label mask is remapped to the declared ``{0, 1}`` scheme.
+
+    Lab masks arrive in both binary conventions — a 255-valued mask written
+    verbatim into labelsTr makes nnU-Net's CE loss device-assert on a target
+    >= n_classes mid-training. The converter must normalize to the
+    ``dataset.json`` scheme before writing.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s24"
+    src.mkdir(parents=True)
+    img = np.zeros((16, 16), dtype=np.uint8)
+    lbl = np.zeros((16, 16), dtype=np.uint8)
+    lbl[4:12, 4:12] = 255  # vessel as 255, the alternate lab convention
+    iio.imwrite(src / "500.png", img)
+    iio.imwrite(src / "500_mask.png", lbl)
+
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+    prepare_nnunet_2d(
+        image_paths=[str(src / "500.png")],
+        label_paths=[str(src / "500_mask.png")],
+        output_dir=str(out_dir),
+        dataset_id=101,
+    )
+
+    written = iio.imread(out_dir / "labelsTr" / "s24_500.png")
+    assert set(np.unique(written).tolist()) <= {0, 1}, (
+        f"labelsTr must contain only {{0, 1}} after normalization, got {np.unique(written)}"
+    )
+    assert written[6, 6] == 1 and written[0, 0] == 0
+
+
+def test_prepare_nnunet_2d_rejects_nonbinary_label_values(tmp_path) -> None:
+    """A mask with values outside ``{0, 1}`` / ``{0, 255}`` raises ValueError.
+
+    Multi-class or corrupt masks are ambiguous for the binary vessel label
+    scheme — silently binarizing them would be silent wrong-data (AGENTS
+    §2), so the offending values are named in the error.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s23"
+    src.mkdir(parents=True)
+    img = np.zeros((16, 16), dtype=np.uint8)
+    lbl = np.zeros((16, 16), dtype=np.uint8)
+    lbl[4:8, 4:8] = 2  # unexpected third value
+    iio.imwrite(src / "575.png", img)
+    iio.imwrite(src / "575_mask.png", lbl)
+
+    with pytest.raises(ValueError, match="unexpected values"):
+        prepare_nnunet_2d(
+            image_paths=[str(src / "575.png")],
+            label_paths=[str(src / "575_mask.png")],
+            output_dir=str(tmp_path / "out"),
+            dataset_id=101,
+        )
+
+
 def test_prepare_nnunet_2d_rejects_case_names_length_mismatch(tmp_path) -> None:
     """case_names/brain_names must be parallel to image_paths."""
     from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
