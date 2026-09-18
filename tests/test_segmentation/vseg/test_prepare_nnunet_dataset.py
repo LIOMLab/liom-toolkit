@@ -1,21 +1,27 @@
 """Tests for the OME-Zarr/PNG → nnU-Net v2 raw-format converter + CLI.
 
-Covers four concerns:
+Covers five concerns:
 
 * **Round-trip** — ``prepare_nnunet_2d`` writes ``imagesTr/<case>_0000.png`` +
-  ``labelsTr/<case>.png`` + ``dataset.json`` in the nnU-Net v2 raw-format
-  layout. The written images round-trip (data equality with the input), the
-  file counts match ``len(image_paths)``, and ``dataset.json`` has the
-  nnU-Net v2 schema (``channel_names`` / ``labels`` / ``numTraining`` /
-  ``file_ending`` / ``dataset_name``).
-* **Input-path validation** — a nonexistent input path raises ``ValueError``
-  with the offending path (no silent wrong-data fallback — AGENTS §2).
-* **CLI** — ``liom-prepare-nnunet-dataset`` is registered in
-  ``[project.scripts]`` and ``main(["<input>", "<output>", "--dataset-id",
-  "101"])`` produces the expected output directory.
-* **All paths parameterized** — no hardcoded lab paths (AGENTS §1); the
-  converter takes ``image_paths`` / ``label_paths`` / ``output_dir`` as
-  function params, the CLI takes them as positionals.
+  ``labelsTr/<case>.png`` + ``dataset.json`` + ``case_brain_manifest.json``
+  in the nnU-Net v2 raw-format layout. Case ids carry brain provenance:
+  ``<input_dir_name>_<stem>`` by default (never anonymous ``case_NNNN`` —
+  anonymous ids make a per-brain split unverifiable, the exact failure a
+  random nnU-Net split over unnamed cases produced), or an explicit
+  ``case_names`` override.
+* **Manifest** — ``case_brain_manifest.json`` maps ``{case_id: brain}`` so
+  the train/val split is auditable by other labs; ``brain_names`` defaults
+  to the input dir name.
+* **Validation** — nonexistent input paths, image/label length mismatch,
+  ``case_names``/``brain_names`` length mismatch, duplicate case ids, and
+  case ids ending in a ``_NNNN`` modality suffix (which would alias with
+  nnU-Net's ``<case>_0000.png`` channel naming) all raise ``ValueError``
+  naming the offender (no silent wrong-data fallback — AGENTS §2).
+* **CLI** — ``liom-prepare-nnunet-dataset`` accepts N input dirs (one per
+  brain) + an output dir; each input dir contributes its dir name as the
+  case prefix. A nonexistent input dir exits 2 via ``parser.error``.
+* **Rebuild contract** — a non-empty output dir raises ``FileExistsError``;
+  re-running the converter never silently merges into a stale dataset.
 
 These tests do NOT need torch (the converter is pure imageio + json IO) — no
 ``importorskip``.
@@ -63,13 +69,15 @@ def _write_synthetic_slices(
 def test_prepare_nnunet_2d_round_trip(tmp_path) -> None:
     """prepare_nnunet_2d writes the nnU-Net v2 raw layout and round-trips.
 
-    Asserts: (a) imagesTr has N files matching len(image_paths), (b) labelsTr
-    has N files, (c) dataset.json has the nnU-Net v2 schema keys with correct
-    values, (d) a written image round-trips (data equality with the input).
+    Asserts: (a) imagesTr has N files matching len(image_paths), named
+    ``<input_dir_name>_<stem>_0000.png`` (brain-provenance ids, never
+    anonymous ``case_NNNN``), (b) labelsTr has N files, (c) dataset.json has
+    the nnU-Net v2 schema keys with correct values, (d) a written image
+    round-trips (data equality with the input).
     """
     from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
-    src = tmp_path / "src"
+    src = tmp_path / "s23"
     image_paths, label_paths, images, _labels = _write_synthetic_slices(src, n=3)
     out_dir = tmp_path / "Dataset101_LIOM6p5"
 
@@ -85,13 +93,20 @@ def test_prepare_nnunet_2d_round_trip(tmp_path) -> None:
     assert images_tr.is_dir(), "imagesTr directory must be created"
     assert labels_tr.is_dir(), "labelsTr directory must be created"
 
-    img_files = sorted(images_tr.glob("case_*_0000.png"))
-    lbl_files = sorted(labels_tr.glob("case_*.png"))
+    img_files = sorted(images_tr.glob("s23_*_0000.png"))
+    lbl_files = sorted(labels_tr.glob("s23_*.png"))
     assert len(img_files) == len(image_paths), (
         f"imagesTr must have {len(image_paths)} files, got {len(img_files)}"
     )
     assert len(lbl_files) == len(label_paths), (
         f"labelsTr must have {len(label_paths)} files, got {len(lbl_files)}"
+    )
+    # No anonymous case_NNNN emission anywhere in the output.
+    assert not list(images_tr.glob("case_*")), (
+        "anonymous case_* names must never be emitted — they lose brain provenance"
+    )
+    assert not list(labels_tr.glob("case_*")), (
+        "anonymous case_* names must never be emitted — they lose brain provenance"
     )
 
     # dataset.json schema (nnU-Net v2).
@@ -111,6 +126,142 @@ def test_prepare_nnunet_2d_round_trip(tmp_path) -> None:
     # Round-trip: read back the first image and compare to the input.
     written = iio.imread(img_files[0])
     np.testing.assert_array_equal(written, images[0])
+
+
+def test_prepare_nnunet_2d_writes_case_brain_manifest(tmp_path) -> None:
+    """Every conversion writes case_brain_manifest.json mapping case → brain.
+
+    The manifest is the audit record other labs use to verify the train/val
+    split is per-brain: default brain = the input dir name, default case id =
+    ``<dir_name>_<stem>``. Keys are sorted in the written JSON.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s24"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+
+    prepare_nnunet_2d(
+        image_paths=image_paths,
+        label_paths=label_paths,
+        output_dir=str(out_dir),
+        dataset_id=101,
+    )
+
+    manifest_path = out_dir / "case_brain_manifest.json"
+    assert manifest_path.is_file(), "case_brain_manifest.json must be written"
+    manifest = json.loads(manifest_path.read_text())
+    expected = {"s24_img_00": "s24", "s24_img_01": "s24"}
+    assert manifest == expected, f"manifest must map case → brain, got {manifest}"
+
+
+def test_prepare_nnunet_2d_explicit_case_names_and_brain_names(tmp_path) -> None:
+    """Explicit case_names/brain_names override the derived defaults.
+
+    ``case_names[i]`` wins over ``<dir>_<stem>`` derivation; ``brain_names[i]``
+    wins over the parent dir name. The manifest reflects the explicit values.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "whatever"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+
+    prepare_nnunet_2d(
+        image_paths=image_paths,
+        label_paths=label_paths,
+        output_dir=str(out_dir),
+        dataset_id=101,
+        case_names=["s23_575", "s23_700"],
+        brain_names=["s23", "s23"],
+    )
+
+    assert (out_dir / "imagesTr" / "s23_575_0000.png").is_file()
+    assert (out_dir / "imagesTr" / "s23_700_0000.png").is_file()
+    assert (out_dir / "labelsTr" / "s23_575.png").is_file()
+    assert (out_dir / "labelsTr" / "s23_700.png").is_file()
+    manifest = json.loads((out_dir / "case_brain_manifest.json").read_text())
+    assert manifest == {"s23_575": "s23", "s23_700": "s23"}
+
+
+def test_prepare_nnunet_2d_rejects_duplicate_case_ids(tmp_path) -> None:
+    """Duplicate derived or explicit case ids raise ValueError naming them.
+
+    Two identically-named slices under identically-named parent dirs would
+    collide on ``<dir>_<stem>``; a silent overwrite would drop a labeled slice
+    from the dataset (silent data loss).
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src_a = tmp_path / "a" / "slices"
+    src_b = tmp_path / "b" / "slices"
+    imgs_a, lbls_a, _ia, _la = _write_synthetic_slices(src_a, n=1)
+    imgs_b, lbls_b, _ib, _lb = _write_synthetic_slices(src_b, n=1)
+
+    with pytest.raises(ValueError, match="slices_img_00"):
+        prepare_nnunet_2d(
+            image_paths=imgs_a + imgs_b,
+            label_paths=lbls_a + lbls_b,
+            output_dir=str(tmp_path / "out"),
+            dataset_id=101,
+        )
+
+    src = tmp_path / "s23"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+    with pytest.raises(ValueError, match="dup_case"):
+        prepare_nnunet_2d(
+            image_paths=image_paths,
+            label_paths=label_paths,
+            output_dir=str(tmp_path / "out2"),
+            dataset_id=101,
+            case_names=["dup_case", "dup_case"],
+        )
+
+
+def test_prepare_nnunet_2d_rejects_modality_suffix_case_ids(tmp_path) -> None:
+    """A case id ending ``_NNNN`` raises ValueError — it aliases nnU-Net naming.
+
+    nnU-Net writes images as ``<case>_0000.png``; a case id like ``s23_0000``
+    would produce ``s23_0000_0000.png`` whose case stem parses ambiguously.
+    """
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s23"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=1)
+
+    with pytest.raises(ValueError, match="s23_0000"):
+        prepare_nnunet_2d(
+            image_paths=image_paths,
+            label_paths=label_paths,
+            output_dir=str(tmp_path / "out"),
+            dataset_id=101,
+            case_names=["s23_0000"],
+        )
+
+
+def test_prepare_nnunet_2d_rejects_case_names_length_mismatch(tmp_path) -> None:
+    """case_names/brain_names must be parallel to image_paths."""
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
+
+    src = tmp_path / "s23"
+    image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
+
+    with pytest.raises(ValueError, match="case_names"):
+        prepare_nnunet_2d(
+            image_paths=image_paths,
+            label_paths=label_paths,
+            output_dir=str(tmp_path / "out"),
+            dataset_id=101,
+            case_names=["only_one"],
+        )
+    with pytest.raises(ValueError, match="brain_names"):
+        prepare_nnunet_2d(
+            image_paths=image_paths,
+            label_paths=label_paths,
+            output_dir=str(tmp_path / "out2"),
+            dataset_id=101,
+            brain_names=["s23"],
+        )
 
 
 def test_prepare_nnunet_2d_raises_on_nonexistent_input(tmp_path) -> None:
@@ -167,10 +318,11 @@ def test_prepare_nnunet_2d_raises_on_length_mismatch(tmp_path) -> None:
 def test_prepare_nnunet_2d_raises_on_nonempty_output_dir(tmp_path) -> None:
     """prepare_nnunet_2d raises FileExistsError on a non-empty output dir.
 
-    Reusing an existing dataset dir leaves stale ``case_NNNN`` files from a
-    previous run: ``dataset.json`` reflects only the new count while the
-    leftover files silently contaminate fingerprint extraction and training
-    (silent wrong-data). An existing EMPTY directory is fine to reuse.
+    Reusing an existing dataset dir leaves stale case files from a previous
+    run: ``dataset.json`` reflects only the new count while the leftover files
+    silently contaminate fingerprint extraction and training (silent
+    wrong-data). The rebuild path is an explicit remove — never a silent
+    merge. An existing EMPTY directory is fine to reuse.
     """
     from liom_toolkit.scripts.liom_prepare_nnunet_dataset import prepare_nnunet_2d
 
@@ -178,7 +330,7 @@ def test_prepare_nnunet_2d_raises_on_nonempty_output_dir(tmp_path) -> None:
     image_paths, label_paths, _imgs, _lbls = _write_synthetic_slices(src, n=2)
     out_dir = tmp_path / "Dataset101_LIOM6p5"
     (out_dir / "imagesTr").mkdir(parents=True)
-    (out_dir / "imagesTr" / "case_0099_0000.png").write_bytes(b"stale")
+    (out_dir / "imagesTr" / "s23_0099_0000.png").write_bytes(b"stale")
 
     with pytest.raises(FileExistsError, match="non-empty"):
         prepare_nnunet_2d(
@@ -205,9 +357,8 @@ def test_prepare_nnunet_cli_creates_output(tmp_path, monkeypatch) -> None:
 
     Sets ``sys.argv`` to ``["liom-prepare-nnunet-dataset", "<input>",
     "<output>", "--dataset-id", "101"]`` and calls ``main()``, then asserts
-    the output directory with imagesTr/labelsTr/dataset.json is created. The
-    CLI takes a single input directory of PNG slices (with matching
-    ``*_mask.png`` labels) and writes the nnU-Net raw layout.
+    the output directory with imagesTr/labelsTr/dataset.json is created. A
+    single input dir still works under the ``nargs="+"`` input contract.
     """
     import sys
 
@@ -229,6 +380,49 @@ def test_prepare_nnunet_cli_creates_output(tmp_path, monkeypatch) -> None:
     assert (out_dir / "dataset.json").is_file()
     dataset_json = json.loads((out_dir / "dataset.json").read_text())
     assert dataset_json["numTraining"] == 2
+
+
+def test_prepare_nnunet_cli_multiple_input_dirs(tmp_path, monkeypatch) -> None:
+    """The CLI accepts N input dirs — one per brain — + an output dir.
+
+    ``liom-prepare-nnunet-dataset <dir_s23> <dir_s24> <output>``: each input
+    dir contributes its dir name as the case prefix, and the manifest maps
+    every case to its brain so the LOO split is auditable.
+    """
+    import sys
+
+    from liom_toolkit.scripts.liom_prepare_nnunet_dataset import main
+
+    dir_s23 = tmp_path / "s23"
+    dir_s24 = tmp_path / "s24"
+    _write_synthetic_slices(dir_s23, n=2)
+    _write_synthetic_slices(dir_s24, n=1)
+    out_dir = tmp_path / "Dataset101_LIOM6p5"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "liom-prepare-nnunet-dataset",
+            str(dir_s23),
+            str(dir_s24),
+            str(out_dir),
+            "--dataset-id",
+            "101",
+        ],
+    )
+    main()
+
+    img_names = sorted(p.name for p in (out_dir / "imagesTr").glob("*.png"))
+    assert img_names == ["s23_img_00_0000.png", "s23_img_01_0000.png", "s24_img_00_0000.png"]
+    dataset_json = json.loads((out_dir / "dataset.json").read_text())
+    assert dataset_json["numTraining"] == 3
+    manifest = json.loads((out_dir / "case_brain_manifest.json").read_text())
+    assert manifest == {
+        "s23_img_00": "s23",
+        "s23_img_01": "s23",
+        "s24_img_00": "s24",
+    }
 
 
 def test_prepare_nnunet_cli_errors_on_nonexistent_input(tmp_path, monkeypatch, capsys) -> None:
